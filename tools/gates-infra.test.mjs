@@ -142,10 +142,7 @@ test('公开仓配套面三件在场（成熟度扫描 20260901 P0-2）', () => 
     /[Pp]rivate vulnerability reporting/.test(security),
     'SECURITY.md 须指明 GitHub private vulnerability reporting 披露渠道',
   );
-  assert.ok(
-    !/[\w.+-]+@[\w-]+\.[\w.]+/.test(security),
-    'SECURITY.md 不设公开邮箱（渠道单源 GitHub，防捏造/失效）',
-  );
+  assert.ok(!/[\w.+-]+@[\w-]+\.[\w.]+/.test(security), 'SECURITY.md 不设公开邮箱（渠道单源 GitHub，防捏造/失效）');
   // CODEOWNERS：单维护者档
   const owners = readFileSync(join(repoRoot, 'CODEOWNERS'), 'utf8');
   assert.ok(/^\* @miuiadmin\s*$/m.test(owners), 'CODEOWNERS 须为「* @miuiadmin」单维护者档');

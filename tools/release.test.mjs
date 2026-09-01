@@ -12,7 +12,8 @@
  * tools/*.mjs 测试（vitest.config include 显式列举）——在 tsc 视门外靠纯
  * node 语义直跑，不参与 typecheck 段。
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,11 +21,13 @@ import {
   INJECT_SCENARIOS,
   applyScenario,
   assertDistTagTerminal,
+  assertNoInstallPlaceholders,
   classifyGitTag,
   classifyProbe,
   decideIdempotent,
   inspectPackEntries,
   planTagOperations,
+  publishArgs,
   runRelease,
 } from './release.mjs';
 
@@ -190,6 +193,68 @@ describe('契约 6 classifyGitTag：git tag 幂等判定', () => {
   });
 });
 
+// ───────────────── 占位锚与 provenance 条件位（成熟度扫描 20260901 P0-5/P0-6） ─────────────────
+
+describe('publishArgs：provenance 条件位（GITHUB_ACTIONS 当且仅当才带）', () => {
+  it('本机形态（无 GITHUB_ACTIONS）：参数面与旧形完全一致——本机零影响', () => {
+    expect(publishArgs('/tmp/x.tgz', { publishTag: 'next', dryRun: true, githubActions: false })).toEqual([
+      'publish',
+      '/tmp/x.tgz',
+      '--tag',
+      'next',
+      '--dry-run',
+    ]);
+    expect(publishArgs('/tmp/x.tgz', { publishTag: 'latest', dryRun: false, githubActions: false })).toEqual([
+      'publish',
+      '/tmp/x.tgz',
+      '--tag',
+      'latest',
+    ]);
+  });
+  it('GitHub Actions 形态：带 --provenance（OIDC 供给在场）；与 --dry-run 可并存', () => {
+    expect(publishArgs('/tmp/x.tgz', { publishTag: 'next', dryRun: false, githubActions: true })).toEqual([
+      'publish',
+      '/tmp/x.tgz',
+      '--tag',
+      'next',
+      '--provenance',
+    ]);
+    expect(publishArgs('/tmp/x.tgz', { publishTag: 'next', dryRun: true, githubActions: true })).toContain(
+      '--provenance',
+    );
+  });
+});
+
+describe('assertNoInstallPlaceholders：发布物占位锚（真发路径 fail-loud）', () => {
+  /** 打指定 README 内容的夹具 tgz（落 workDir——writeRealTarball 走真 tar 形态） */
+  const fixtureTgz = (files) => writeRealTarball(join(workDir, 'anchor-fixture.tgz'), files);
+  it('中文三形占位（<仓库>/<仓库 URL>/<本仓库>）任一命中即拒', () => {
+    const shapes = [
+      '# t\n\ncurl -fsSL <仓库>/scripts/install.sh | sh\n',
+      '# t\n\n安装方式见 <仓库 URL>。\n',
+      '# t\ngit clone <本仓库>。\n',
+    ];
+    for (const text of shapes) {
+      // 断言锚在「命中占位」分支（发布物占位锚：…含安装占位符）——非清单读取失败
+      // 等 tar 级错误（两者都以「占位锚」开头，须点名分支防假绿）
+      expect(() => assertNoInstallPlaceholders(fixtureTgz({ 'README.md': text }))).toThrow(/含安装占位符/);
+    }
+  });
+  it('外语 <repo> 形同拒（英/西/法镜像安装段形态）', () => {
+    expect(() =>
+      assertNoInstallPlaceholders(fixtureTgz({ 'README.md': '# t\ncurl <repo>/install.sh | sh\n' })),
+    ).toThrow(/含安装占位符/);
+  });
+  it('干净 README 放行（真实安装命令零占位）', () => {
+    expect(() =>
+      assertNoInstallPlaceholders(fixtureTgz({ 'README.md': '# berry\n\nnpm i -g berry-agent-os\n' })),
+    ).not.toThrow();
+  });
+  it('README 缺席 = pack 白名单漂移，同锚 fail-loud', () => {
+    expect(() => assertNoInstallPlaceholders(fixtureTgz({ 'other.md': 'x' }))).toThrow(/白名单漂移/);
+  });
+});
+
 // ───────────────── 编排骨舞（io 注入缝全脚本化——零真实 npm/git） ─────────────────
 
 /** 每测独立的临时工作目录（pack 落点/dist 清扫锚定；不污染仓库） */
@@ -201,8 +266,24 @@ afterEach(() => {
   rmSync(workDir, { recursive: true, force: true });
 });
 
-/** 假 tarball 内容（sha1 稳定——幂等比对基准） */
-const FAKE_TARBALL_BYTES = 'fake-tarball-bytes-for-sha1';
+/**
+ * 打一只真形态最小 tarball（成熟度扫描 20260901 P0-6）：占位锚在真发路径
+ * spawnSync tar 直读上传物——假字节被 `tar -tzf` 拒收，故夹具必须走真 tar。
+ * files：package/ 内文件名 → 内容映射；缺省 = 干净 README（greenBase 真发
+ * 路径用——底座不得自带占位符，否则锚本职（命中即拒）反咬底座自身）。
+ */
+function writeRealTarball(tgzPath, files = { 'README.md': '# berry-agent-os\n\nnpm i -g berry-agent-os\n' }) {
+  const src = mkdtempSync(join(tmpdir(), 'release-tarball-src-'));
+  try {
+    mkdirSync(join(src, 'package'), { recursive: true });
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(src, 'package', name), text);
+    const r = spawnSync('tar', ['-czf', tgzPath, '-C', src, 'package']);
+    if (r.status !== 0) throw new Error(`夹具 tgz 打包失败：${r.stderr}`);
+  } finally {
+    rmSync(src, { recursive: true, force: true });
+  }
+  return tgzPath;
+}
 
 /**
  * 全脚本化 io：canned 表按步骤标签喂应答（缺标签即抛——每测的 canned 面必须
@@ -256,7 +337,8 @@ function greenBase(version) {
       stderr: '',
     }),
     'pack:real': () => {
-      writeFileSync(join(workDir, 'berry-agent-os-fake.tgz'), FAKE_TARBALL_BYTES);
+      // 真形态 tarball（P0-6 占位锚直读上传物——见 writeRealTarball 注释）
+      writeRealTarball(join(workDir, 'berry-agent-os-fake.tgz'));
       return { code: 0, stdout: JSON.stringify([{ filename: 'berry-agent-os-fake.tgz' }]), stderr: '' };
     },
     'smoke:install': () => ({ code: 0, stdout: '', stderr: '' }),

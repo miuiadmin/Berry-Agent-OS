@@ -205,6 +205,56 @@ export function classifyGitTag(tagExists, tagSha, headSha) {
   return tagSha === headSha ? { action: 'skip' } : { action: 'reject' };
 }
 
+/** 安装占位符形态（成熟度扫描 20260901 P0-6）：README 快速开始里的仓库 URL 占位——
+ *  中文三形（<仓库>/<仓库 URL>/<本仓库>）+ 外语 <repo> 形（英/西/法镜像同款）。
+ *  仓转公开日回填前这些安装指引对装机用户全数 404，发布物不得带它们出门。 */
+const INSTALL_PLACEHOLDER_PATTERN = /<[^<>\n]{0,20}(仓库|repo)[^<>\n]{0,20}>/i;
+
+/**
+ * publish 前置占位锚（成熟度扫描 20260901 P0-6 规范先行；**dry-run 不拦**——
+ * 演习/CI 常跑面保持绿，闸只在真上传时刻执法）：抽 tarball 内 package/README*.md
+ * 逐篇扫描安装占位符，命中即抛（fail-loud 拒发）。
+ * @param {string} tarballPath 契约 3 打出的 tarball 路径（检视即所传——锚查的就是上传物本体）
+ */
+export function assertNoInstallPlaceholders(tarballPath) {
+  const list = spawnSync('tar', ['-tzf', tarballPath], { encoding: 'utf8' });
+  if (list.status !== 0) throw new Error(`占位锚：tarball 清单读取失败（${list.stderr}）`);
+  const readmes = list.stdout
+    .split('\n')
+    .map((f) => f.trim())
+    .filter((f) => /^package\/README[^/]*\.md$/.test(f));
+  // README 缺席本身就是 pack 白名单漂移（发布物首屏文件不可缺）——同锚 fail-loud
+  if (readmes.length === 0) throw new Error('占位锚：tarball 内 README*.md 缺席（pack 白名单漂移？）');
+  const offenders = [];
+  for (const entry of readmes) {
+    const text = spawnSync('tar', ['-xOzf', tarballPath, entry], { encoding: 'utf8' });
+    if (text.status !== 0) throw new Error(`占位锚：${entry} 读取失败（${text.stderr}）`);
+    if (INSTALL_PLACEHOLDER_PATTERN.test(text.stdout)) offenders.push(entry);
+  }
+  if (offenders.length > 0) {
+    throw new Error(`发布物占位锚：${offenders.join('、')} 含安装占位符——仓转公开日先回填实际 URL 再发`);
+  }
+}
+
+/**
+ * publish 参数面（成熟度扫描 20260901 P0-5 规范先行）：provenance 条件位——
+ * GitHub Actions OIDC 环境在场（GITHUB_ACTIONS 检出）才带 --provenance；本机
+ * 发布形态 npm 无 OIDC 供给必拒，故条件缺省 off 本机零影响。发布面若迁 CI 自动
+ * 带上（历史版本不回溯——alpha 首发无 provenance 属可接受拍板）。
+ * @param {string} tarballPath 上传物路径（契约 3 打出的 tarball 本体）
+ * @param {{publishTag: string, dryRun: boolean, githubActions: boolean}} opts
+ */
+export function publishArgs(tarballPath, { publishTag, dryRun, githubActions }) {
+  return [
+    'publish',
+    tarballPath,
+    '--tag',
+    publishTag,
+    ...(githubActions ? ['--provenance'] : []),
+    ...(dryRun ? ['--dry-run'] : []),
+  ];
+}
+
 // ───────────────────────── 失败注入谱（演习两轮的机器载体） ─────────────────────────
 
 /**
@@ -389,11 +439,18 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
     }
     let published = false;
     if (decision.action === 'publish') {
-      console.log(`── 契约 4/6 publish${dryRun ? '（dry-run 干跑）' : ''}：--tag ${plan.publishTag}`);
+      // 占位锚先于上传执法（真发路径专用——dry-run 不拦：演习/CI 常跑面保持绿，
+      // 闸只在真上传时刻生效；成熟度扫描 20260901 P0-6）
+      if (!dryRun) assertNoInstallPlaceholders(tarballPath);
+      // provenance 条件位（P0-5）：GITHUB_ACTIONS 在场才带——本机无 OIDC 供给必拒
+      const provenance = Boolean(process.env.GITHUB_ACTIONS);
+      console.log(
+        `── 契约 4/6 publish${dryRun ? '（dry-run 干跑）' : ''}：--tag ${plan.publishTag}${provenance ? ' --provenance' : ''}`,
+      );
       const pub = await activeIo.exec(
         'publish',
         'npm',
-        ['publish', tarballPath, '--tag', plan.publishTag, ...(dryRun ? ['--dry-run'] : [])],
+        publishArgs(tarballPath, { publishTag: plan.publishTag, dryRun, githubActions: provenance }),
         { inherit: true },
       );
       if (pub.code !== 0) throw new Error(`npm publish 失败（退出码 ${pub.code}）`);
