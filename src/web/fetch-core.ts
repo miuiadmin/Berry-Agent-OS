@@ -139,7 +139,8 @@ export async function performFetch(
   /* ---- 卫生件④：限流（排队不拒绝；排队中 abort 立即出队） ---- */
   const gates = deps.gates;
   const fetchImpl = deps.fetchImpl ?? ((url: string, init: RequestInit) => fetch(url, init));
-  let host = initialUrl.host;
+  let host = initialUrl.host; // 当前跳主机（重定向循环换轨游标）
+  let heldHost: string | null = host; // 实际持槽主机（换轨窗口置空——finally 只还实持槽，m-1）
   await gates.acquire(host, signal);
 
   let finalUrl = initialUrl;
@@ -180,11 +181,17 @@ export async function performFetch(
         }
         // 每跳私网校验（重定向是 SSRF 向量——公网页 302 到内网地址的经典绕行）
         await assertPublicHost(next.hostname, deps.lookup);
-        // 换主机 = 释放原主机槽再取新槽（上限兜底跨主机链锁死）；同主机续持
+        // 换主机 = 先还旧槽、置空持槽位、再取新槽（上限兜底跨主机链锁死）；
+        // 同主机续持。槽序（m-1，20260901-c）：取槽抛出（排队中被取消）时
+        // 持槽位保持 null——finally 不还从未取到的槽（旧行为 host 先行重赋值，
+        // release 未 acquire 的新主机 → 限流账负漂）；刻意不「先取后放」——
+        // 短暂双持两槽在全局帽下可死锁并发换轨者（与 download.ts 同形同修）。
         if (next.host !== host) {
           gates.release(host);
+          heldHost = null;
+          await gates.acquire(next.host, signal);
+          heldHost = next.host;
           host = next.host;
-          await gates.acquire(host, signal);
         }
         finalUrl = next;
         continue;
@@ -231,7 +238,7 @@ export async function performFetch(
       },
     };
   } finally {
-    gates.release(host); // 双槽必还（异常/取消/成功统一出口——漏放即泄漏槽位）
+    if (heldHost !== null) gates.release(heldHost); // 只还实持槽（换轨中断时 null——账不漂移）
   }
 }
 

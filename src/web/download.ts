@@ -13,7 +13,9 @@
  * - SHA256 流式随下载计算记回执——记档不对照（远端 checksum 校验链依赖
  *   同一管道可信度，对照挂账判据 = 首个真实损坏案例）；
  * - 执行帽独立 600s（WEB_DOWNLOAD_TIMEOUT_MS——超帽删档 WEB_DOWNLOAD_FAILED；
- *   与调用方取消（AbortError 原样传播）判别面 = 帽信号标记位）。
+ *   与调用方取消判别面 = 帽信号标记位 timedOut。注意 Node fetch 对
+ *   AbortSignal.timeout 的真实抛形是 name='TimeoutError' 非 'AbortError'——
+ *   两形并收后由标记位二分，20260901-c C-2 修死）。
  */
 
 import { createHash } from 'node:crypto';
@@ -78,20 +80,22 @@ export async function performDownload(
     { once: true },
   );
   const signal = opts.signal === undefined ? timeoutSignal : AbortSignal.any([opts.signal, timeoutSignal]);
-  let finalUrl = initialUrl; // asTimeout 帽文案引用——先于 try 声明（帽可于任意阶段触发）
-  // 帽触发统一出口：AbortError 家族在此二分——帽触发翻译 WEB_DOWNLOAD_FAILED，
-  // 调用方取消返回 undefined 交还原样传播路径
-  const asTimeout = (err: unknown): AppError | undefined =>
-    timedOut.v
-      ? new AppError(WEB_DOWNLOAD_FAILED, `下载超执行帽 ${WEB_DOWNLOAD_TIMEOUT_MS}ms（${finalUrl.href}）`)
-      : err instanceof Error && err.name === 'AbortError'
-        ? undefined
-        : undefined;
+  let finalUrl = initialUrl; // 帽文案引用——先于 try 声明（帽可于任意阶段触发）
+  /**
+   * abort 家族判定（C-2，20260901-c）：Node fetch/pipeline 对 AbortSignal.timeout
+   * 的真实抛形是 name='TimeoutError' 的 DOMException，调用方 controller.abort()
+   * 才是 'AbortError'——旧判据只认后者，超帽在 fetch 层/传输层抛出会被误装箱
+   * 成 WEB_FETCH_FAILED（网络层失败）而非 WEB_DOWNLOAD_FAILED 删档收场。
+   * 两形并收后由 timedOut.v 标记位二分帽/取消。
+   */
+  const isAbortFamily = (err: unknown): err is Error =>
+    err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
 
   /* ---- 卫生件③：限流（与抓取共享同一 InflightGates 单例——第三消费位） ---- */
   const gates = deps.gates;
   const fetchImpl = deps.fetchImpl ?? ((u: string, init: RequestInit) => fetch(u, init));
-  let host = initialUrl.host;
+  let host = initialUrl.host; // 当前跳主机（重定向循环换轨游标）
+  let heldHost: string | null = host; // 实际持槽主机（换轨窗口置空——finally 只还实持槽，m-1）
   await gates.acquire(host, opts.signal);
 
   // 半档清理：预算断流/取消/超帽都先删已写部分（装机物不留半态）
@@ -105,10 +109,12 @@ export async function performDownload(
       try {
         current = await fetchImpl(finalUrl.href, { redirect: 'manual', signal, headers: DOWNLOAD_HEADERS });
       } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          const timeoutErr = asTimeout(err);
-          if (timeoutErr !== undefined) throw timeoutErr;
-          throw err; // 调用方取消原样传播
+        if (isAbortFamily(err)) {
+          // 帽触发（标记位）翻译 WEB_DOWNLOAD_FAILED 删档；调用方取消原样传播
+          if (timedOut.v) {
+            throw new AppError(WEB_DOWNLOAD_FAILED, `下载超执行帽 ${WEB_DOWNLOAD_TIMEOUT_MS}ms（${finalUrl.href}）`);
+          }
+          throw err;
         }
         throw new AppError(
           WEB_FETCH_FAILED,
@@ -134,9 +140,16 @@ export async function performDownload(
         assertHostAllowed(next.hostname, opts.allowedHosts);
         await assertPublicHost(next.hostname, deps.lookup);
         if (next.host !== host) {
+          // 换轨槽序（m-1，20260901-c）：先还旧槽 → 置空持槽位 → 取新槽 → 回填。
+          // 取槽抛出（新主机排队中被调用方取消）时持槽位保持 null，finally 不还
+          // 从未取到的槽——旧行为 host 先行重赋值，finally 会 release 新主机，
+          // 限流账负漂（per-host/global 计数虚减，后续请求被误放行超限）。
+          // 刻意不「先取后放」：那会短暂双持两槽，全局帽 8 下并发换轨者互等死锁。
           gates.release(host);
+          heldHost = null;
+          await gates.acquire(next.host, opts.signal);
+          heldHost = next.host;
           host = next.host;
-          await gates.acquire(host, opts.signal);
         }
         finalUrl = next;
         continue;
@@ -172,10 +185,12 @@ export async function performDownload(
     try {
       await pipeline(source, meter, createWriteStream(partPath));
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        const timeoutErr = asTimeout(err);
-        if (timeoutErr !== undefined) throw timeoutErr;
-        throw err; // 调用方取消原样传播
+      if (isAbortFamily(err)) {
+        // 同 fetch 层：帽触发翻译删档错，调用方取消原样传播
+        if (timedOut.v) {
+          throw new AppError(WEB_DOWNLOAD_FAILED, `下载超执行帽 ${WEB_DOWNLOAD_TIMEOUT_MS}ms（${finalUrl.href}）`);
+        }
+        throw err;
       }
       if (budgetBroken) throw err; // 预算断流——AppError 原样上抛（finally 删半档）
       throw new AppError(
@@ -199,7 +214,7 @@ export async function performDownload(
     };
   } finally {
     if (partPath !== undefined) await unlink(partPath).catch(() => {}); // 已删/未写成均静默
-    gates.release(host); // 双槽必还（异常/取消/成功统一出口——漏放即泄漏槽位）
+    if (heldHost !== null) gates.release(heldHost); // 只还实持槽（换轨中断时 null——账不漂移）
   }
 }
 
