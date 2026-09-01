@@ -207,8 +207,6 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
   const runningBySession = new Map<string, boolean>();
   /** 会话 accent 表（清单拉取刷新——themeFor 数据源） */
   const accentBySession = new Map<string, string | undefined>();
-  /** 在身审批提示表（approvalId → 撤销控制器——decided 镜像到即收场） */
-  const openAsks = new Map<string, AbortController>();
   /** 退出旗（收尾期静音断线/迟到通知） */
   let quitting = false;
 

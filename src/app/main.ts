@@ -80,7 +80,10 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
                可写面 = 档位根 ∪ 数据目录（~/.berry：库与凭证必须可写）。
                诚实边界：①策略并集粒度——数据目录内部互害关不住；②非网络沙箱
                ——出网默认放行（LLM API 刚需）；③seatbelt profile 非稳定公开接口，
-               随 macOS 漂移；④Windows 无后端——fail-closed 拒跑（退出码 1）`;
+               随 macOS 漂移；④Windows 无后端——fail-closed 拒跑（退出码 1）
+  --           终结符：其后的参数全作消息字面、旗标解析停摆——正当以 -- 起头的
+               消息内容（如让模型解释某旗标）经 berry run -- "--foo bar" 保真送达；
+               未识别的 -- 旗标（含 --app=chat 等 = 取值形/拼写错写）全入口用法错退 2`;
 
 /** 解析结果：首个非旗标参数为子命令，其余顺次为参数 */
 interface ParsedArgs {
@@ -113,9 +116,63 @@ interface ParsedArgs {
  * 手写 argv 解析（不引 commander——第九批拍板 #15）。
  * `--tick` / `--app` 是取值旗标：吃掉紧随其后的一个参数作值（与位置参数的
  * 互斥在 run case 执法——解析层只负责取值）。
+ *
+ * 未识别 `--` 词与终结符（20260901-c #1 修死，技术栈篇 §5「CLI 解析面执法四律」）：
+ * - 以 `--` 起头且不在已知集的词收进 `unknownFlags`（分派层统一用法错退 2）——
+ *   旧形落进位置参数被静默并进消息，`--app=chat` 等语序错写语义静默丢失；
+ * - 裸 `--` = 终结符：其后的 argv 全字面进位置参数（旗标解析停摆）——正当以
+ *   `--` 起头的消息内容经 `berry run -- "--foo bar"` 保真送达；
+ * - 单短横线词不在射程（`-5` 形负数/缩写消息正当存在，维持位置参数落点）。
  */
+/** 已知取值/布尔旗标全集（未列者以 `--` 起头即未识别——命令位词另见 COMMAND_WORDS） */
+const KNOWN_FLAG_WORDS: ReadonlySet<string> = new Set([
+  '--debug',
+  '--read-only',
+  '--background',
+  '--tick',
+  '--app',
+  '--port',
+  '--no-apps',
+  '--sandbox-host',
+  '--foreground',
+  '--app-file',
+  '--standalone',
+]);
+/** 命令位词（合法落在位置参数首位、由分派 switch 匹配——不算未识别旗标） */
+const COMMAND_WORDS: ReadonlySet<string> = new Set(['--help', '-h', '--version', '-v']);
+
+/** 解析结果：首个非旗标参数为子命令，其余顺次为参数 */
+interface ParsedArgs {
+  command: string;
+  args: string[];
+  debug: boolean;
+  /** run 子命令只读档（tick 子进程复用同入口——技术栈篇 §5） */
+  readOnly: boolean;
+  /** run 子命令后台记账道（tick 子进程复用同入口——席 13 第二刀 blocker 修） */
+  background: boolean;
+  /** run 子命令到点编排形态（取值旗标——值为任务名；undefined = 普通单发） */
+  tick: string | undefined;
+  /** run 子命令应用身份（第三纵切，取值旗标——值为应用 id；undefined = 对话应用域） */
+  app: string | undefined;
+  /** Web 通道端口（契约篇 §6.8 刀一，取值旗标——值为端口串，入口层转数执法）；TUI/run 收，dump-config 不收 */
+  port: string | undefined;
+  /** 安全模式（--no-apps，技术栈篇 §5）：boot 组合树空装只保 Ring 1 硬装配行 */
+  noApps: boolean;
+  /** e1 宿主沙箱包裹（--sandbox-host，技术栈篇 §5 第二十八批题 3A）：run 限定，wrapper 重 exec */
+  sandboxHost: boolean;
+  /** daemon 前台常驻（--foreground，契约篇 §6.8 刀一）：daemon 限定——start spawn 的目标形态 */
+  foreground: boolean;
+  /** 裸 berry 显式单开（--standalone，契约篇 §6.8 刀二）：跳过 daemon 检测——其余入口无害忽略 */
+  standalone: boolean;
+  /** 快速试件路径（--app-file <path>，开发指南 §8）：berry/run 两入口收——组合树注入临时行，零装机零挂载零落盘 */
+  appFile: string | undefined;
+  /** 未识别 `--` 词（终结符之前收到的——分派层统一用法错退 2，20260901-c #1） */
+  unknownFlags: readonly string[];
+}
+
 function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
+  const unknownFlags: string[] = [];
   let debug = false;
   let readOnly = false;
   let background = false;
@@ -127,8 +184,19 @@ function parseArgs(argv: string[]): ParsedArgs {
   let foreground = false;
   let standalone = false;
   let appFile: string | undefined;
+  let terminated = false; // `--` 终结符已见——其后 argv 全字面（旗标解析停摆）
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
+    if (terminated) {
+      // 终结符之后：一切词原样作位置参数（以 -- 起头的消息内容经此保真送达）
+      positional.push(arg);
+      continue;
+    }
+    if (arg === '--') {
+      // 裸 `--` = 终结符本体（消费不进位置参数——存在意义就是切换解析态）
+      terminated = true;
+      continue;
+    }
     if (arg === '--debug') {
       debug = true;
       if (!process.env['APP_LOG_LEVEL']) process.env['APP_LOG_LEVEL'] = 'debug';
@@ -171,6 +239,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       // 裸 berry 显式单开（契约篇 §6.8 刀二）：跳过 daemon 检测——其余入口收到
       // 时无害忽略（同律：语义只在裸 berry case 执法）
       standalone = true;
+    } else if (arg.startsWith('--') && !KNOWN_FLAG_WORDS.has(arg) && !COMMAND_WORDS.has(arg)) {
+      // 未识别 `--` 词（含 = 取值形/拼写错写）：收进名单交分派层统一用法错——
+      // 旧形落位置参数被静默并进消息（#1：`berry run --app=chat "hi"` 送进 LLM）
+      unknownFlags.push(arg);
     } else {
       positional.push(arg);
     }
@@ -190,6 +262,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     foreground,
     standalone,
     appFile,
+    unknownFlags,
   };
 }
 
@@ -204,10 +277,31 @@ function parsePortValue(value: string): number | undefined {
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
 function main(argv: string[]): number {
-  const { command, args, readOnly, background, tick, app, port, noApps, sandboxHost, foreground, standalone, appFile } =
-    parseArgs(argv);
+  const {
+    command,
+    args,
+    readOnly,
+    background,
+    tick,
+    app,
+    port,
+    noApps,
+    sandboxHost,
+    foreground,
+    standalone,
+    appFile,
+    unknownFlags,
+  } = parseArgs(argv);
 
   const run = async (): Promise<number> => {
+    // 未识别 `--` 旗标闸（20260901-c #1，技术栈篇 §5「CLI 解析面执法四律」①）：
+    // 全入口统一退 2——旧形落位置参数被静默并进消息/子命令，语义静默丢失
+    if (unknownFlags.length > 0) {
+      process.stderr.write(
+        `未识别旗标：${unknownFlags.join(' ')}（用法见 berry --help；以 -- 起头的消息内容用 \`--\` 终结符转义）\n`,
+      );
+      return 2;
+    }
     switch (command) {
       case '': {
         // 安全模式主场景就是 TUI：坏应用锁死启动时起最小内核壳（无驱动形态
@@ -216,6 +310,12 @@ function main(argv: string[]): number {
         const webuiPort = port === undefined ? undefined : parsePortValue(port);
         if (port !== undefined && webuiPort === undefined) {
           process.stderr.write('用法：berry --port <1-65535>（端口须为整数）\n');
+          return 2;
+        }
+        // --app-file 缺值空串占位执法（20260901-c #14）：占位逃过 undefined 判据
+        // 会直传装配层以 APP_ENTRY_UNRESOLVED 退 1（路径文案现 cwd 谎报）——入口退 2
+        if (appFile === '') {
+          process.stderr.write('用法：berry --app-file <入口文件路径>\n');
           return 2;
         }
         // 裸 berry 检测（刀二，契约篇 §6.8）：daemon.json 在场时对其 port 发真握手
@@ -255,13 +355,13 @@ function main(argv: string[]): number {
             return 2;
           }
           // e1 宿主沙箱包裹：用法校验先行（快失败不浪费 wrapper spawn），剥旗标
-          // 重 exec 后内层 argv 再入此分支照常走 tick 形态（旗标已剥不递归）
+          // 重 exec 后内层 argv 再入此分支照常走 tick 形态（旗标已剥不递归）。
+          // wrapper 档位恒 read-only（20260901-c #2，技术栈篇 §5「CLI 解析面执法
+          // 四律」④）：tick 任务面档 = tick-main 缺省 read-only（进程档永不宽于
+          // 只读），OS 硬墙不随 --read-only 在场与否分叉——旧形缺席时给
+          // workspace-write，硬墙宽于进程语义档即档位口径漂移
           if (sandboxHost) {
-            return relaunchUnderHostSandbox(
-              process.argv,
-              process.cwd(),
-              readOnly ? ('read-only' as const) : 'workspace-write',
-            );
+            return relaunchUnderHostSandbox(process.argv, process.cwd(), 'read-only' as const);
           }
           // 旗标显式值优先；tick-main 兜底缺省（read-only + background——
           // 与 /tick run spawn 公式同款任务面档）
@@ -277,6 +377,12 @@ function main(argv: string[]): number {
             process.stderr.write('用法：berry run --app <应用id> "<message>" [--read-only] [--background]\n');
             return 2;
           }
+        }
+        // --app-file 缺值空串占位执法（20260901-c #14，同 TUI 入口律）：占位逃过
+        // undefined 判据会直传装配层以 APP_ENTRY_UNRESOLVED 退 1——入口退 2
+        if (appFile === '') {
+          process.stderr.write('用法：berry run --app-file <入口文件路径> "<message>"\n');
+          return 2;
         }
         const message = args.join(' ');
         if (!message) {
@@ -388,7 +494,11 @@ function main(argv: string[]): number {
       }
       case 'upgrade': {
         // 第六命令（技术栈篇 §8.5，第五十一批）：纯 CLI 维护动词——零装配（不建
-        // runtime/不触库）；run 族旗标不适用即用法错（形态面互斥同 daemon 律）
+        // runtime/不触库）；run 族旗标不适用即用法错（形态面互斥同 daemon 律）。
+        // 互斥面修订（20260901-c #13，契约篇 §5.5 互斥表）：--app-file 入拒列
+        // （快试件与升级动词并给 = 语义静默吞且 spawn npm i -g 会真跑）；
+        // --standalone 自拒列退役——无害忽略同 --foreground 律（attach/daemon 同款，
+        // 原拒列是码面偏离规范的孤例）
         if (
           args.length > 0 ||
           readOnly ||
@@ -399,7 +509,7 @@ function main(argv: string[]): number {
           noApps ||
           sandboxHost ||
           foreground ||
-          standalone
+          appFile !== undefined
         ) {
           process.stderr.write('用法：berry upgrade（无旗标——升级维护动词不与运行形态旗标并用）\n');
           return 2;
