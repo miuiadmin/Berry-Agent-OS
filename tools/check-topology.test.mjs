@@ -70,6 +70,11 @@ beforeAll(() => {
   writeFileSync(join(fixtureRoot, 'src', 'agent', 'index.ts'), "import type { X } from '../session/index.js';\n");
   // 组合根纪律段可读即可（空档两道正则皆不匹配）
   writeFileSync(join(fixtureRoot, 'src', 'app', 'assembly.ts'), '');
+  // O-4① 负例（遗漏大扫 20260901）：夹具 README 写错模块数——规则 3 锚面随
+  // CHECK_ROOT 随移后在岗必红；锚规则整块删除（或锚面退回恒读真仓）则本测
+  // stderr 无此违规必败——「锁的锁」缺位补齐（修复前实证红：锚面未随移时
+  // exit 1 仅由越边构成，宣称 99 无人点名）
+  writeFileSync(join(fixtureRoot, 'README.md'), '# 夹具\n\n共 **99** 模块（错位宣称）。\n');
 });
 
 afterAll(() => {
@@ -92,5 +97,17 @@ describe('check-topology 机器闸（复盘 20260901 T-3）', () => {
     });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('agent/index.ts：agent → session 不在白名单边');
+  });
+
+  it('O-4① 锚负例：夹具 README 模块计数错位被 stderr 点名——规则 3 整块删除后本测必红', () => {
+    const run = spawnSync(process.execPath, [SCRIPT], {
+      cwd: ROOT,
+      env: { ...process.env, CHECK_ROOT: fixtureRoot },
+      encoding: 'utf8',
+    });
+    expect(run.status).toBe(1);
+    // 锚面随 CHECK_ROOT 随移 + 计数对照真值恒为边表实数（内嵌脚本）——
+    // 夹具宣称 99 ≠ 实数必被点名；锚规则被静默删除时此断言先红
+    expect(run.stderr).toContain('README.md：模块计数宣称 99 ≠ 边表实数');
   });
 });

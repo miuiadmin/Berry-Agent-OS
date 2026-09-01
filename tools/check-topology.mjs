@@ -22,8 +22,9 @@ import { fileURLToPath } from 'node:url';
 
 // 根缝（复盘 20260901 T-3 自测）：缺省扫本仓 src；CHECK_ROOT 指向夹具树时 src 根
 // 随移——spawn 自测以已知违规夹具断言 exit 1（侦测能力回归锁，防扫描逻辑静默
-// 退化假绿）。规则 3 公开面计数锚恒读脚本同仓真文件（边表内嵌于脚本，计数对照
-// 两端同为真值——夹具模式不受影响）。
+// 退化假绿）。规则 3 公开面计数锚同随缝随移（遗漏大扫 20260901 O-4①：夹具树
+// 可写错数 README 负例锁「锚规则整块删除后测试照绿」缺位）；计数对照真值恒为
+// 边表实数——边表内嵌于脚本，对照两端在夹具模式下仍同为真值。
 const srcRoot = process.env.CHECK_ROOT
   ? resolve(process.env.CHECK_ROOT, 'src')
   : resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src');
@@ -340,6 +341,12 @@ function relative(file) {
  * 子集数等他口径不收（各有语义，不属本器真相）。文件缺失静默跳过（本仓恒在）。 */
 {
   const count = Object.keys(MODULE_EDGES).length;
+  // 锚面根缝（遗漏大扫 20260901 O-4①）：公开面文件随 CHECK_ROOT 随移——夹具树
+  // 写错数 README 即红（负例锁见 check-topology.test.mjs）。计数对照真值恒为
+  // 边表实数（内嵌脚本），夹具模式对照两端仍同为真值
+  const claimsRoot = process.env.CHECK_ROOT
+    ? resolve(process.env.CHECK_ROOT)
+    : resolve(dirname(fileURLToPath(import.meta.url)), '..');
   /** 文件 → 提取正则（g 标志逐处对照；语言各自适配） */
   const CLAIMS = [
     ['README.md', /\*\*(\d+)\*\*\s*模块/g],
@@ -356,7 +363,7 @@ function relative(file) {
     ['docs/架构总览.md', /(\d+)\s*个模块单向依赖/g],
   ];
   for (const [file, re] of CLAIMS) {
-    const full = resolve(dirname(fileURLToPath(import.meta.url)), '..', file);
+    const full = join(claimsRoot, file);
     if (!existsSync(full)) continue;
     for (const m of readFileSync(full, 'utf8').matchAll(re)) {
       if (Number(m[1]) !== count) {

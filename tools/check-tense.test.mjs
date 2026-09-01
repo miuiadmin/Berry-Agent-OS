@@ -44,6 +44,11 @@ beforeAll(() => {
       '',
     ].join('\n'),
   );
+  // O-4③ 锚负例（遗漏大扫 20260901）：README.md 与 README.en.md 各踩规则 2——
+  // 后者只有 glob 展开（README*.md，复盘 G-2）在岗才被点名：glob 被拆回单文件
+  // 硬编码时本断言必红（实证法：临时把 glob 收敛为只读 README.md → 本测红）
+  writeFileSync(join(fixtureRoot, 'README.md'), ['# 夹具', '', '已落码 `src/never-zh.md`。', ''].join('\n'));
+  writeFileSync(join(fixtureRoot, 'README.en.md'), ['# fixture', '', '已落码 `src/never-en.ts`。', ''].join('\n'));
   // 规则 1 对照锚 ROOT 上的 git log——夹具需 ≥1 笔 commit（无 commit 时 git log
   // 非零退出使 execFileSync 抛错，夹具即废）；-c 注入身份防全局配置缺省拦截
   const git = (args) =>
@@ -78,5 +83,9 @@ describe('check-tense 机器闸（复盘 20260901 T-3）', () => {
     expect(run.stderr).toContain('完成时态引用路径不存在「src/ghost.ts」');
     // 规则 3：退役词
     expect(run.stderr).toContain('退役词「插件」');
+    // O-4③：README glob 展开在岗——外国语镜像（README.en.md）与中文同查，
+    // 各自的规则 2 违规都被点名（glob 退化时 en 断言先红——G-2 锚）
+    expect(run.stderr).toContain('README.md:3 完成时态引用路径不存在「src/never-zh.md」');
+    expect(run.stderr).toContain('README.en.md:3 完成时态引用路径不存在「src/never-en.ts」');
   });
 });

@@ -875,6 +875,59 @@ describe('ctx.llm.complete 底账（P1-5 全桶入账 + model 口径统一）', 
     expect(data.usage.input!).toBeGreaterThan(0);
     expect(data.usage.output!).toBeGreaterThan(0);
   });
+
+  it('E-3 接线锁（遗漏大扫 20260901 L-5）：onUsage 入账炸经 onUsageError 落 ctx.logger.warn——拆掉接线本测必红', async () => {
+    // 机制半（onUsageError 收 {callId, model, error} 且不拖垮补全）已锁在
+    // llm/complete.test.ts；本测锁**接线半**：组合根把 onUsageError 接到
+    // ctx.logger.warn——llm/usage 是 backgroundSpentToday 预算投影唯一底账，
+    // 拆线后丢账静默不可观测（实证红法：临时删 assembly.ts 的 onUsageError
+    // 实参 → 本测 warn 断言先红）。入账失败注入：entry.session 与
+    // runtime.session 是同一活对象（registry 单真相）——append 换成抛错即炸
+    const faux = fauxProvider({ provider: 'faux-ledger', models: [{ id: 'm1' }] });
+    faux.setResponses([
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 },
+        stopReason: 'stop',
+        timestamp: 1,
+      } as unknown as Parameters<typeof faux.setResponses>[0][number],
+    ]);
+    const runtime = await assemble({ providers: [faux.provider], model: 'faux-ledger/m1' });
+    const llm = runtime.ctx.get<LlmService>('llm');
+    const sessionId = runtime.session!.header.sessionId;
+    // 记录 warn：拦截组合根接线目标（ctx.logger 同一对象——onUsageError 闭包
+    // 运行期属性访问，补丁方法可见）
+    const warns: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger = runtime.ctx.logger as unknown as {
+      warn: (message: string, fields?: Record<string, unknown>) => void;
+    };
+    const origWarn = logger.warn.bind(logger);
+    logger.warn = (message, fields) => warns.push({ message, fields });
+    // 入账失败注入：append 抛错 → onUsage 炸 → onUsageError 接线面接住
+    const session = runtime.session!;
+    const origAppend = session.append.bind(session);
+    session.append = (() => {
+      throw new Error('底账写入炸了');
+    }) as typeof session.append;
+    try {
+      const result = await runInSessionChain({ sessionId }, () =>
+        llm.complete({ messages: [{ role: 'user', content: '问', timestamp: 1 }] }),
+      );
+      // 计量是观测面：入账炸不拖垮补全本身（E-3 主语义，机制面已锁——此处复核装配面）
+      expect(result.message.content).toBeTruthy();
+    } finally {
+      session.append = origAppend;
+      logger.warn = origWarn;
+    }
+    // 接线在岗：丢账可见——warn 文案 + callId/model/error 三字段随行
+    const drop = warns.find((w) => w.message.includes('llm.complete 用量入账失败'));
+    expect(drop).toBeDefined();
+    expect((drop!.fields as { callId?: unknown }).callId).toBeTypeOf('string');
+    expect(String(drop!.fields?.error)).toContain('底账写入炸了');
+    // 入账炸未落任何 llm/usage 事件（失败即丢——不重试不重复入账）
+    expect(runtime.session!.events.filter((e) => e.type === 'llm/usage')).toHaveLength(0);
+  });
 });
 
 describe('ConversationDriver 防御（直接构造）', () => {

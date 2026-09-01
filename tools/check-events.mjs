@@ -42,10 +42,24 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { join, dirname, relative } from 'node:path';
+import { join, dirname, relative, resolve } from 'node:path';
 import { createJiti } from 'jiti';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * 公开面镜像读根缝（遗漏大扫 20260901 O-4②）：缺省读真仓（缺文件 readFileSync
+ * 抛错即红——docs 改名漂移不得静默跳过）；CHECK_ROOT 指向夹具树时镜像面随缝
+ * 随移且缺席文件静默跳过（夹具树只造目标锚面，不复制整册 docs）——锚规则可被
+ * 负例锁钉（第五族③整块删除后测试照绿的「锁的锁」缺位补齐）。src 扫描面与
+ * jiti 目录真源恒读真仓（事件目录真相不随夹具变）。返回 undefined = 跳过本文件。
+ */
+const MIRROR_ROOT = process.env.CHECK_ROOT ? resolve(process.env.CHECK_ROOT) : ROOT;
+function readMirrorFile(relPath) {
+  const full = join(MIRROR_ROOT, relPath);
+  if (process.env.CHECK_ROOT && !existsSync(full)) return undefined;
+  return readFileSync(full, 'utf8');
+}
 
 /* ------------------------------------------------------------------ */
 /* 源码收集（src 下全部 .ts，排除测试与产物）                           */
@@ -375,7 +389,8 @@ for (const entry of liveCatalog) {
   // ① 应用开发指南「活体总线词汇速览」表：词集双向 + 标题计数 + 层括号计数和
   {
     const relPath = join('docs', '应用开发指南.md');
-    const section = docSection(readFileSync(join(ROOT, relPath), 'utf8'), relPath, '### 活体总线词汇速览');
+    const source = readMirrorFile(relPath); // O-4② 镜像根缝：夹具模式缺席跳过
+    const section = source === undefined ? null : docSection(source, relPath, '### 活体总线词汇速览');
     if (section) {
       // 词集提取锚 = 以 | 起头的表格行内反引号词（过词汇格式正则滤掉 `next()`/
       // `ctx.on` 型非词汇）——钉死表格行识别防注行 `on/emit` 型杂质混入（冷读 #6）
@@ -422,7 +437,8 @@ for (const entry of liveCatalog) {
   // ② 架构总览「事件系统」表：三行计数（项/型/类）≡ 三目录真值，各恰一次命中
   {
     const relPath = join('docs', '架构总览.md');
-    const section = docSection(readFileSync(join(ROOT, relPath), 'utf8'), relPath, '## 4. 事件系统');
+    const source = readMirrorFile(relPath); // O-4② 镜像根缝：夹具模式缺席跳过
+    const section = source === undefined ? null : docSection(source, relPath, '## 4. 事件系统');
     if (section) {
       const countChecks = [
         ['总线词汇量（项）', /(\d+)\s*项/g, liveCatalog.length],
@@ -480,7 +496,9 @@ for (const entry of liveCatalog) {
       ],
     ];
     for (const [relPath, anchors] of README_ANCHORS) {
-      const full = join(ROOT, relPath);
+      // O-4② 镜像根缝：面随 CHECK_ROOT 随移。缺席跳过语义两态同构（既有
+      // existsSync 先行——README 四语任一缺席不炸器，不属 fail-loud 面）
+      const full = join(MIRROR_ROOT, relPath);
       if (!existsSync(full)) continue;
       const source = readFileSync(full, 'utf8');
       for (const [label, pattern, truth] of anchors) {
