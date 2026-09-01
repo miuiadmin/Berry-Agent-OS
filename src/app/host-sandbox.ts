@@ -18,11 +18,12 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { AppError, SANDBOX_UNAVAILABLE } from '../contracts/errors.js';
 import { canonicalPath, createDefaultBackends, createSandboxService, deriveWritableRoots } from '../safety/index.js';
 import type { ConfinedSandboxMode, SandboxPolicy } from '../safety/index.js';
-import { dataDir, dbPath } from './paths.js';
+import { dataDir, dbPath, ensureDbDir } from './paths.js';
 
 /** 旗标词（CLI 面；帮助文案与解析层同词） */
 export const HOST_SANDBOX_FLAG = '--sandbox-host';
@@ -87,6 +88,26 @@ export function relaunchUnderHostSandbox(
   mode: ConfinedSandboxMode,
   opts: RelaunchOptions = {},
 ): number {
+  // 外层建档先行（遗漏大扫 20260901-d #18，技术栈篇 §5 e1 勘正）：宿主可写根
+  // canonical 化的隐含前提是目录已存在——首跑数据目录未建时 canonicalPath 对
+  // 缺失路径回退原始串，符号链祖先（/tmp→/private/tmp、$TMPDIR=/var/folders/…、
+  // /var）未解析，seatbelt subpath 字面量与内核 namei 解析路径失配，内层
+  // ensureDbDir 建档 EPERM 首跑即砖（read-only 档恒中——推导根为空无 /tmp 宽
+  // 根兜底；tick wrapper 档恒 read-only 同中；多级缺失父目录 recursive mkdir
+  // 越出白名单叶是同族第二因）。外层（未受限进程）预建数据目录与库父目录
+  // ——建档本就是宿主职责（e1「read-only 建库刚需」的时点前移），复用
+  // ensureDbDir 语义（0700 新建段 + 产权面 chmod 同款），目录既建 canonical
+  // 化前提恒成立、内层建档幂等；建档失败 = 响亮退出码 1（不裸栈——与内层
+  // EPERM 旧形同为首跑失败，但消息面提前到外层且带归因）
+  try {
+    mkdirSync(dataDir(), { recursive: true, mode: 0o700 });
+    ensureDbDir(dbPath());
+  } catch (err) {
+    process.stderr.write(
+      `数据目录建档失败（--sandbox-host 外层预建）：${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return 1;
+  }
   // 无 ctx 服务形态：CLI 入口早于组合根——直接组装一次性服务（probe/仲裁/
   // fail-closed 语义与 ctx.sandbox 同源，链即平台默认链）
   const service = createSandboxService({ backends: opts.backends ?? createDefaultBackends() });

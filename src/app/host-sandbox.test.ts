@@ -8,7 +8,7 @@
  * 环境面用 vi.stubEnv 注入 APP_DATA_DIR/APP_DB_PATH（与生产路径同构——
  * paths.ts 三函数的测试注入首选）。
  */
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -115,6 +115,10 @@ describe('e1 宿主沙箱（host-sandbox 件）', () => {
   });
 
   it('fail-closed 回归锁：无后端平台（空链）响亮拒退出码 1，绝不 spawn 裸跑', () => {
+    // 数据目录钉扎（#18 后 relaunch 有外层建档副作用——不钉即写真 ~/.berry，G1 教训）
+    const pinned = makeTempDir('e1-fc-');
+    vi.stubEnv('APP_DATA_DIR', pinned);
+    vi.stubEnv('APP_DB_PATH', join(pinned, 'sessions.db'));
     // Windows 形态等价物（createDefaultBackends 空链）→ SANDBOX_UNAVAILABLE 拒
     const code = relaunchUnderHostSandbox(
       ['node', 'main.js', 'run', HOST_SANDBOX_FLAG, 'hi'],
@@ -129,6 +133,9 @@ describe('e1 宿主沙箱（host-sandbox 件）', () => {
   });
 
   it('重 exec 成功路径：spawn 收到后端 wrap 产物（runner 前缀 + 剥旗标内层 argv）；退出码透传', () => {
+    const pinned = makeTempDir('e1-ok-'); // 同上钉扎（外层建档副作用）
+    vi.stubEnv('APP_DATA_DIR', pinned);
+    vi.stubEnv('APP_DB_PATH', join(pinned, 'sessions.db'));
     vi.mocked(spawnSync).mockReturnValue({ status: 7 } as ReturnType<typeof spawnSync>);
     const code = relaunchUnderHostSandbox(
       ['/usr/bin/node', '/x/dist/app/main.js', 'run', HOST_SANDBOX_FLAG, 'hi'],
@@ -145,6 +152,9 @@ describe('e1 宿主沙箱（host-sandbox 件）', () => {
   });
 
   it('wrapper 启动失败（runner 缺失/异常终止）= 退出码 1 响亮，不伪造成功', () => {
+    const pinned = makeTempDir('e1-fail-'); // 同上钉扎（外层建档副作用）
+    vi.stubEnv('APP_DATA_DIR', pinned);
+    vi.stubEnv('APP_DB_PATH', join(pinned, 'sessions.db'));
     vi.mocked(spawnSync).mockReturnValue({ error: new Error('runner 缺失'), status: null } as ReturnType<
       typeof spawnSync
     >);
@@ -153,5 +163,38 @@ describe('e1 宿主沙箱（host-sandbox 件）', () => {
       execArgv: [],
     });
     expect(code).toBe(1);
+  });
+
+  // 【遗漏大扫 20260901-d #18】外层建档先行：符号链 + 未建数据目录形态下，
+  // canonicalPath 对缺失路径回退原始串（符号链段未解析）——seatbelt subpath
+  // 字面量与内核 namei 解析路径失配，内层建档 EPERM 首跑即砖（read-only 档
+  // 恒中：推导根为空无 /tmp 宽根兜底；tick wrapper 档恒 read-only 同中）。
+  // 修复 = wrapper 重 exec 前外层（未受限进程）预建数据目录与库父目录。
+  it('#18 外层建档先行：符号链未建数据目录——策略组装前预建，可写根恒 canonical 形', () => {
+    // 平台无关地复现 /tmp→/private/tmp 形态：显式符号链指入已存在目标，数据
+    // 目录段经符号链且多级缺失（第二因 recursive mkdir 越出白名单叶同锁）
+    const base = makeTempDir('e1-unbuilt-');
+    const realDir = join(base, 'real');
+    mkdirSync(realDir); // 符号链目标（已存在——只缺其下数据目录段）
+    const linkDir = join(base, 'lnk');
+    symlinkSync(realDir, linkDir, 'dir');
+    const data = join(linkDir, 'nested', 'data'); // 未建 + 多级缺失 + 符号链祖先
+    const db = join(linkDir, 'nested', 'dbdir', 'x.db'); // 库显式指到别处（同未建）
+    vi.stubEnv('APP_DATA_DIR', data);
+    vi.stubEnv('APP_DB_PATH', db);
+    vi.mocked(spawnSync).mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
+    const code = relaunchUnderHostSandbox(['node', 'main.js', 'run', HOST_SANDBOX_FLAG, 'hi'], '/ws', 'read-only', {
+      backends: [fakeBackend('/wrapper/bin')],
+      execArgv: [],
+    });
+    expect(code).toBe(0);
+    // 外层建档先行（修前红锚①）：符号链目标下两目录已建——建档先于策略组装
+    expect(existsSync(join(realDir, 'nested', 'data'))).toBe(true);
+    expect(existsSync(join(realDir, 'nested', 'dbdir'))).toBe(true);
+    // 可写根恒 canonical（修前红锚②）：符号链段解析到真实位置；未解析字面量
+    // 在场即内层 EPERM 根因
+    const roots = hostWritableRoots('/ws', 'read-only');
+    expect(roots).toContain(realpathSync(data));
+    expect(roots).not.toContain(data);
   });
 });
