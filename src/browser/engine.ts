@@ -377,8 +377,11 @@ export class BrowserEngine {
       this.adoptConnection(connection, { enginePath: discovered.path, attach: false });
     } catch (err) {
       // 起链失败即清算本 child（#2/#9）：活 Chrome 不留野、登记簿不留尸、
-      // 状态不谎报 starting（收场后置 closed）——失败原样上抛，下一调用照常复活
-      this.teardownGeneration({ conn: this.connection, child });
+      // 状态不谎报 starting（收场后置 closed）——失败原样上抛，下一调用照常复活。
+      // conn 恒传 undefined（#23）：本代从未收养连接（adoptConnection 只在成功
+      // 尾部置 this.connection），此刻现值必属别代——传现值会抢别代连接的
+      // tornDown 幂等闸位，别代自身收场的树杀/登记簿净退被闸吞
+      this.teardownGeneration({ conn: undefined, child });
       throw err;
     }
     this.deps.notify('浏览器引擎已启动（本地 CDP 回环）');
@@ -398,8 +401,10 @@ export class BrowserEngine {
       });
       this.adoptConnection(connection, { enginePath: `(attach ${endpoint})`, attach: true });
     } catch (err) {
-      // 连不上即收场复位（#9：状态不谎报 starting）——attach 无 child 零清算面
-      this.teardownGeneration({ conn: this.connection, child: undefined });
+      // 连不上即收场复位（#9：状态不谎报 starting）——attach 无 child 零清算面；
+      // conn 恒传 undefined（#23，与 spawn 失败腿同律）：此刻 this.connection
+      // 现值属别代（本代从未收养），不得借 teardown 抢别代幂等闸位
+      this.teardownGeneration({ conn: undefined, child: undefined });
       throw err;
     }
     this.deps.notify(`浏览器引擎已 attach（${browserName}）`);
@@ -455,13 +460,17 @@ export class BrowserEngine {
         this.keyByCdpSession.delete(session.sessionId);
       }
     }
-    // 共享引用护栏：仍指向本代产物才清（换代 = 新代引用原位不动）
-    if (this.connection === atClose.conn) {
-      this.connection = undefined;
-      if (this.child === atClose.child) {
-        this.child = undefined;
-        this.enginePath = undefined;
-      }
+    // 共享引用护栏：仍指向本代产物才清（换代 = 新代引用原位不动）。三判据分立
+    // （#23）：conn/child/status 各按自判据清算不嵌套——起链失败腿 conn=undefined
+    // （本代从未收养）不清别代 connection，但仍清本代 child/enginePath（判据 =
+    // this.child === 本代 child），并在 connection 与 child 均不再在位时复位
+    // status 为 closed（判据缺席不清算 = 旧回归面：this.child 残壳 + starting 谎报）
+    if (this.connection === atClose.conn) this.connection = undefined;
+    if (this.child === atClose.child) {
+      this.child = undefined;
+      this.enginePath = undefined;
+    }
+    if (this.connection === undefined && this.child === undefined) {
       this.status = { state: 'closed' };
     }
     if (atClose.child !== undefined) {

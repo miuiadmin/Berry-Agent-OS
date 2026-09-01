@@ -769,6 +769,65 @@ describe('browser 引擎生命周期', () => {
     await engine.dispose();
   });
 
+  // 【遗漏大扫 20260901-c #23】起链失败腿不得抢别代 tornDown 闸位：旧代收场
+  // await 窗内并发换代起链失败时，失败腿传 this.connection 现值（= 别代连接）进
+  // teardownGeneration——别代连接被标进幂等闸，旧代自身收场两腿（onDead/显式）
+  // 均早退，旧 child 的树杀与登记簿净退被吞。修复：失败腿 conn 恒传 undefined
+  //（本代从未收养连接）+ 共享引用护栏三判据分立。修复前红：killTree 打不到
+  // 424242（旧代漏杀）、remove(424242) 不发生——两代各清各的账。
+  it('#23 起链失败腿不抢别代闸位：旧收场窗内新起链失败——两代 child 各自树杀净退', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    // 可变配置（makeEngine 的 noPortFile/alive 在 spawnEngine 回调内惰性求值——
+    // 两代之间翻面即得「第二代启动即死」形态，第一代照常起）
+    const cfg: Parameters<typeof makeEngine>[0] = {
+      dataDir,
+      idleMs: 250,
+      pids: [424_242, 424_243, 424_244],
+    };
+    const { engine, killTree, registry } = makeEngine(cfg);
+    await engine.acquireContext('sess-A'); // 第一代引擎（pid 424242）
+    // 扣押 Browser.close 应答：闲置两跳后 closeEngine 进 await 窗（#17 同款编排）
+    fake.holdMethods.add('Browser.close');
+    const until = async (pred: () => boolean, ms = 2_000): Promise<void> => {
+      const start = Date.now();
+      while (!pred()) {
+        if (Date.now() - start > ms) throw new Error('until 轮询超时');
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    };
+    await until(() => fake.receivedFrames.some((f) => f.method === 'Browser.close'));
+    expect(engine.getStatus().state).toBe('closed'); // closeEngine 入场已置 closed（await 窗内）
+    // 窗内并发取用：第二代 spawn 即死（alive 恒 false + 端口文件不写——引擎先死腿）
+    cfg.alive = () => false;
+    cfg.noPortFile = true;
+    let err: unknown;
+    try {
+      await engine.acquireContext('sess-A');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(AppError); // 第二代失败腿本身清算正确（#2/#9 语义）
+    expect(describeError(err)).toContain('BROWSER_CONNECT_FAILED');
+    expect(killTree).toHaveBeenCalledWith(424_243, expect.any(Function)); // 本代 child 即杀
+    // 放行旧收场：第一代必须仍被清算（修复前红：闸位被失败腿抢占 → 两腿早退，
+    // 424242 永不树杀、登记簿留尸）
+    fake.releaseHeld();
+    await until(() => killTree.mock.calls.some((c) => c[0] === 424_242));
+    expect(killTree).toHaveBeenCalledTimes(2); // 两代各恰一次（修复前 = 1：只有 424243）
+    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(registry.remove).toHaveBeenCalledWith(424_242);
+    expect(registry.remove).toHaveBeenCalledWith(424_243);
+    // 引用面收干净（三判据分立的红面：conn 未清会卡 status 复位）
+    expect(engine.getStatus().state).toBe('closed');
+    // 下一调用照常复活（无楔死）：第三代（pid 424244）正常起
+    cfg.alive = () => true;
+    cfg.noPortFile = false;
+    const handle3 = await engine.acquireContext('sess-A');
+    expect(handle3.session.sessionId).toBe('SESS-1');
+    expect(engine.getStatus().state).toBe('running');
+    await engine.dispose();
+  });
+
   // 【遗漏大扫 20260901-b #15】运行时版本闸：bringUp 两形态共用入口先验
   // process.versions.node ≥ 22.19——不达标落 BROWSER_NODE_UNSUPPORTED，且闸在
   // spawn/连接之前：零野进程、零半建态、status 不谎报 starting（保持 idle，
