@@ -329,6 +329,24 @@ function scriptedIo(canned) {
   };
 }
 
+/**
+ * 编排骨舞断言用的 publish 期望 args（provenance 条件位对齐——成熟度扫描
+ * P0-5）：runRelease 内部读 process.env.GITHUB_ACTIONS 决定是否追加
+ * --provenance（publishArgs 同序：--tag 之后、--dry-run 之前）；GitHub
+ * Actions 上跑 vitest 进程继承该 env，硬编码基线必红（cfc5f83b 四测连红
+ * 实锚——本地绿/CI 红 = env 差非行为差）。本机无该 env 落基线形态。
+ */
+function publishExpect(dir, publishTag, dryRun = false) {
+  return [
+    'publish',
+    join(dir, 'berry-agent-os-fake.tgz'),
+    '--tag',
+    publishTag,
+    ...(process.env.GITHUB_ACTIONS ? ['--provenance'] : []),
+    ...(dryRun ? ['--dry-run'] : []),
+  ];
+}
+
 /** 四门禁 + 净空 + 构建 + 双 pack + 安装冒烟的全绿底座（各测按路径增删） */
 function greenBase(version) {
   return {
@@ -410,7 +428,7 @@ describe('runRelease 编排骨舞：preview 期 prerelease 全绿路径', () => 
     ]);
     // publish 单点：上传物 = tarball 本体 + prerelease 显式 next
     const pub = calls.find((c) => c.label === 'publish');
-    expect(pub.args).toEqual(['publish', join(workDir, 'berry-agent-os-fake.tgz'), '--tag', 'next']);
+    expect(pub.args).toEqual(publishExpect(workDir, 'next'));
     // dist-tag add 补 latest 腿（next 腿由 publish 立起）
     expect(labels(calls).filter((l) => l === 'dist-tag-add')).toEqual(['dist-tag-add']);
     expect(calls.find((c) => c.label === 'dist-tag-add').args).toEqual([
@@ -457,12 +475,7 @@ describe('runRelease 编排骨舞：正式版分叉路径', () => {
 
     expect(summary.published).toBe(true);
     expect(summary.gitTag).toBe('skip'); // 同 commit 幂等跳过
-    expect(calls.find((c) => c.label === 'publish').args).toEqual([
-      'publish',
-      join(workDir, 'berry-agent-os-fake.tgz'),
-      '--tag',
-      'latest',
-    ]);
+    expect(calls.find((c) => c.label === 'publish').args).toEqual(publishExpect(workDir, 'latest'));
     expect(labels(calls)).not.toContain('dist-tag-add');
     // pre 快照先于 publish（「next 不动」的基准必须取在任何写操作前）
     expect(labels(calls).indexOf('view-tags:pre')).toBeLessThan(labels(calls).indexOf('publish'));
@@ -485,13 +498,7 @@ describe('runRelease 演习矩阵：--dry-run 行为（检视/冒烟真做，写
 
     expect(summary.published).toBe(false);
     expect(summary.dryRun).toBe(true);
-    expect(calls.find((c) => c.label === 'publish').args).toEqual([
-      'publish',
-      join(workDir, 'berry-agent-os-fake.tgz'),
-      '--tag',
-      'next',
-      '--dry-run',
-    ]);
+    expect(calls.find((c) => c.label === 'publish').args).toEqual(publishExpect(workDir, 'next', true));
     const ran = labels(calls);
     expect(ran).not.toContain('dist-tag-add');
     expect(ran).not.toContain('view-tags:post'); // 无注入时终态走投影断言
@@ -526,13 +533,7 @@ describe('runRelease 演习矩阵：--dry-run 行为（检视/冒烟真做，写
 
     expect(summary.published).toBe(false);
     expect(summary.expectedTags).toEqual({ latest: '1.0.0' });
-    expect(calls.find((c) => c.label === 'publish').args).toEqual([
-      'publish',
-      join(workDir, 'berry-agent-os-fake.tgz'),
-      '--tag',
-      'latest',
-      '--dry-run',
-    ]);
+    expect(calls.find((c) => c.label === 'publish').args).toEqual(publishExpect(workDir, 'latest', true));
     expect(labels(calls)).not.toContain('dist-tag-add');
     // pre 快照照取（正式版两态同律），只是投影断言不消费它
     expect(labels(calls)).toContain('view-tags:pre');
