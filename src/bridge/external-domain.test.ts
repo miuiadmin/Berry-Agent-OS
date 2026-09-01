@@ -9,7 +9,7 @@
  * 域死结算在两载体上行为同一。external 腿独有面另测：PM 三层旗真执法 /
  * 组杀（树杀）/ 孤儿防线 / crash diagnostic / kill 归因。
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -23,14 +23,31 @@ import { spawnExternalDomain, externalEntryUrl, type ExternalDomain } from './ex
 
 /* ---------------- 测试基建（同 bootstrap.test.ts 形态——parity 的基建也对齐） ---------------- */
 
-/** 域 id 判死探测：process.kill(pid, 0) 抛 ESRCH = 已死 */
+/**
+ * 域 id 判死探测：process.kill(pid, 0) 抛 ESRCH = 已死；Linux 下 zombie 按
+ * 死报。zombie 澄清（刀四 CI 跟进修实测）：树杀用例等「孙进程死」，孙的父
+ * （域）先被组杀 → 孙过继 PID 1——若 init 不 reap（docker 容器 PID 1 是
+ * sh/node，macOS launchd 与 GH runner systemd 都收），孙成永久 zombie 而
+ * kill(pid, 0) 对 zombie 仍成功（pid 未释放）→ 误报活拖到轮询超时。读
+ * /proc/\<pid\>/stat 的 state 字段（comm 可含空格——取最后 ')' 后首段），
+ * Z = 已退出按死报；无 /proc 平台（macOS）kill0 结果即真相。
+ */
 function pidAlive(pid: number | undefined): boolean {
   if (pid === undefined) return false;
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const state = stat
+      .slice(stat.lastIndexOf(')') + 1)
+      .trim()
+      .split(/\s+/)[0];
+    return state !== 'Z';
+  } catch {
+    return true; // 无 /proc——kill0 已证进程在且非本平台可判 zombie
   }
 }
 
@@ -314,6 +331,10 @@ describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/c
       // 自带推导器同款两坑执法：预建（坑三——不存在则白名单静默失效）+
       // realpath 归一（坑一——与子进程运行时路径同形）
       mkdirSync(inside, { recursive: true });
+      // --allow-worker 在位：TS 源形态经引导器 module.register 挂 loader 钩子
+      // 线程（AsyncLoaderHookWorker），PM 拒 Worker 构造即挂——刀四载体去
+      // tsx 化实测勘正（旧理由 tsx→esbuild 线程已退役；TSX_DISABLE_CACHE 同
+      // 批退役——载体零 tsx 无磁盘缓存面）
       const execArgv = [
         '--permission',
         '--allow-fs-read=*',
@@ -322,7 +343,6 @@ describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/c
       ];
       const pm = spawnTestDomain({
         execArgv,
-        env: { ...process.env, TSX_DISABLE_CACHE: '1' } as Record<string, string>,
       });
       const probeEntry = join(fixtureDir, 'fx-pm-probe.ts');
       try {
@@ -563,17 +583,25 @@ describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/c
     },
   );
 
-  it('execArgv tsx 守卫：显式旗组已含 tsx 不重补 / 不含则自补（spawnargs 直证）', () => {
-    // 腿一：显式 ['--import=tsx']（vitest 形态）→ 守卫跳过追加——恰好一份
-    //（若误重补，双重 --import 同载两份 tsx 实例——态漂移面）
-    const dedup = spawnTestDomain({ execArgv: ['--import=tsx'] });
-    expect(dedup.child.spawnargs.filter((a) => a.includes('tsx'))).toHaveLength(1);
-    dedup.terminate('守卫用例收尾');
-    // 腿二：显式 PM 旗组（无 tsx）+ .ts 入口 → 守卫自补 '--import=tsx'——恰好
-    // 一份（追加位在旗组与入口之间；不补则 TS 入口无法装载——PM 用例已隐证
-    // 装载可达，本断言把守卫本身钉成字面锁）
-    const appended = spawnTestDomain({ execArgv: ['--permission'] });
-    expect(appended.child.spawnargs.filter((a) => a.includes('tsx'))).toHaveLength(1);
-    appended.terminate('守卫用例收尾');
+  it('载体去 tsx 化路由：TS 入口经引导器 + argv[2] 域id 协议位恒在；显式旗组原样透传（spawnargs 直证）', () => {
+    // 刀四 CI 首跑红根因①回归锁：旧「TS 形态自补 --import=tsx」在 node 22
+    // 双缺陷（module.register 钩子不挂 worker 线程 + esbuild 子进程被 PM 旗
+    // 拒杀）——现形 TS 入口恒经纯 JS 引导器 carrier-launch.mjs（原生
+    // type-strip 直载 + 兜底 resolve 钩子），argv 形状 =
+    // [node, ...旗, carrier-launch.mjs, 域id, 入口路径]。
+    // 断言面（spawnargs 字面锁）：①零 tsx（旗组透传不追加——加载链不在
+    // execArgv）；②argv[2] 恒域 id（external-entry.ts 协议位，引导器透明）；
+    // ③入口路径在 argv[3]（引导器读它动态 import）。
+    const domain = spawnTestDomain({ execArgv: ['--permission'], workerId: 'route-probe' });
+    const args = domain.child.spawnargs.slice(1); // 去 node 本体
+    // ① 显式旗组原样在位且零 tsx 追加
+    expect(args).toContain('--permission');
+    expect(args.filter((a) => a.includes('tsx'))).toHaveLength(0);
+    // ②③ 引导器路由形：域 id 与 .ts 入口都在（域 id 位置 = 引导器后第一位）
+    const launcherAt = args.findIndex((a) => a.endsWith('carrier-launch.mjs'));
+    expect(launcherAt).toBeGreaterThan(-1);
+    expect(args[launcherAt + 1]).toBe('route-probe'); // argv[2] 域 id 协议位恒在
+    expect(args[launcherAt + 2]).toMatch(/external-entry\.ts$/); // 入口路径随行
+    domain.terminate('守卫用例收尾');
   });
 });

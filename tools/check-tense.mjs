@@ -103,9 +103,12 @@ function isDir(p) {
  * - 0a1b2c3d：记忆篇标记格式「[m:8位十六进制]」示例字面量；
  * - 7fb0d8f：old-v2 mercury 域实证 commit（memory 篇历史引注）；
  * - 01a03051/01a03052/c49906ec/b150a55：路线图蓝本快照表——pi / dsh
- *   外部仓库 commit（参考源码/ 快照锚）。
+ *   外部仓库 commit（参考源码/ 快照锚）；
+ * - b395c44：legacy 旧私有仓 berry-agent feat-new 顶——AGENTS.md 双仓拓扑
+ *   归档位引注（origin 仓不含此 hash；本地 private-archive 分支在场故绿，
+ *   CI 克隆视角必红——刀四 CI 首跑红根因③，2026-09-01 入册）。
  */
-const TENSE_HASH_EXEMPT = new Set(['0a1b2c3d', '7fb0d8f', '01a03051', '01a03052', 'c49906ec', 'b150a55']);
+const TENSE_HASH_EXEMPT = new Set(['0a1b2c3d', '7fb0d8f', '01a03051', '01a03052', 'c49906ec', 'b150a55', 'b395c44']);
 
 /** 取本仓全部 commit hash 的 7-12 位前缀集（文档引用按前缀对照——短 hash 随仓库增长变长，7 位引用恒为某 hash 前缀） */
 function collectHashPrefixes() {

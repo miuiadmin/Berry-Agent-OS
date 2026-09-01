@@ -26,6 +26,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: 安装 bubblewrap（mcp 件 OS 沙箱层后端——e2e 真子进程测试依赖）
+        # ubuntu-latest 不预装 bwrap；mcp spawn 的 L3 沙箱探测 fail-closed，
+        # 缺后端即拒 spawn（契约篇 §6.6）。GitHub runner 是标准 VM，unprivileged
+        # user namespace 可用，装上即过探测（本机 docker 复现容器因 seccomp
+        # 拦 clone(CLONE_NEWUSER) 需 --privileged 才能跑同一套件——环境差注记）
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
       - name: 安装依赖（npm ci——package-lock 精确复现）
         run: npm ci
       - name: 门禁一 typecheck

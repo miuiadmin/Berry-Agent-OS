@@ -305,10 +305,12 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
    * external 腿 spawn 参数组装（三层执法的参数面——头注）：PM 旗 + 预算旗
    * （execArgv）、OS 层 confine 包裹器（argvWrapper）、白名单 env + per-域
    * TMPDIR。per-域 tmp 子目录建在件数据根内（基线内零新增根；痕迹随行清算）。
-   * TS 源形态两伴随参数（E6 实测）：PM 旗补 --allow-worker（tsx→esbuild 转译
-   * 走 worker 线程服务）+ env 钉 TSX_DISABLE_CACHE=1（tsx 磁盘缓存的 mkdir 在
-   * PM 下必挂）——编译产物形态两参数都不带，PM 保持最紧。入口形态判据：
-   * 显式 externalUrl 看自身；缺省入口（external-domain.ts 内部定位）与本
+   * TS 源形态 PM 伴随参数（刀四载体去 tsx 化后勘正）：`--allow-worker` 保留
+   * ——理由从「tsx→esbuild 转译线程」换为「载体引导器 module.register 的
+   * loader 钩子线程（AsyncLoaderHookWorker）」；`TSX_DISABLE_CACHE` 退役
+   * （载体零 tsx 无磁盘缓存面）。编译产物形态参数都不带——PM 保持最紧
+   * （dist 直载不经引导器）。入口形态判据 = 域入口 URL 尾缀：显式
+   * externalUrl 看自身；缺省入口（external-domain.ts 内部定位）与本
    * 模块同树同形（src/bridge 同编译单元——dev 同 .ts、dist 同 .js）。
    */
   const assembleExternalSpawn = (
@@ -345,8 +347,6 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
     const env = {
       ...buildChildEnv(process.env),
       TMPDIR: tmpDir,
-      // TS 源形态：tsx 磁盘缓存 mkdir 在 PM 下必挂——钉禁缓存（域短命本无缓存收益）
-      ...(isTs ? { TSX_DISABLE_CACHE: '1' } : {}),
     };
     return { execArgv, ...(argvWrapper === undefined ? {} : { argvWrapper }), env };
   };

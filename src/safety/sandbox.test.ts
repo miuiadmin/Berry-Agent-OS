@@ -344,11 +344,15 @@ describe('Seatbelt 后端（纯函数 profile 生成）', () => {
 });
 
 describe('bwrap 后端（纯函数参数生成）', () => {
-  it('read-only 缺省（无显式根）：只读根视图 + 虚拟设备 + tmpfs /tmp——统一前后字节不变', () => {
+  it('read-only 缺省（无显式根）：只读根视图 + 虚拟设备 + tmpfs /tmp 前置', () => {
     // 子进程 read-only 档缺省推导空根——形态与统一前的 bwrapReadOnlyArgs 全同
-    //（两档统一消费 resolvePolicyRoots 的回归锚：子进程既有行为零漂移）
+    //（两档统一消费 resolvePolicyRoots 的回归锚：子进程既有行为零漂移）。
+    // tmpfs /tmp 前置为第一条挂载（刀四 CI 首跑红根因④：后置会遮蔽 /tmp 子路径
+    // 根的 bind——顺序回归锁见下一条）
     const args = bwrapArgs({ mode: 'read-only', workspaceRoot: '/ws' });
     expect(args).toEqual([
+      '--tmpfs',
+      '/tmp',
       '--ro-bind',
       '/',
       '/',
@@ -358,9 +362,26 @@ describe('bwrap 后端（纯函数参数生成）', () => {
       '/proc',
       '--unshare-pid',
       '--die-with-parent',
-      '--tmpfs',
-      '/tmp',
     ]);
+  });
+
+  it('/tmp 子路径根：tmpfs /tmp 恒先于任何 bind（顺序回归锁——刀四 CI 红根因④）', () => {
+    // 修复前形态：roots 的 --bind 在前、--tmpfs /tmp 追加在后——bwrap 按参数序
+    // 建挂载，后置 tmpfs 整树遮蔽先前的 /tmp 子路径 bind（实测 bwrap 0.8：
+    // Linux CI 上 e2e server 脚本 /tmp/mcp-e2e-*/echo-server.mjs 不可见，
+    // spawn 即死）。锁法：workspaceRoot 取 /tmp 子路径，断言 tmpfs /tmp 的
+    // 参数位先于任何 bind 的参数位——顺序再被调换即红。
+    const args = bwrapArgs({ mode: 'workspace-write', workspaceRoot: '/tmp/proj-x' });
+    const tmpfsAt = args.indexOf('--tmpfs');
+    const bindAt = args.indexOf('--bind');
+    expect(tmpfsAt).toBeGreaterThanOrEqual(0);
+    expect(bindAt).toBeGreaterThan(tmpfsAt);
+    // 该 /tmp 子路径根在 tmpfs 之上 bind 露出（宿主可写映射）。只锁「在场」
+    // 不锁根集合精确值：deriveWritableRoots 的档位推导多根（macOS 还会把
+    // 存在的 /tmp 归一为 /private/tmp 追加）——集合是推导实现细节，顺序
+    // 才是本回归锁的猎物。
+    const bindTargets = args.filter((_, i) => args[i - 1] === '--bind');
+    expect(bindTargets).toContain('/tmp/proj-x');
   });
 
   it('read-only + 显式根（e1 宿主形态）：刚需根真实 bind（字段覆盖契约恢复生效）', () => {

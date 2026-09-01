@@ -1,9 +1,9 @@
 /**
  * bridge — 宿主半端到端测试（契约篇 §1.7，第二十七批刀二 K3-b2）。
  *
- * 真 worker_threads 子进程（execArgv [--import=tsx] 直跑 TS 源——dev
- * 形态同构；等号单元素形态与两段参数语义等价，且避开拓扑门禁的裸导入
- * 词法扫描误触发）+ 真宿主作用域 + 真 loadApps 管线：不 mock bridge 任何内部。
+ * 真 worker_threads 子进程（TS 源形态经纯 JS 引导器 carrier-launch.mjs
+ * 直载——刀四载体去 tsx 化后 spawn 零注入即对；dev 形态同构）+ 真宿主
+ * 作用域 + 真 loadApps 管线：不 mock bridge 任何内部。
  * 工具服务用最小记录桩（WorkerDomainOptions.tools 的结构面——桥接语义真跑，
  * 注册表本体非被测件）；模型面无涉（零 mock 原则的天然满足）。
  *
@@ -155,7 +155,6 @@ beforeAll(async () => {
     tools: tools as unknown as ToolsService,
     workerUrl: WORKER_URL,
     workerId: 'e2e-worker',
-    execArgv: ['--import=tsx'],
     // 共享域意外死亡观测面（正常用例流不该有意外死亡——it5 terminate 是主动收尾）
     onExit: (info) => unexpectedExits.push(info),
   });
@@ -279,7 +278,6 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
       tools: tools as unknown as ToolsService,
       workerUrl: WORKER_URL,
       workerId: 'e2e-worker-2',
-      execArgv: ['--import=tsx'],
       onExit: (info) => exits.push(info),
     });
     await until(

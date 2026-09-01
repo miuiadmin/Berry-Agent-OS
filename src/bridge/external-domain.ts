@@ -60,9 +60,11 @@ export interface ExternalDomainOptions {
   /** 域标识（诊断归因/错误信封 origin；缺省自动生成——舰队装配传 `e:<行id>`） */
   readonly workerId?: string;
   /**
-   * 子进程 Node 旗（PM 旗 + 预算旗由装配层推导传入）。TS 源形态且无 tsx
-   * 预载时自补 `--import=tsx`（与 spawnWorkerDomain 同款自适应：Node
-   * type-stripping 不重写 .js→.ts 指示符，直跑 TS 源须预载链）。
+   * 子进程 Node 旗（PM 旗 + 预算旗由装配层推导传入）。只作额外旗透传——
+   * TS 源形态的加载链由内部引导器路由（carrier-launch.mjs 直载入口，
+   * spawnExternalDomain 内 argv 组装；旧「TS 形态自补 --import=tsx」已随
+   * 刀四载体去 tsx 化退役——tsx 的 module.register 钩子在 node 22 worker
+   * 线程不生效 + esbuild 子进程被 PM 旗拒杀，双缺陷）。
    */
   readonly execArgv?: readonly string[];
   /**
@@ -140,13 +142,21 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
   const workerId = opts.workerId ?? `e-${randomUUID().slice(0, 8)}`;
   const entryUrl = opts.externalUrl ?? externalEntryUrl(import.meta.url);
   const isTs = entryUrl.pathname.endsWith('.ts');
-  // execArgv：显式注入优先；TS 形态且无 tsx 预载时自补（spawnWorkerDomain 同款）
-  const explicitArgv = opts.execArgv ?? [];
-  const execArgv =
-    isTs && !explicitArgv.some((a) => a.includes('tsx')) ? [...explicitArgv, '--import=tsx'] : [...explicitArgv];
+  // execArgv：显式注入透传（PM 旗/预算旗等——只作额外旗，不再承担加载链：
+  // 刀四载体去 tsx 化，旧「TS 形态自补 --import=tsx」退役——tsx 变换走
+  // esbuild 子进程，被 PM 旗 --permission 拒杀即 CI 首跑红根因②）
+  const execArgv = [...(opts.execArgv ?? [])];
 
-  // 完整 argv：node + 旗 + 入口 + 域id（argv[2] 协议位——见 external-entry.ts）
-  const rawArgv = [process.execPath, ...execArgv, fileURLToPath(entryUrl), workerId];
+  // 完整 argv：node + 旗 + 入口 + 域id。TS 源形态入口改指纯 JS 引导器
+  // carrier-launch.mjs（node ≥22.19 原生 type-strip 直载 + 兜底 resolve
+  // 钩子），argv 形状 = [node, ...旗, carrier-launch.mjs, 域id, 入口路径]——
+  // process.argv[2] 恒为域 id（external-entry.ts 的协议位，引导器透明不改
+  // 域代码）；argv[3] 是入口路径（引导器读它动态 import）。
+  // 编译产物形态 argv 与旧形全同：[node, ...旗, 入口, 域id]。
+  const entry = isTs
+    ? [fileURLToPath(new URL('./carrier-launch.mjs', import.meta.url)), workerId, fileURLToPath(entryUrl)]
+    : [fileURLToPath(entryUrl), workerId];
+  const rawArgv = [process.execPath, ...execArgv, ...entry];
   // OS 层包裹（seatbelt/bwrap confine——runner 前缀 argv；缺省直跑 = PM-only 逃生门）
   const argv = opts.argvWrapper !== undefined ? opts.argvWrapper(rawArgv) : rawArgv;
 

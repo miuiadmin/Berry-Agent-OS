@@ -97,12 +97,14 @@ export class BridgeEndpoint {
   /** dispose 后为 true：出站调用即刻拒绝，入站消息走丢弃观测 */
   private disposed = false;
   private readonly options: BridgeEndpointOptions;
+  /** 载体端口（生命周期归调用方——本端点不 close 端口，只清自己的簿记）。
+   *  显式字段声明 + 构造器赋值（非形参数属性）：载体值图须全可 type-strip——
+   *  构造器形参数属性是 strip-only 模式不支持的语法（刀四载体去 tsx 化，
+   *  node 原生直载 .ts 的唯一障碍点） */
+  private readonly port: BridgePort;
 
-  constructor(
-    /** 载体端口（生命周期归调用方——本端点不 close 端口，只清自己的簿记） */
-    private readonly port: BridgePort,
-    options: BridgeEndpointOptions = {},
-  ) {
+  constructor(port: BridgePort, options: BridgeEndpointOptions = {}) {
+    this.port = port;
     this.options = options;
     this.origin = options.origin;
     // 载体唯一接线点：一切入站消息从这里进分派器

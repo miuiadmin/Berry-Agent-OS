@@ -19,8 +19,9 @@
  * 读面裁定 = `--allow-fs-read=*`（全域可读）：PM 中层定位 = 防写 + 防
  * addon（`--allow-addons` 刻意不开——拒载即拒装，PoC ⑦ 实证）+ 防 child
  * （`--allow-child-process` 刻意不开——域内 spawn 强制经 ctx.exec，增补
- * 2c）。全域读在 PM 层放行不是漏：tsx 预载链要读全 node_modules 树（逐根
- * 枚举读面是维护陷阱）。
+ * 2c）。全域读在 PM 层放行不是漏：域代码按需 import 全 node_modules 树
+ * （逐根枚举读面是维护陷阱；旧「tsx 预载链」措辞已随刀四载体去 tsx 化
+ * 退役——理由不随载体加载链变）。
  *
  * **OS 层读/网面诚实边界（R1 P0-6 勘正，契约篇 §1.7 增补 10 R1 注记
  * 2026-08-29）**：现行两后端 profile 对 external 域的实际覆盖 = **防写不防
@@ -43,12 +44,16 @@ import { mkdirSync, realpathSync } from 'node:fs';
  *
  * @param writeRoots 写白名单根（宿主推导基线 ∩ 应用声明交集的产物——
  *   调用方已完成闩二校验；本函数信任输入只管翻译）
- * @param opts.tsTransform 域入口是 TS 源形态（dev 直跑）时为 true——tsx 预载
- *   链的 esbuild 转译走 worker 线程服务，PM 缺省拒 Worker 构造，须补
- *   `--allow-worker`（E6 实测两坑：另需 env TSX_DISABLE_CACHE=1 关 tsx 磁盘
- *   缓存的 mkdir）。编译产物形态不补——PM 保持最紧。官方对 --allow-worker
- *   有 SecurityWarning（worker 可弱化 PM）——dev 形态的已知放行：进程墙 +
- *   OS 层仍在（PM 是中层非墙），入册见契约篇 §1.7 external carrier 落码批注记。
+ * @param opts.tsTransform 域入口是 TS 源形态（dev 直跑）时为 true——载体
+ *   引导器（carrier-launch.mjs）经 module.register 挂 `.js→.ts` 兜底
+ *   resolve 钩子，node 的 loader 钩子跑在 AsyncLoaderHookWorker 专用线程，
+ *   PM 缺省拒 Worker 构造，须补 `--allow-worker`（ERR_ACCESS_DENIED:
+ *   WorkerThreads——刀四载体去 tsx 化实测勘正：旧理由「tsx→esbuild 转译
+ *   线程」已随 tsx 退役，新理由 = node 自家 loader 线程，放行面同宽）。
+ *   官方 SecurityWarning（worker 可弱化 PM）——dev 形态已知放行：进程墙 +
+ *   OS 层仍在（PM 是中层非墙）。旧伴随参数 TSX_DISABLE_CACHE 已退役
+ *   （载体零 tsx 无磁盘缓存面）。编译产物形态不补——PM 保持最紧（dist
+ *   直载不经引导器，零钩子零线程）。
  * @returns execArgv 旗数组（`--permission` 领衔 + 全域读一旗 + 每写根一旗）
  */
 export function derivePmFlags(writeRoots: readonly string[], opts?: { tsTransform?: boolean }): string[] {
@@ -60,7 +65,7 @@ export function derivePmFlags(writeRoots: readonly string[], opts?: { tsTransfor
     '--allow-fs-read=*',
     // 写面：坑三预建（幂等）+ 坑一归一 + 坑二每根一旗
     ...writeRoots.map((root) => `--allow-fs-write=${prepareRoot(root)}`),
-    // TS 源形态（dev）：tsx→esbuild 转译需 worker 线程服务（编译产物形态不开）
+    // TS 源形态（dev）：载体引导器的 loader 钩子线程（编译产物形态不开）
     ...(opts?.tsTransform === true ? ['--allow-worker'] : []),
   ];
 }

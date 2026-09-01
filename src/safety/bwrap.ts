@@ -9,34 +9,41 @@ import { spawnSync } from 'node:child_process';
 import type { SandboxBackend } from './types.js';
 import { resolvePolicyRoots, type SandboxPolicy } from './sandbox.js';
 
-/** bwrap argv 前缀（不含策略差异）：全系统只读 + 虚拟 /dev /proc + 隔离 PID 命名空间 */
+/** bwrap argv 前缀（不含策略差异）：全系统只读 + 虚拟 /dev /proc + 隔离 PID 命名空间。
+ *  /tmp tmpfs 恒前置为第一条挂载：bwrap 按参数序建挂载，若 tmpfs /tmp 出现在
+ *  某 /tmp 子路径根的 bind 之后，会整树遮蔽该 bind（实测 bwrap 0.8：bind 先、
+ *  tmpfs 后 → 挂载点不可见；tmpfs 先、bind 后 → bwrap 在 tmpfs 上自动造出
+ *  dest 挂载点，根正确露出——刀四 CI 首跑红根因④，e2e server 脚本在
+ *  /tmp/mcp-e2e-* 下被空 tmpfs 吞即此形）。 */
 function bwrapBaseArgs(): string[] {
-  return ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--unshare-pid', '--die-with-parent'];
+  return [
+    '--tmpfs',
+    '/tmp',
+    '--ro-bind',
+    '/',
+    '/',
+    '--dev',
+    '/dev',
+    '--proc',
+    '/proc',
+    '--unshare-pid',
+    '--die-with-parent',
+  ];
 }
 
 /**
  * 按策略生成 bwrap 参数前缀（纯函数）。两档统一消费 resolvePolicyRoots——
  * 缺省按档位推导（read-only 空根、workspace-write 工作区根族），**writableRoots
  * 显式覆盖在两档同等生效**（字段契约本义；e1 宿主 read-only 档携数据目录刚需根
- * 即走此路——与 seatbelt profile 同日统一）。不变式：/tmp 恒给 tmpfs（临时面
- * 「能用不留痕」——无 /tmp 根时补挂，有则根映射本就 tmpfs）。
+ * 即走此路——与 seatbelt profile 同日统一）。不变式：/tmp 恒 tmpfs（临时面
+ * 「能用不留痕」）由 base 前缀承接；根恰为 /tmp 时跳过重复挂载，/tmp 子路径根
+ * 在 tmpfs 之上 bind 露出（宿主可写映射，见 base 前缀注）。
  */
 export function bwrapArgs(policy: SandboxPolicy): string[] {
   const args = [...bwrapBaseArgs()];
-  let tmpCovered = false;
   for (const root of resolvePolicyRoots(policy)) {
-    // 可写根与 fs fence 同源；/tmp 保持 tmpfs（临时面），其余根真实 bind
-    if (root === '/tmp') {
-      args.push('--tmpfs', '/tmp');
-      tmpCovered = true;
-    } else {
-      args.push('--bind', root, root);
-    }
-  }
-  if (!tmpCovered) {
-    // 大量 CLI 需要可写 /tmp——tmpfs 给「能用但不留痕」的最小面（旧 read-only
-    // 档形态的既有承诺，统一后由不变式承接）
-    args.push('--tmpfs', '/tmp');
+    // 可写根与 fs fence 同源；/tmp 已由 base tmpfs 覆盖，其余根真实 bind
+    if (root !== '/tmp') args.push('--bind', root, root);
   }
   return args;
 }

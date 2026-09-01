@@ -325,9 +325,9 @@ export interface WorkerDomain {
 
 /**
  * 宿主半入口的 worker 同伴 URL：按宿主半自身形态判别——TS 源形态（dev/测试）
- * → 同目录 worker.ts，编译产物形态 → worker.js。TS 形态下 worker 预载参数见
- * spawnWorkerDomain 的 execArgv 自适应（tsx 补载）；编译产物形态零参数即对
- * ——两种形态零配置自适应。
+ * → 同目录 worker.ts，编译产物形态 → worker.js。TS 形态下 worker 经引导器
+ * carrier-launch.mjs 直载（spawnWorkerDomain 的入口路由）；编译产物形态零
+ * 参数即对——两种形态零配置自适应。
  */
 export function workerEntryUrl(selfUrl: string): URL {
   return new URL(selfUrl.endsWith('.ts') ? './worker.ts' : './worker.js', selfUrl);
@@ -350,18 +350,18 @@ export function bridgeWorkerUrl(): URL {
 export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   const workerId = opts.workerId ?? `worker-${randomUUID().slice(0, 8)}`;
   const workerUrl = opts.workerUrl ?? workerEntryUrl(import.meta.url);
-  const worker = new Worker(workerUrl, {
-    workerData: { workerId },
-    // TS 源形态零配置自适应：Node type-stripping 不重写 .js→.ts 指示符，
-    // 直跑 TS 源必 MODULE_NOT_FOUND——须有 tsx 预载链。dev（tsx 直跑）经
-    // execArgv 继承自然延续；vitest 变换进程 execArgv 无 tsx，故 TS 形态且
-    // 调用方未显式传参时自补 --import=tsx（TS 形态只在 dev/test 出现、tsx
-    // 恒为在场 devDep；编译产物形态不进此分支零参数；显式注入面优先不受影响）
-    ...(opts.execArgv !== undefined
-      ? { execArgv: [...opts.execArgv] }
-      : workerUrl.pathname.endsWith('.ts')
-        ? { execArgv: ['--import=tsx'] }
-        : {}),
+  // TS 源形态零配置自适应（刀四载体去 tsx 化）：入口改指纯 JS 引导器
+  // carrier-launch.mjs（注册 .js→.ts 兜底 resolve 钩子后动态 import 域入口
+  // ——realmEntry 经 workerData 携带；node ≥22.19 原生 type-strip 直载）。
+  // 旧「自补 --import=tsx」形态已退役：tsx 的 module.register 钩子在 node 22
+  // worker 线程不生效（spawn 即 MODULE_NOT_FOUND——CI 首跑红根因①）。
+  // 编译产物形态直载 worker.js 零参数（两形态行为均与旧形对齐）；显式
+  // execArgv 只作额外旗（预算等）透传，不再承担加载链。
+  const isTs = workerUrl.pathname.endsWith('.ts');
+  const launchUrl = new URL('./carrier-launch.mjs', import.meta.url);
+  const worker = new Worker(isTs ? launchUrl : workerUrl, {
+    ...(isTs ? { workerData: { workerId, realmEntry: workerUrl.href } } : { workerData: { workerId } }),
+    ...(opts.execArgv !== undefined ? { execArgv: [...opts.execArgv] } : {}),
     ...(opts.resourceLimits !== undefined ? { resourceLimits: { ...opts.resourceLimits } } : {}),
     ...(opts.env !== undefined ? { env: { ...opts.env } } : {}),
   });

@@ -1,8 +1,9 @@
 /**
  * app — worker 域舰队端到端测试（契约篇 §1.7 K3-c，第二十七批刀二）。
  *
- * 真 worker_threads 子进程（同 bootstrap.test.ts 模式：execArgv [--import=tsx]
- * 直跑 TS 源）+ 真 ctx 作用域——不 mock bridge/fleet 任何内部，只对 fleet 消费
+ * 真 worker_threads 子进程（同 bootstrap.test.ts 模式：TS 源形态经引导器
+ * carrier-launch.mjs 直载——刀四载体去 tsx 化后 spawn 零注入即对）+ 真 ctx
+ * 作用域——不 mock bridge/fleet 任何内部，只对 fleet 消费
  * 的 markFailed 注入物用记录桩（AppsService 的结构面）。bootstrap.test.ts
  * 已覆盖机制面（桥协议/域死回卷/工具桥接）；本文件聚焦**装配编舞语义**：
  * 每行一域路由 / 装机计数 / reapUnapplied 防漏 / terminateAll 收编 /
@@ -149,7 +150,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
     });
     // 三行三态：独占（apps:[a]）/ 跨区（apps:[a,b]——共享件）/ 系统相位（无 apps）
     const rows: AppPlanRow[] = [
@@ -203,7 +203,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
     });
     try {
       const row: AppPlanRow = { id: 'r-d1', entry: fxToolEntry, apps: ['a'], sandbox: { carrier: 'worker' } };
@@ -230,7 +229,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
     });
     // 行 r1：完整 load+apply（宿主物化 provide 服务）
     await fleet.loader.load({ id: 'r1', entry: fxEntry, sandbox: { carrier: 'worker' } });
@@ -272,7 +270,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
       markFailed: (id, code, message) => marked.push({ id, code, message }),
     });
     // 行 w1 装载自崩应用（apply 返还后 uncaught 异步异常 → worker 线程自崩溃）
@@ -313,7 +310,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
     });
     await fleet.loader.load({ id: 'b1', entry: throwEntry, sandbox: { carrier: 'worker' } });
     const scope = anchor.fork({ name: 'b1', rowId: 'b1', builtinRow: false });
@@ -337,7 +333,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
       heartbeatMs: 50,
       heartbeatMissLimit: 2,
       markFailed: (id, code, message) => marked.push({ id, code, message }),
@@ -379,7 +374,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
       heartbeatMs: 50,
       heartbeatMissLimit: 2,
       markFailed: (id, code, message) => marked.push({ id, code, message }),
@@ -414,7 +408,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
       // 48MB 堆上限（probe-oom.mjs 实证档位：增长面秒级触顶，不拖慢套件）
       resourceLimits: { maxOldGenerationSizeMb: 48 },
       markFailed: (id, code, message) => marked.push({ id, code, message }),
@@ -461,7 +454,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
       // 全局缺省刻意宽（512MB）：本用例只有行钩子命中才收紧——OOM 发生本身
       // 即证明钩子值到达 spawn（否则按全局 512MB 增长面跑不完）
       resourceLimits: { maxOldGenerationSizeMb: 512 },
@@ -492,8 +484,8 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
 
 /** external 写探测 fixture：config.inside/outside 各写一发报结果 + 回报 TMPDIR
  * （fleet 组装的 per-域 tmp 注入面——env 白名单 + TMPDIR 的行为断言源）+
- * 回报 TSX_DISABLE_CACHE（R2 测试小项③：assembleExternalSpawn 对 ts 源域的
- * 环境注入断言源——tsx 磁盘缓存在 PM 下必挂，注入缺席即环境面接线断裂） */
+ * 回报 TSX_DISABLE_CACHE（R2 测试小项③的退役钉：刀四载体去 tsx 化后
+ * assembleExternalSpawn 不再注入——断言恒 undefined，防 tsx 面静默回流） */
 const FX_EXT_PROBE = `
 import { writeFileSync } from 'node:fs';
 export const name = 'fleet-ext-probe';
@@ -586,7 +578,6 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
       root,
       anchor: () => anchor,
       workerUrl: WORKER_URL,
-      execArgv: ['--import=tsx'],
     });
     const row: AppPlanRow = {
       id: 'ext-nocap',
@@ -761,10 +752,9 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
       expect(report.outside).toEqual({ pass: false, code: 'ERR_ACCESS_DENIED' });
       // per-域 TMPDIR 注入面：件数据根内 tmp/（契约篇 §1.5 钉位——痕迹随行清算）
       expect(report.tmpdir).toBe(join(appDataDirOf(dataDir, 'nx'), 'tmp'));
-      // tsx 环境注入面（R2 测试小项③）：.ts 源域必带 TSX_DISABLE_CACHE='1'——
-      // tsx 磁盘缓存的 mkdir 在 PM 下必挂，注入缺席 = assembleExternalSpawn 的
-      // isTs 分支接线断裂（假绿形态：域可起但首写必炸，且时点在装载远端）
-      expect(report.tsxCache).toBe('1');
+      // tsx 环境面退役钉（刀四载体去 tsx 化）：TSX_DISABLE_CACHE 不再注入——
+      // 载体域零 tsx 无磁盘缓存面；若此处回 '1' 说明 tsx 面静默回流
+      expect(report.tsxCache).toBeUndefined();
       await fleet.terminateAll('用例收尾');
       await root.dispose().catch(() => undefined);
       rmSync(dir, { recursive: true, force: true });

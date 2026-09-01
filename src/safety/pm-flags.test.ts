@@ -55,7 +55,10 @@ describe('derivePmFlags — 旗形三坑回归锁（纯逻辑）', () => {
     rmSync(stage, { recursive: true, force: true });
   });
 
-  it('TS 源形态：补 --allow-worker（tsx→esbuild 转译走 worker 线程服务）；编译产物形态不补', () => {
+  it('TS 源形态：补 --allow-worker（载体引导器 loader 钩子线程）；编译产物形态不补', () => {
+    // 刀四载体去 tsx 化勘正：理由从「tsx→esbuild 转译线程」换为「引导器
+    // module.register 的 AsyncLoaderHookWorker 线程」（PM 拒 Worker 构造即挂，
+    // 实测 ERR_ACCESS_DENIED: WorkerThreads）
     expect(derivePmFlags(['/a'], { tsTransform: true })).toContain('--allow-worker');
     expect(derivePmFlags(['/a'])).not.toContain('--allow-worker');
     expect(derivePmFlags(['/a'], { tsTransform: false })).not.toContain('--allow-worker');
