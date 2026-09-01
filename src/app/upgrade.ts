@@ -150,8 +150,14 @@ export function distTagsUrlFor(registryBase: string): string {
   return `${base.replace(/\/+$/, '')}/-/package/berryagent/dist-tags`;
 }
 
-/** npm 进程执行面（resolveRegistryBase 的注入位——测试假面换跑，真面 spawn） */
+/** npm 进程执行面（resolveRegistry 的注入位——测试假面换跑，真面 spawn） */
 export type NpmRunner = (args: readonly string[]) => Promise<{ code: number; stdout: string }>;
+
+/** registry 解析结果：base = 拼端点用的根；fallback = 是否走了官方源回退（注记位） */
+export interface RegistryResolution {
+  readonly base: string;
+  readonly fallback: boolean;
+}
 
 /** 真面：spawn npm（win32 走 npm.cmd + shell——与安装腿同款形态；10s 超时） */
 const realNpmRunner: NpmRunner = (args) =>
@@ -173,18 +179,23 @@ const realNpmRunner: NpmRunner = (args) =>
  * 解析用户 npm 配置源（#16：判定腿与安装腿同源——spawn npm i -g 走用户 .npmrc，
  * 版本检查原硬编码官方源即两腿分叉：镜像滞后窗口「可升级」结论失真 + 重试恒败）。
  * 不自研 .npmrc 解析层（global/user/project 三层与 scoped registry 属 npm 自家
- * 配置_resolution），`npm config get registry` 是唯一诚实单源；失败回退官方源。
+ * 配置_resolution），`npm config get registry` 是唯一诚实单源；失败/空输出回退
+ * 官方源并立 fallback 旗标——编排器据此输出注记（技术栈篇 §8.5 条 1）。
  */
-export async function resolveRegistryBase(run: NpmRunner = realNpmRunner): Promise<string> {
+export async function resolveRegistry(run: NpmRunner = realNpmRunner): Promise<RegistryResolution> {
   const { code, stdout } = await run(['config', 'get', 'registry']);
-  if (code !== 0) return OFFICIAL_REGISTRY;
-  const base = stdout.trim();
-  return base === '' ? OFFICIAL_REGISTRY : base;
+  // code≠0 但 stdout 可能非空（npm 报错时吐过的残值）——失败态不以输出为准
+  const raw = code === 0 ? stdout.trim() : '';
+  return raw === '' ? { base: OFFICIAL_REGISTRY, fallback: true } : { base: raw, fallback: false };
 }
 
-/** 查询 registry dist-tags（node:fetch + 超时；404 = 未发布，与网络错分立） */
-export async function fetchDistTags(): Promise<DistTagsResult> {
-  const url = distTagsUrlFor(await resolveRegistryBase());
+/**
+ * 查询 registry dist-tags（node:fetch + 超时；404 = 未发布，与网络错分立）。
+ * @param resolved registry 解析结果（缺省现场解析一次——编排器已解析时传入复用，
+ *                 避免判定腿双 spawn）
+ */
+export async function fetchDistTags(resolved?: RegistryResolution): Promise<DistTagsResult> {
+  const url = distTagsUrlFor((resolved ?? (await resolveRegistry())).base);
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (res.status === 404) return { status: 'unpublished' };
@@ -244,6 +255,8 @@ const red = (s: string): string => `\x1b[31m${s}\x1b[0m`;
  * `berry upgrade` 手验——两层互补不互代。
  */
 export interface UpgradeMainIo {
+  /** registry 解析（缺省真面 spawn `npm config get registry`——#16 判定腿） */
+  readonly registryBase?: () => Promise<RegistryResolution>;
   /** dist-tags 查询（缺省真网络面） */
   readonly fetchDistTags?: () => Promise<DistTagsResult>;
   /** npm 安装腿（缺省真 spawn npm i -g；resolve = 退出码） */
@@ -279,7 +292,10 @@ const realSpawnNpm = (target: string): Promise<number> =>
 export async function upgradeMain(io: UpgradeMainIo = {}): Promise<number> {
   const out = io.out ?? ((s: string) => void process.stdout.write(s));
   const err = io.err ?? ((s: string) => void process.stderr.write(s));
-  const fetcher = io.fetchDistTags ?? fetchDistTags;
+  // registry 解析一次过（#16 判定腿与安装腿同源）：缺省注入面接管；真面解析结果
+  // 传入 fetchDistTags 复用（判定腿单次 spawn）。
+  const resolvedRegistry = await (io.registryBase ?? resolveRegistry)();
+  const fetcher = io.fetchDistTags ?? ((): Promise<DistTagsResult> => fetchDistTags(resolvedRegistry));
   const spawnNpm = io.spawnNpm ?? realSpawnNpm;
   const realPath = io.entryRealPath ?? entryRealPath;
 
@@ -290,6 +306,10 @@ export async function upgradeMain(io: UpgradeMainIo = {}): Promise<number> {
   out(`${dim('· 装机形态：')}${form === 'npm' ? 'npm 全局' : '源码'}\n`);
 
   out(`${dim('· 检查更新（registry dist-tags）…')}\n`);
+  if (resolvedRegistry.fallback) {
+    // 解析失败回退官方源的注记（技术栈篇 §8.5 条 1）——镜像用户知道为何查了 npmjs.org
+    out(dim('· （npm registry 配置未解析成功——检查更新回退官方源 registry.npmjs.org）\n'));
+  }
   const check = await runUpgradeCheck(localVersion, realPath(), { fetchDistTags: fetcher });
 
   if (check.verdict.kind === 'unpublished') {

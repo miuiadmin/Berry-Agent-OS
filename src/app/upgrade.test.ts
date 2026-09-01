@@ -14,13 +14,13 @@ import {
   distTagsUrlFor,
   foreignManagerGuidance,
   pickTargetVersion,
-  resolveRegistryBase,
+  resolveRegistry,
   runUpgradeCheck,
   sourceUpgradeGuidance,
   unpublishedGuidance,
   upgradeMain,
 } from './upgrade.js';
-import type { DistTagsResult } from './upgrade.js';
+import type { DistTagsResult, RegistryResolution } from './upgrade.js';
 import { VERSION } from './version.js';
 
 describe('compareSemver（semver 简化比对）', () => {
@@ -128,14 +128,25 @@ describe('distTagsUrlFor（#16 判定腿端点拼接与回退）', () => {
   });
 });
 
-describe('resolveRegistryBase（#16 用户 npm 配置源解析）', () => {
-  it('npm config 正常输出 → 用户源原样（含换行由调用方 trim 已吃）', async () => {
-    const base = await resolveRegistryBase(async () => ({ code: 0, stdout: 'https://registry.npmmirror.com/\n' }));
-    expect(base).toBe('https://registry.npmmirror.com/');
+describe('resolveRegistry（#16 用户 npm 配置源解析——对象形 + fallback 旗标）', () => {
+  it('npm config 正常输出 → 用户源原样 + 不回退', async () => {
+    const r = await resolveRegistry(async () => ({ code: 0, stdout: 'https://registry.npmmirror.com/\n' }));
+    expect(r).toEqual({ base: 'https://registry.npmmirror.com/', fallback: false });
   });
-  it('退出码非 0 / 空输出 → 官方源回退（解析是尽力而为不是硬前置）', async () => {
-    expect(await resolveRegistryBase(async () => ({ code: 1, stdout: '' }))).toBe('https://registry.npmjs.org');
-    expect(await resolveRegistryBase(async () => ({ code: 0, stdout: '\n' }))).toBe('https://registry.npmjs.org');
+  it('退出码非 0 / 空输出 → 官方源回退 + fallback 旗标立（注记位）', async () => {
+    expect(await resolveRegistry(async () => ({ code: 1, stdout: '' }))).toEqual({
+      base: 'https://registry.npmjs.org',
+      fallback: true,
+    });
+    // code≠0 但 stdout 非空（npm 报错时吐过的残值）——失败态不以输出为准
+    expect(await resolveRegistry(async () => ({ code: 1, stdout: 'https://registry.example.com/\n' }))).toEqual({
+      base: 'https://registry.npmjs.org',
+      fallback: true,
+    });
+    expect(await resolveRegistry(async () => ({ code: 0, stdout: '\n' }))).toEqual({
+      base: 'https://registry.npmjs.org',
+      fallback: true,
+    });
   });
 });
 
@@ -178,6 +189,13 @@ describe('runUpgradeCheck（#8 verdict 五态分派——注入面直锁检查�
 describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/五态/退出码/npm 半态）', () => {
   /** npm 全局装路径假面（含 node_modules 段 → npm 形态 + npm 管理器） */
   const NPM_PATH = '/usr/local/lib/node_modules/berryagent/dist/app/main.js';
+  /** io 底座：registry 解析恒成功（官方源、不回退）——各测试只覆写关心的键 */
+  const ioBase = {
+    registryBase: async (): Promise<RegistryResolution> => ({
+      base: 'https://registry.npmjs.org',
+      fallback: false,
+    }),
+  };
   /** 输出记录假面工厂（out/errs 数组 + 直写闭包） */
   const recordOutput = (): {
     out: string[];
@@ -199,6 +217,7 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
     let spawned = 0;
     const { errs, writeOut, writeErr } = recordOutput();
     const code = await upgradeMain({
+      ...ioBase,
       entryRealPath: () => NPM_PATH,
       ...okTags('9.9.9+evil'),
       spawnNpm: async () => {
@@ -221,6 +240,7 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
     let spawned = 0;
     const { out, writeOut, writeErr } = recordOutput();
     const code = await upgradeMain({
+      ...ioBase,
       entryRealPath: () => NPM_PATH,
       ...okTags('1.0.0; rm -rf /tmp'),
       spawnNpm: async () => {
@@ -238,6 +258,7 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
   it('未发布态：退 0 + 诚实告知', async () => {
     const { out, writeOut, writeErr } = recordOutput();
     const code = await upgradeMain({
+      ...ioBase,
       entryRealPath: () => NPM_PATH,
       fetchDistTags: async () => ({ status: 'unpublished' }),
       out: writeOut,
@@ -250,6 +271,7 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
   it('网络失败：退 1（唯一非 0 的检查类态）+ 不影响使用注记', async () => {
     const { out, writeOut, writeErr } = recordOutput();
     const code = await upgradeMain({
+      ...ioBase,
       entryRealPath: () => NPM_PATH,
       fetchDistTags: async () => ({ status: 'network', message: 'boom' }),
       out: writeOut,
@@ -263,6 +285,7 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
   it('源码形态：退 0 + 四步指引 + 不自动执行', async () => {
     const { out, writeOut, writeErr } = recordOutput();
     const code = await upgradeMain({
+      ...ioBase,
       entryRealPath: () => '/repo/berry/dist/app/main.js',
       ...okTags('9.9.9'),
       out: writeOut,
@@ -277,6 +300,7 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
     let spawned = 0;
     const { out, writeOut, writeErr } = recordOutput();
     const code = await upgradeMain({
+      ...ioBase,
       entryRealPath: () => NPM_PATH,
       ...okTags(VERSION),
       spawnNpm: async () => {
@@ -295,6 +319,7 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
     const targets: string[] = [];
     const { out, writeOut, writeErr } = recordOutput();
     const code = await upgradeMain({
+      ...ioBase,
       entryRealPath: () => NPM_PATH,
       ...okTags('9.9.9'),
       spawnNpm: async (target) => {
@@ -313,6 +338,7 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
   it('npm 半态：退出码非 0 → 退 1 + 「包未变动，可重试」', async () => {
     const { errs, writeOut, writeErr } = recordOutput();
     const code = await upgradeMain({
+      ...ioBase,
       entryRealPath: () => NPM_PATH,
       ...okTags('9.9.9'),
       spawnNpm: async () => 1,
@@ -322,5 +348,19 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
     expect(code).toBe(1);
     expect(errs.join('')).toContain('包未变动');
     expect(errs.join('')).toContain('可重试');
+  });
+
+  it('#16 注记腿：registry 解析失败回退官方源——输出回退注记（镜像用户可辨因）', async () => {
+    const { out, writeOut, writeErr } = recordOutput();
+    const code = await upgradeMain({
+      ...ioBase,
+      registryBase: async () => ({ base: 'https://registry.npmjs.org', fallback: true }),
+      entryRealPath: () => NPM_PATH,
+      fetchDistTags: async () => ({ status: 'unpublished' }),
+      out: writeOut,
+      err: writeErr,
+    });
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('回退官方源'); // 注记在场（解析失败不静默换源）
   });
 });
