@@ -352,7 +352,15 @@ function main(argv: string[]): number {
           process.stderr.write('用法：berry daemon <start|stop|status|doctor|--foreground> [--port <1-65535>]\n');
           return 2;
         }
-        if (readOnly || background || tick !== undefined || app !== undefined || sandboxHost || noApps || appFile !== undefined) {
+        if (
+          readOnly ||
+          background ||
+          tick !== undefined ||
+          app !== undefined ||
+          sandboxHost ||
+          noApps ||
+          appFile !== undefined
+        ) {
           process.stderr.write(
             '用法：berry daemon <start|stop|status|doctor|--foreground> [--port <n>]（run 族旗标不适用）\n',
           );
