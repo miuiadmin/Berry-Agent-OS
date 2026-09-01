@@ -112,6 +112,36 @@ describe('detectPackageManager（npm 形态的包管理器甄别——冷读 m1 
     // 裸 `bun` 目录名（无三段序）= 普通 npm 路径，不构成 bun 判据
     expect(detectPackageManager('/home/x/projects/bun/node_modules/berryagent/dist/app/main.js')).toBe('npm');
   });
+  it('yarn classic win32 全局（Yarn 大写段）→ yarn（遗漏大扫 20260901-c #10）', () => {
+    // yarn classic (v1) Windows 全局装目录默认 %LOCALAPPDATA%\Yarn\config\global
+    // ——段名首字母大写，小写判据漏检即误判 npm 装出第二份
+    expect(
+      detectPackageManager(
+        'C:\\Users\\x\\AppData\\Local\\Yarn\\config\\global\\node_modules\\berryagent\\dist\\app\\main.js',
+      ),
+    ).toBe('yarn');
+  });
+  it('bun 自定义根（BUN_INSTALL / BUN_INSTALL_GLOBAL_DIR 前缀）→ bun；相似兄弟目录不误伤（遗漏大扫 20260901-c #18）', () => {
+    const prevInstall = process.env.BUN_INSTALL;
+    const prevGlobalDir = process.env.BUN_INSTALL_GLOBAL_DIR;
+    try {
+      // BUN_INSTALL 换根形态：根下 install/global 段序，.bun 字面段缺席
+      process.env.BUN_INSTALL = '/opt/bun';
+      expect(detectPackageManager('/opt/bun/install/global/node_modules/berryagent/dist/app/main.js')).toBe('bun');
+      // BUN_INSTALL_GLOBAL_DIR 直改全局目录本体形态
+      delete process.env.BUN_INSTALL;
+      process.env.BUN_INSTALL_GLOBAL_DIR = '/srv/bun-global';
+      expect(detectPackageManager('/srv/bun-global/node_modules/berryagent/dist/app/main.js')).toBe('bun');
+      // 相似前缀兄弟目录（/opt/bunny ≠ /opt/bun/）不误伤
+      process.env.BUN_INSTALL = '/opt/bun';
+      expect(detectPackageManager('/opt/bunny/install/global/node_modules/berryagent/dist/app/main.js')).toBe('npm');
+    } finally {
+      if (prevInstall === undefined) delete process.env.BUN_INSTALL;
+      else process.env.BUN_INSTALL = prevInstall;
+      if (prevGlobalDir === undefined) delete process.env.BUN_INSTALL_GLOBAL_DIR;
+      else process.env.BUN_INSTALL_GLOBAL_DIR = prevGlobalDir;
+    }
+  });
   it('非 npm 管理器指引：原管理器一条命令 + 不代执行声明', () => {
     expect(foreignManagerGuidance('pnpm')).toContain('pnpm add -g berryagent');
     expect(foreignManagerGuidance('yarn')).toContain('yarn global add berryagent');

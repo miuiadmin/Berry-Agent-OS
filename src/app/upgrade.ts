@@ -89,7 +89,8 @@ export function detectInstallForm(entryRealPath: string): InstallForm {
 /**
  * npm 形态的包管理器甄别（冷读 m1 余款）：pnpm/yarn/bun 全局装路径同样含
  * node_modules（会误入 npm 分支）——spawn `npm i -g` 会装出第二份、原装不
- * 升级。检出 `.pnpm` / `pnpm-global` / `yarn` / `.bun→install→global` 路径
+ * 升级。检出 `.pnpm` / `pnpm-global` / `yarn`（大小写不敏感——win32 yarn
+ * classic 大写段）/ `.bun→install→global` / BUN_INSTALL 自定义根前缀路径
  * 形时给原管理器指引。
  */
 export function detectPackageManager(entryRealPath: string): 'npm' | 'pnpm' | 'yarn' | 'bun' {
@@ -98,12 +99,25 @@ export function detectPackageManager(entryRealPath: string): 'npm' | 'pnpm' | 'y
   if (segs.some((x) => x === '.pnpm' || x.startsWith('.pnpm-') || x.startsWith('pnpm-global'))) {
     return 'pnpm';
   }
-  if (segs.includes('yarn')) return 'yarn';
+  // yarn 段大小写不敏感比对（遗漏大扫 20260901-c #10）：yarn classic (v1) 在
+  // Windows 的全局装目录是 %LOCALAPPDATA%\Yarn\config\global——段名首字母大写，
+  // 小写精确比对漏检即误判 npm 后 spawn npm i -g 装出第二份、原装不升级
+  if (segs.some((x) => x.toLowerCase() === 'yarn')) return 'yarn';
   // bun 全局装：`~/.bun/install/global/node_modules/…`——三段序判定（裸 `bun`
   // 目录名不构成判据，防普通项目目录误伤）
   const bunIdx = segs.indexOf('.bun');
   if (bunIdx >= 0 && segs[bunIdx + 1] === 'install' && segs[bunIdx + 2] === 'global') {
     return 'bun';
+  }
+  // bun 自定义安装根（遗漏大扫 20260901-c #18）：BUN_INSTALL 可整体换根
+  // （默认 ~/.bun 只是缺省值非协议不变量）——根下同样落 install/global 段序；
+  // BUN_INSTALL_GLOBAL_DIR 直改全局目录本体。两变量任一前缀命中即 bun。
+  // 比对大小写不敏感（win32 盘符/目录大小写不定形），分隔符归一正斜杠；
+  // 尾斜杠归一后带 / 前缀比对防相似名兄弟目录误伤（/opt/bunny ≠ /opt/bun）
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const entryNorm = norm(entryRealPath);
+  for (const root of [process.env.BUN_INSTALL, process.env.BUN_INSTALL_GLOBAL_DIR]) {
+    if (root && entryNorm.startsWith(`${norm(root)}/`)) return 'bun';
   }
   return 'npm';
 }
