@@ -154,6 +154,17 @@ test('package-lock 与 package.json 名字同步（成熟度扫描 20260901 P0-1
   assert.equal(lock.packages?.['']?.name, pkg.name, 'lockfile packages[""].name 与 package.json 漂移');
 });
 
+test('AGENTS.md 行数预算棘轮：≤175 行（工程纪律「并发协作与本文档治理」——先例 dsh verify-doc-budgets）', () => {
+  // 预算棘轮只减不增（基线 175，含治理节本身）；事故追加新规则须同次修订合并
+  // 或删减等量旧内容——本闸防无声超支。口径与 wc -l 一致（换行计数，尾部空行不计）。
+  const text = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
+  const lines = (text.match(/\n/g) ?? []).length;
+  assert.ok(
+    lines <= 175,
+    `AGENTS.md 行数 ${lines} 超预算基线 175——棘轮只减不增：追加规则须同次删减等量旧内容，或先修订预算拍板`,
+  );
+});
+
 test('公开仓配套面三件在场（成熟度扫描 20260901 P0-2）', () => {
   // SECURITY.md：披露唯一渠道 = GitHub private vulnerability reporting，不设公开
   // 邮箱（防捏造/失效——渠道单源 GitHub 后台功能，转公开后在后台开启）
