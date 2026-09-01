@@ -87,23 +87,35 @@ export function detectInstallForm(entryRealPath: string): InstallForm {
 }
 
 /**
- * npm 形态的包管理器甄别（冷读 m1 余款）：pnpm/yarn 全局装路径同样含
+ * npm 形态的包管理器甄别（冷读 m1 余款）：pnpm/yarn/bun 全局装路径同样含
  * node_modules（会误入 npm 分支）——spawn `npm i -g` 会装出第二份、原装不
- * 升级。检出 `.pnpm` / `pnpm-global` / `yarn` 路径段时给原管理器指引。
+ * 升级。检出 `.pnpm` / `pnpm-global` / `yarn` / `.bun→install→global` 路径
+ * 形时给原管理器指引。
  */
-export function detectPackageManager(entryRealPath: string): 'npm' | 'pnpm' | 'yarn' {
+export function detectPackageManager(entryRealPath: string): 'npm' | 'pnpm' | 'yarn' | 'bun' {
   const segs = entryRealPath.split(/[\\/]/);
   // `.pnpm`（虚拟仓）/ `.pnpm-*`（home 变体）/ `pnpm-global`（无点形）三形并收
   if (segs.some((x) => x === '.pnpm' || x.startsWith('.pnpm-') || x.startsWith('pnpm-global'))) {
     return 'pnpm';
   }
   if (segs.includes('yarn')) return 'yarn';
+  // bun 全局装：`~/.bun/install/global/node_modules/…`——三段序判定（裸 `bun`
+  // 目录名不构成判据，防普通项目目录误伤）
+  const bunIdx = segs.indexOf('.bun');
+  if (bunIdx >= 0 && segs[bunIdx + 1] === 'install' && segs[bunIdx + 2] === 'global') {
+    return 'bun';
+  }
   return 'npm';
 }
 
 /** 非 npm 包管理器的升级指引（原管理器一条命令——本命令不代执行） */
-export function foreignManagerGuidance(manager: 'pnpm' | 'yarn'): string {
-  const cmd = manager === 'pnpm' ? 'pnpm add -g berryagent' : 'yarn global add berryagent';
+export function foreignManagerGuidance(manager: 'pnpm' | 'yarn' | 'bun'): string {
+  const cmd =
+    manager === 'pnpm'
+      ? 'pnpm add -g berryagent'
+      : manager === 'yarn'
+        ? 'yarn global add berryagent'
+        : 'bun add -g berryagent';
   return `检测到 ${manager} 全局安装形态——请用原包管理器升级（\`${cmd}\`），本命令不代执行（npm i -g 会装出第二份）。`;
 }
 

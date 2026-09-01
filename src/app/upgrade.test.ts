@@ -103,9 +103,19 @@ describe('detectPackageManager（npm 形态的包管理器甄别——冷读 m1 
   it('yarn 全局（yarn 段）→ yarn', () => {
     expect(detectPackageManager('/home/x/.config/yarn/global/node_modules/berryagent/dist/app/main.js')).toBe('yarn');
   });
+  it('bun 全局（.bun→install→global 三段序）→ bun；裸 bun 段不误伤', () => {
+    expect(detectPackageManager('/home/x/.bun/install/global/node_modules/berryagent/dist/app/main.js')).toBe('bun');
+    // win32 形态同款（反斜杠分隔）
+    expect(
+      detectPackageManager('C:\\Users\\x\\.bun\\install\\global\\node_modules\\berryagent\\dist\\app\\main.js'),
+    ).toBe('bun');
+    // 裸 `bun` 目录名（无三段序）= 普通 npm 路径，不构成 bun 判据
+    expect(detectPackageManager('/home/x/projects/bun/node_modules/berryagent/dist/app/main.js')).toBe('npm');
+  });
   it('非 npm 管理器指引：原管理器一条命令 + 不代执行声明', () => {
     expect(foreignManagerGuidance('pnpm')).toContain('pnpm add -g berryagent');
     expect(foreignManagerGuidance('yarn')).toContain('yarn global add berryagent');
+    expect(foreignManagerGuidance('bun')).toContain('bun add -g berryagent');
     expect(foreignManagerGuidance('pnpm')).toContain('不代执行');
   });
 });
