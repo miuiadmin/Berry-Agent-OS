@@ -1,0 +1,39 @@
+#!/bin/sh
+# pre-commit 钩子——四门禁提交时刻执法（基建大扫 20260901 #20）。
+#
+# 住在仓库内 .githooks/（经 core.hooksPath 接线——tools/install-hooks.mjs，
+# npm install 时 package.json 的 prepare 脚本自动安装），不再依赖各机器手动
+# 放置 .git/hooks/pre-commit（旧形态只覆盖两门且新 clone 零提示）。
+#
+# 四门禁与 AGENTS.md 工程纪律 / CONTRIBUTING.md 同源：
+# typecheck → test → lint:topology → format:check，任一红即拒提交。
+
+set -e
+
+echo "🔍 门禁一 typecheck..."
+npm run typecheck
+
+echo "🔍 门禁二 test..."
+# 退出码必须真闸：管道会把退出码换成 tail 的（vitest 失败被吞——曾致
+# 「1 failed 仍 Pre-commit checks passed」）。先落临时文件再取尾，状态自持。
+log=$(mktemp)
+# set -e 下裸跑会把非零退出直接变成脚本退出——诊断行（tail/❌）被吞、静默退 1。
+# 用 || 捕获形态把退出码接住，失败仍走下方真闸分支。
+status=0
+npx vitest run --reporter=verbose >"$log" 2>&1 || status=$?
+tail -5 "$log"
+if [ "$status" -ne 0 ]; then
+  echo "❌ 测试未全绿（exit $status）——失败用例："
+  grep -E "FAIL |×" "$log" | head -10
+  rm -f "$log"
+  exit "$status"
+fi
+rm -f "$log"
+
+echo "🔍 门禁三 lint:topology（拓扑 DAG / 事件目录 / 时态词汇三器）..."
+npm run lint:topology
+
+echo "🔍 门禁四 format:check..."
+npm run format:check
+
+echo "✅ 四门禁全绿（Pre-commit checks passed）"

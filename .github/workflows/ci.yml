@@ -1,0 +1,38 @@
+# CI——四门禁远端执法（基建大扫 20260901 #19）。
+#
+# 仓库四道门禁（typecheck / test / lint:topology / format:check）此前只有
+# 本机手动钩子与发版时点（release 契约 1）执法，外部 PR / 新机器 clone 零
+# 强制——本工作流把四门禁搬上 GitHub Actions：push 与 pull_request 双触发
+# （外部贡献走 PR 面）。Node 22 单矩阵（运行时下限 = 22.19，22.x 最新即满足）。
+#
+# 关键细节：checkout 必须 fetch-depth: 0（全史）——check-tense 规则 1 把公开
+# 文档里的「已落码 <hash>」引用对照 git log 全量 commit 前缀集，浅克隆只见
+# 单 commit，数百条 hash 引用会全数误红。
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 全史拉取（check-tense hash 对照依赖——见文件头注释，勿"优化"成浅克隆）
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖（npm ci——package-lock 精确复现）
+        run: npm ci
+      - name: 门禁一 typecheck
+        run: npm run typecheck
+      - name: 门禁二 test
+        run: npm test
+      - name: 门禁三 lint:topology（拓扑 DAG / 事件目录 / 时态词汇三器）
+        run: npm run lint:topology
+      - name: 门禁四 format:check
+        run: npm run format:check

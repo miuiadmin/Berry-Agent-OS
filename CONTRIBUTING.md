@@ -54,7 +54,11 @@ berry/
 
 ## 四门禁（提交前提）
 
-`npm run typecheck` / `npm test` / `npm run lint:topology` / `npm run format:check` 全绿才提交。
+`npm run typecheck` / `npm test` / `npm run lint:topology` / `npm run format:check` 全绿才提交。三层执法自动兜底：
+
+- **提交时刻**：`npm install` 经 prepare 脚本自动把 git 钩子指到仓内 `.githooks/`（`core.hooksPath`，手写安装器 `tools/install-hooks.mjs`，零依赖）——commit 前四门禁本地真跑，红即拒提交。
+- **远端**：GitHub Actions（`.github/workflows/ci.yml`）push / PR 双触发，同一套四门禁全量重跑——外部 PR 零豁免。
+- **发版时点**：`npm run release` 发布机器契约 1 再全量复核。
 
 ## 核心纪律速览
 

@@ -15,6 +15,10 @@ export default defineConfig({
     // check-topology / check-tense 两闸自测（复盘 20260901 T-3）再同款收编：
     // 净树 exit 0 + CHECK_ROOT 夹具 exit 1——侦测能力回归锁，扫描静默退化
     // （假绿）先在测试面红。
+    // 门禁基建自测（基建大扫 20260901 #19/#20）同款收编：CI 工作流四门禁 +
+    // fetch-depth 0 锚 / pre-commit 钩子四门 + 可执行位 / install-hooks 真跑
+    // 双场景——基建面的形态锁（缺席即红，同 release.test.mjs 锁 package.json
+    // 字段先例）。
     // client 子树显式排除（CR-7）：SPA 测试若引入需 jsdom 环境，node 环境的
     // 常规轨不收（域不同不静默跑红）
     include: [
@@ -25,6 +29,7 @@ export default defineConfig({
       'tools/check-events.test.mjs',
       'tools/check-topology.test.mjs',
       'tools/check-tense.test.mjs',
+      'tools/gates-infra.test.mjs',
     ],
     environment: 'node',
     // 每 worker 数据目录钉扎（20260901-d #2 同类）：setupFiles 强制
