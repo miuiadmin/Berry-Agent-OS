@@ -140,4 +140,35 @@ describe('createTickRunner：env 合成（白名单 + set 显式层）', () => {
     expect(env['MY_SERVICE_SECRET']).toBeUndefined();
     expect(env['RANDOM_TOKEN']).toBeUndefined();
   });
+
+  it('宿主覆盖类同路透传（基建大扫 #29）：APP_MODEL/APP_BASH_PATH/APP_LOG_LEVEL 有值才传——凭证到模型也到', async () => {
+    const runner = createTickRunner({
+      dataDir: '/data',
+      dbPath: '/data/sessions.db',
+      env: {
+        PATH: '/usr/bin',
+        APP_MODEL: 'anthropic/claude-sonnet-5', // 模型覆盖——修前被白名单剥掉：凭证到了模型没到
+        APP_BASH_PATH: '/custom/bin/bash', // bash 工具显式覆盖——丢失则重走四级发现序（win32 失效）
+        APP_LOG_LEVEL: 'debug', // 子进程日志级别随宿主（轮账排障面）
+      },
+    });
+    await runner('p');
+    const env = (runArgvMock.mock.calls[0]![1] as { env: Record<string, string> }).env;
+    expect(env['APP_MODEL']).toBe('anthropic/claude-sonnet-5');
+    expect(env['APP_BASH_PATH']).toBe('/custom/bin/bash');
+    expect(env['APP_LOG_LEVEL']).toBe('debug');
+  });
+
+  it('宿主覆盖类缺席不造面（#29 同款不造空串：宿主无值/空串 = 子进程同键缺席）', async () => {
+    const runner = createTickRunner({
+      dataDir: '/d',
+      dbPath: '/d/x.db',
+      env: { PATH: '/bin', APP_MODEL: '', APP_FD_PATH: '/fd' }, // 空串 MODEL + 名单外 FD 路径
+    });
+    await runner('p');
+    const env = (runArgvMock.mock.calls[0]![1] as { env: Record<string, string> }).env;
+    expect(env['APP_MODEL']).toBeUndefined(); // 空串不传
+    expect(env['APP_BASH_PATH']).toBeUndefined(); // 宿主无值不传
+    expect(env['APP_FD_PATH']).toBeUndefined(); // 名单外 APP_* 保留前缀不隐式扩面（tick 子进程无 TUI 面）
+  });
 });

@@ -58,6 +58,16 @@ const CREDENTIAL_ENV_NAMES: readonly string[] = [
   'OPENAI_BASE_URL',
 ];
 
+/**
+ * 宿主覆盖类变量（基建大扫 #29 拍板，内核与应用边界篇席 13）：tick 子进程
+ * 同路 set 显式透传——有值才传、与凭证族同款不造空串。APP_MODEL 剥离会造
+ * 「凭证到了模型没到」错配（宿主覆盖模型不达定时任务）；APP_BASH_PATH 丢
+ * 则 bash 工具重走四级发现序（win32 显式覆盖失效）；APP_LOG_LEVEL 丢则
+ * 轮账日志降级（宿主 debug 时子进程排障面缺）。APP_* 是禁运保留前缀，
+ * 不在此显式列名的 APP_* 变量一律剥掉（不隐式扩面）。
+ */
+const HOST_OVERRIDE_ENV_NAMES: readonly string[] = ['APP_MODEL', 'APP_BASH_PATH', 'APP_LOG_LEVEL'];
+
 /** runner 构造选项（argv/env 注入式——公式可单测） */
 export interface TickRunnerOptions {
   /** 宿主 resolved 数据目录（子进程 APP_DATA_DIR——同一本账） */
@@ -88,6 +98,11 @@ export function createTickRunner(opts: TickRunnerOptions): (prompt: string) => P
   };
   const hostEnv = opts.env ?? process.env;
   for (const name of CREDENTIAL_ENV_NAMES) {
+    const value = hostEnv[name];
+    if (value !== undefined && value !== '') set[name] = value;
+  }
+  // 宿主覆盖类同款循环（#29——有值才传不造空串；值来源纪律同凭证族）
+  for (const name of HOST_OVERRIDE_ENV_NAMES) {
     const value = hostEnv[name];
     if (value !== undefined && value !== '') set[name] = value;
   }
