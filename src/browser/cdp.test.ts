@@ -33,7 +33,8 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JsonRpcConnection } from '../mcp/index.js';
 import type { AppLogger } from '../contracts/app.js';
-import { AppError, BROWSER_ENGINE_NOT_FOUND, describeError } from '../contracts/errors.js';
+import type { AppContext } from '../contracts/app.js';
+import { AppError, BROWSER_ENGINE_NOT_FOUND, BROWSER_NODE_UNSUPPORTED, describeError } from '../contracts/errors.js';
 import type { ToolDefinition } from '../contracts/tools.js';
 import { CdpConnection, disposeSessionContext, fetchVersionInfo, openSessionContext } from './cdp.js';
 import { discoverEngine } from './discover.js';
@@ -42,6 +43,7 @@ import { applyCaptureEvent, ConsoleRing, SessionCapture } from './capture.js';
 import { renderAccessibilitySnapshot, type FlatDocNode } from './a11y.js';
 import { saveScreenshot, SCREENSHOTS_KEEP } from './screenshots.js';
 import { registerBrowserTools } from './tools.js';
+import { createBrowserApp } from './app.js';
 
 /* ---------------- 手写 WS 帧编解码（服务器侧最小面） ---------------- */
 
@@ -260,6 +262,9 @@ describe('browser cdp 层（假 CDP 服务器 WS 帧层）', () => {
   it('fetchVersionInfo：ws url 直用（零 HTTP 探测）；端点死 → BROWSER_CONNECT_FAILED', async () => {
     const direct = await fetchVersionInfo(`ws://127.0.0.1:${fake.port}/devtools/browser/x`);
     expect(direct.webSocketDebuggerUrl).toContain('/devtools/browser/x');
+    // browser 自报名以 '(endpoint)' 字面量回填（#21 注释-实现对齐锁——直用形态
+    // 无 HTTP 探测即无自报名，占位形态是消费面〔attach 通知〕的取值语义）
+    expect(direct.browser).toBe('(endpoint)');
     // 死端口（探测面）：端口 1 保留位——连接必拒即验码
     await expect(fetchVersionInfo('127.0.0.1:1', 500)).rejects.toSatisfy((err: unknown) => {
       return err instanceof AppError && err.code === 'BROWSER_CONNECT_FAILED';
@@ -760,6 +765,156 @@ describe('browser 引擎生命周期', () => {
     expect(again.session.browserContextId).not.toBe('CTX-9'); // 复用第二代的 CTX-1
     await engine.dispose();
   });
+
+  // 【遗漏大扫 20260901-b #15】运行时版本闸：bringUp 两形态共用入口先验
+  // process.versions.node ≥ 22.19——不达标落 BROWSER_NODE_UNSUPPORTED，且闸在
+  // spawn/连接之前：零野进程、零半建态、status 不谎报 starting（保持 idle，
+  // 修复后升级 Node 再调即重试）。修复前红：无闸——spawn 照走，WebSocket
+  // 全局缺席以裸 ReferenceError 形态晚爆，留下不可理解的半建现场。
+  it('#15 运行时版本闸：Node < 22.19 起链前拒——BROWSER_NODE_UNSUPPORTED + 零 spawn', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    let spawns = 0;
+    const { engine } = makeEngine({
+      dataDir,
+      idleMs: 60_000, // 闸测试不依赖闲置钟——长钟防干扰
+      onSpawn: () => {
+        spawns += 1;
+      },
+    });
+    // process.versions.node 描述符只读（writable:false，直接赋值静默无操作）——
+    // defineProperty 换值（configurable:true），finally 还原防污染同进程后续测试
+    const realNode = process.versions.node;
+    Object.defineProperty(process.versions, 'node', { value: '20.11.0', configurable: true });
+    try {
+      await expect(engine.acquireContext('sess-A')).rejects.toSatisfy((e: unknown) => {
+        return e instanceof AppError && e.code === BROWSER_NODE_UNSUPPORTED;
+      });
+      expect(spawns).toBe(0); // 闸先于 spawn——引擎可执行从未起（零野进程）
+      expect(engine.getStatus().state).toBe('idle'); // 不谎报 starting——status 原地可重试
+    } finally {
+      Object.defineProperty(process.versions, 'node', { value: realNode, configurable: true });
+    }
+    await engine.dispose();
+  });
+
+  // 【遗漏大扫 20260901-b #23】并发去重：ensureRunning 以 starting promise 缓存
+  // 共享——同时首用只 spawn 一次。修复前红面：去重若失效（如 starting 被同步
+  // 清空），双 spawn 双引擎 = profile 双开 + 登记簿双条目。
+  it('#23 并发去重：同时首用只 spawn 一次（starting promise 共享）', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const spawnArgs: string[][] = [];
+    const { engine } = makeEngine({
+      dataDir,
+      idleMs: 60_000,
+      onSpawn: (args) => spawnArgs.push([...args]),
+    });
+    // 双路并发首用（同 session 两调用 + 异 session 一路——三路同抢起链窗；
+    // 第三路只参与竞抢不断言结果——解构不绑 c）
+    const [a, b] = await Promise.all([
+      engine.acquireContext('sess-A'),
+      engine.acquireContext('sess-A'),
+      engine.acquireContext('sess-B'),
+    ]);
+    expect(spawnArgs).toHaveLength(1); // 只一次 spawn（去重成功）
+    expect(a.session.sessionId).toBe('SESS-1');
+    expect(b.session.sessionId).toBe('SESS-1'); // 同 session 复用同一 context
+    // 三路都拿到活引擎
+    expect(engine.getStatus().state).toBe('running');
+    await engine.dispose();
+  });
+
+  // 【遗漏大扫 20260901-b #23】起链失败重试腿：starting 在 finally 清空——失败
+  // 后下一调用照常复活（不是永久失败态）。
+  it('#23 起链失败重试：starting 清空——首次引擎先死后第二次照常起链', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    // 可变活性开关：第一次 spawn 即死（不写端口文件），第二次写端口文件成功
+    let healthy = false;
+    let spawnCount = 0;
+    const engine = new BrowserEngine({
+      dataDir,
+      config: { executablePath: process.execPath },
+      spawnEngine: ({ args }) => {
+        spawnCount += 1;
+        const dir = args.find((a) => a.startsWith('--user-data-dir='))!.slice('--user-data-dir='.length);
+        if (healthy) {
+          writeFileSync(join(dir, 'DevToolsActivePort'), `${fake.port}\n/devtools/browser/fake-uuid\n`);
+        }
+        return { pid: 424_242 + spawnCount, alive: () => healthy };
+      },
+      killTree: vi.fn(),
+      registry: { add: vi.fn(), remove: vi.fn(), sweep: vi.fn(async () => ({ killed: [] })) },
+      newConnection: (o) => new JsonRpcConnection(o),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Pick<AppLogger, 'debug' | 'info' | 'warn'>,
+      notify: vi.fn(),
+      idleMs: 60_000,
+      startupTimeoutMs: 2_000,
+    });
+    await expect(engine.acquireContext('sess-A')).rejects.toBeInstanceOf(AppError); // 引擎先死腿
+    healthy = true;
+    const handle = await engine.acquireContext('sess-A'); // 重试照常复活
+    expect(handle.session.sessionId).toBe('SESS-1');
+    expect(engine.getStatus().state).toBe('running');
+    expect(spawnCount).toBe(2);
+    await engine.dispose();
+  });
+
+  // 【遗漏大扫 20260901-b #23】多会话事件分流：attachToTarget 按 target 派不同
+  // sessionId——B 会话 console 不串入 A（keyByCdpSession 反查表多条目形态）。
+  // 修复前不可测形态：responder 恒返单一 sessionId，反查表恒单条目（同键覆盖）。
+  it('#23 多会话事件分流：B 会话 console 只进 B 捕获态（反查表多条目）', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const { engine } = makeEngine({ dataDir, idleMs: 60_000 });
+    // per-target 派发 sessionId（真 CDP 语义：flat sessionId per attach）
+    let tgtSeq = 0;
+    fake.responders['Target.createTarget'] = () => ({ targetId: `TGT-${(tgtSeq += 1)}` });
+    fake.responders['Target.attachToTarget'] = (p) => ({ sessionId: `SESS-${(p as { targetId: string }).targetId}` });
+    const a = await engine.acquireContext('sess-A');
+    const b = await engine.acquireContext('sess-B');
+    expect(a.session.sessionId).toBe('SESS-TGT-1');
+    expect(b.session.sessionId).toBe('SESS-TGT-2'); // 反查表两条目（不再同键覆盖）
+    // B 会话事件：只入 B 的捕获态——A 缓冲零串扰（帧到达窗同既有事件测试——
+    // WS 帧→桥解析→入账是异步 I/O 链，先等帧落账再断言）
+    fake.pushEvent(
+      'Runtime.consoleAPICalled',
+      { type: 'log', args: [{ type: 'string', value: 'B 的输出' }] },
+      'SESS-TGT-2',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const bEntries = b.capture.console.entries();
+    expect(bEntries).toHaveLength(1);
+    expect(bEntries[0]).toMatchObject({ kind: 'console', text: 'B 的输出' });
+    expect(a.capture.console.entries()).toHaveLength(0); // 修复前红形态：恒单条目时 B 事件串入 A
+    await engine.dispose();
+  });
+
+  // 【遗漏大扫 20260901-b #26】双配冲突闸：cdpEndpoint×executablePath 同给 =
+  // 配置错 fail-loud（规范条款执法位）。修复前红：静默走 attach 丢弃
+  // executablePath——用户自配引擎路径被无声吞掉。
+  it('#26 双配冲突闸：cdpEndpoint×executablePath 同给 → BROWSER_CONFIG_CONFLICT + 零 spawn 零连接', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    let spawns = 0;
+    const engine = new BrowserEngine({
+      dataDir,
+      config: { cdpEndpoint: `127.0.0.1:${fake.port}`, executablePath: process.execPath }, // 双配
+      spawnEngine: () => {
+        spawns += 1;
+        throw new Error('不应 spawn');
+      },
+      killTree: vi.fn(),
+      registry: { add: vi.fn(), remove: vi.fn(), sweep: vi.fn(async () => ({ killed: [] })) },
+      newConnection: (o) => new JsonRpcConnection(o),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Pick<AppLogger, 'debug' | 'info' | 'warn'>,
+      notify: vi.fn(),
+      idleMs: 60_000,
+    });
+    await expect(engine.acquireContext('sess-A')).rejects.toSatisfy((e: unknown) => {
+      return e instanceof AppError && e.code === 'BROWSER_CONFIG_CONFLICT';
+    });
+    expect(spawns).toBe(0); // 闸在 spawn/attach 之前——两形态都未触达
+    expect(engine.getStatus().state).toBe('idle'); // 不谎报 starting——改配置后原地重试
+    // 对照：真 CDP 服务器全程零请求（attach 腿也没走）
+    expect(fake.receivedFrames).toHaveLength(0);
+  });
 });
 
 /* ---------------- 刀二：捕获态 / a11y / 截图 / 工具面 ---------------- */
@@ -1061,6 +1216,43 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
     expect((miss.content[0] as { text: string }).text).toContain('不在最近快照');
   });
 
+  // 【遗漏大扫 20260901-b #22】无盒模型语义失败分支：ref 仍在表但元素已隐藏/
+  // 移除（快照后页面变化——浏览自动化最高频竞态后果路）。修复前红：该 throw
+  // 全测试面零触达——若误把坏 quad 当合法坐标，会派 NaN 坐标点击（静默错误
+  // 坐标）而非 isError 自纠指引。
+  it('#22 click/type 无盒分支：坏 quad（空模型/短 quad/非数值）→ isError 自纠 + 零鼠标派发', async () => {
+    fake.responders['DOM.getFlattenedDocumentTree'] = () => ({
+      nodes: [
+        { nodeId: 1, backendNodeId: 100, nodeType: 9, nodeName: '#document' },
+        {
+          nodeId: 4,
+          backendNodeId: 103,
+          nodeType: 1,
+          nodeName: 'BUTTON',
+          parentId: 1,
+          attributes: ['aria-label', '提交'],
+        },
+      ],
+    });
+    await run('browser_snapshot');
+    // 三种坏形态逐一（覆盖分支的全部拒绝子条件）：无 quad / 长度不足 / 非数值
+    for (const model of [{}, { quad: [0, 0, 100, 0] }, { quad: [0, 0, 100, 0, 100, 40, 0, 'x'] }]) {
+      fake.responders['DOM.getBoxModel'] = () => ({ model });
+      fake.receivedFrames.length = 0; // 每轮清面——零鼠标派发断言按轮验
+      const bad = await run('browser_click', { ref: '@e0' });
+      expect(bad.isError).toBe(true);
+      expect((bad.content[0] as { text: string }).text).toContain('无盒模型');
+      expect((bad.content[0] as { text: string }).text).toContain('滚动到位'); // 自纠指引在场
+      expect(framesOf('Input.dispatchMouseEvent')).toHaveLength(0); // 不派 NaN 坐标
+    }
+    // type 同路（聚焦点击前同一 refBoxCenter——同样拦在鼠标派发之前）
+    fake.responders['DOM.getBoxModel'] = () => ({ model: {} });
+    const badType = await run('browser_type', { ref: '@e0', text: 'x' });
+    expect(badType.isError).toBe(true);
+    expect((badType.content[0] as { text: string }).text).toContain('无盒模型');
+    expect(framesOf('Input.insertText')).toHaveLength(0);
+  });
+
   it('press：白名单执法 + 组合键 modifiers 位 + 三事件合成', async () => {
     const combo = await run('browser_press', { key: 'Control+A' });
     expect(combo.isError).toBeUndefined();
@@ -1079,9 +1271,13 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
     expect((bad.content[0] as { text: string }).text).toContain('未知键名');
   });
 
-  it('scroll：四向距离派（yDistance 正 = 向下）', async () => {
+  it('scroll：四向距离派（yDistance 正 = 向下）+ 页面锚点回读（#11——规范工具表 scroll 行 title+url 承诺）', async () => {
     const ok = await run('browser_scroll', { direction: 'down' });
     expect((ok.content[0] as { text: string }).text).toContain('向下滚动 600px');
+    // #11：滚动后回 title+url（与 navigate/back/forward 同律——模型直拿位置反馈）
+    expect((ok.content[0] as { text: string }).text).toContain('Example');
+    expect((ok.details as { url?: string; title?: string }).url).toBe('https://example.com/page');
+    expect((ok.details as { title?: string }).title).toBe('Example');
     expect(framesOf('Input.synthesizeScrollGesture')[0]!.params).toMatchObject({ xDistance: 0, yDistance: 600 });
     await run('browser_scroll', { direction: 'left', amount: 300 });
     expect(framesOf('Input.synthesizeScrollGesture')[1]!.params).toMatchObject({ xDistance: 300 });
@@ -1149,6 +1345,40 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
     expect(stale.isError).toBe(true);
     expect((stale.content[0] as { text: string }).text).toContain('不在最近快照');
   });
+
+  // 【遗漏大扫 20260901-b #27】引擎回退披露：发现序回退代（engineNote 在场）
+  // 工具结果标 fallbackWarning——规范条款的模型面通道。修复前红：engineNote
+  // 组装了但全仓零消费，模型对回退引擎（可能过期的下载引擎）全盲。
+  it('#27 引擎回退披露：engineNote 在场 → 结果文本尾附回退自述 + details.fallbackWarning；无回退零标注', async () => {
+    // 独立注册面（假 service 携 engineNote——发现序回退的确定性注入位，不依赖
+    // 真 FS 缺席形态）
+    const noteDefs = new Map<string, ToolDefinition>();
+    registerBrowserTools({
+      service: {
+        status: () => engine.getStatus(),
+        acquireContext: async () => ({
+          rpc: {} as unknown as import('./cdp.js').CdpRpc, // console 工具不触 rpc——只读捕获态
+          session: { browserContextId: 'CTX-1', sessionId: 'SESS-1', targetId: 'TGT-1' },
+          capture: new SessionCapture(),
+          engineNote: '系统未装 Chrome——使用下载的引擎（版本可能落后于系统渠道）',
+        }),
+        dispose: async () => undefined,
+      },
+      dataDir,
+      register: (def) => {
+        noteDefs.set(def.name, def);
+        return () => noteDefs.delete(def.name);
+      },
+    });
+    const noted = await noteDefs.get('browser_console')!.execute({}, { toolCallId: 't-1', sessionId: 'sess-A' });
+    expect(noted.isError).toBeUndefined();
+    expect((noted.content[0] as { text: string }).text).toContain('（引擎回退：系统未装 Chrome');
+    expect((noted.details as { fallbackWarning?: string }).fallbackWarning).toContain('落后于系统渠道');
+    // 对照：主注册面（engineNote 缺席）零标注——回退披露只在回退代出现
+    const plain = await run('browser_console');
+    expect((plain.content[0] as { text: string }).text).not.toContain('引擎回退');
+    expect((plain.details as { fallbackWarning?: string }).fallbackWarning).toBeUndefined();
+  });
 });
 
 describe('browser 运行时 Node 版本闸（纯函数——遗漏大扫 20260901-b #15）', () => {
@@ -1170,5 +1400,61 @@ describe('browser 运行时 Node 版本闸（纯函数——遗漏大扫 2026090
   it('非法形态按 0.0.0 兜底判红（fail-closed——未知版本不放行）', () => {
     expect(nodeVersionProblem('garbage')).toBeDefined();
     expect(nodeVersionProblem('')).toBeDefined();
+  });
+});
+
+/* ---------------- 行 apply 接线（遗漏大扫 20260901-b #24） ---------------- */
+
+describe('browser 行 apply 接线（孤儿清扫——刀一治理面的接线锁）', () => {
+  it('#24 apply 期 sweep 先行：kill 探针接线 killTree、清扫命中记 warn、服务注册', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-apply-'));
+    const killTree = vi.fn();
+    /** sweep 假面：真调传入的 kill 探针（验证探针→killTree 接线）并报两株命中 */
+    const sweep = vi.fn(async (probes: { kill: (pid: number) => void }) => {
+      probes.kill(111);
+      probes.kill(222);
+      return { killed: [111, 222] as number[] };
+    });
+    const registry = { add: vi.fn(), remove: vi.fn(), sweep };
+    const warns: string[] = [];
+    const uiNotify = vi.fn();
+    /** 工具注册面假收容（effect 回调即跑——真 context 语义位） */
+    const registered: string[] = [];
+    const disposers: Array<() => void> = [];
+    // 最小 ctx stub（apply 消费面四键：get ui/tools、provide、effect、logger）
+    const ctx = {
+      get: (key: string) =>
+        key === 'ui'
+          ? { notify: uiNotify }
+          : { register: (def: ToolDefinition) => (registered.push(def.name), () => undefined) },
+      provide: vi.fn(),
+      effect: (fn: () => () => void) => {
+        disposers.push(fn());
+      },
+      logger: { debug: vi.fn(), info: vi.fn(), warn: (m: string) => void warns.push(m) },
+    } as unknown as AppContext;
+
+    createBrowserApp({
+      dataDir,
+      spawnEngine: () => {
+        throw new Error('apply 期零 spawn——引擎惰性首用才起');
+      },
+      killTree,
+      registry,
+      newConnection: (o) => new JsonRpcConnection(o),
+    }).apply(ctx);
+
+    // 接线三断言（修复前红形态：sweep 被摘或 kill 探针接错——崩溃残留进程永久泄漏且无测试红）
+    expect(sweep).toHaveBeenCalledTimes(1); // apply 期恰扫一次（先于一切自家 spawn）
+    expect(killTree).toHaveBeenCalledWith(111, expect.any(Function)); // 探针 → killTree(pid, () => true)
+    expect(killTree).toHaveBeenCalledWith(222, expect.any(Function));
+    // 清扫命中走 warn（人读出口——operator 排障面）
+    await new Promise((resolve) => setTimeout(resolve, 0)); // sweep promise .then 结算
+    expect(warns.join('\n')).toContain('孤儿引擎清扫 2 株');
+    // 服务面 + 工具面十件注册（apply 全接线自证）
+    expect(ctx.provide).toHaveBeenCalledWith('browser', expect.anything());
+    expect(registered).toHaveLength(10);
+    expect(registered).toContain('browser_navigate');
+    rmSync(dataDir, { recursive: true, force: true });
   });
 });

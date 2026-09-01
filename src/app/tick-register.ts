@@ -177,10 +177,11 @@ export function createTickOsRegistrar(opts: TickOsOptions): TickOsRegistrar {
       ...(opts.commandLog !== undefined ? { commandLog: opts.commandLog } : {}),
     });
 
-  /** 平台不支持的人读回执（win32 等——诚实披露非错误崩溃） */
+  /** 平台不支持的人读回执（win32 等——诚实披露非错误崩溃；规范定性即「披露
+   * 不支持」，不挂账：无触发判据的未来承诺是无主挂账——遗漏大扫 20260901-b #18） */
   const unsupported = (): TickOsResult => ({
     ok: false,
-    message: '当前平台不支持 OS 定时注册（支持 darwin launchd / Linux crontab——Windows 挂账）',
+    message: '当前平台不支持 OS 定时注册（支持 darwin launchd / Linux crontab）',
   });
 
   /* ---------------- darwin：launchd plist 面 ---------------- */

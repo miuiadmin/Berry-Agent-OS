@@ -213,8 +213,22 @@ export function registerBrowserTools(deps: BrowserToolsDeps): Array<() => void> 
   const { service, dataDir, register } = deps;
   /** per-session 截图序号（文件名即时序——滚动清理按 mtime 兜底） */
   const shotSeq = new Map<string, number>();
-  /** 取隔离态（每工具调用主口——SessionHandle 携 rpc/session/capture） */
-  const acquire = (sessionId: string | undefined) => service.acquireContext(sessionId);
+  /**
+   * 引擎回退注记簿（路由键 → 本代 engineNote——acquire 时刷新，#27）：
+   * 发现序回退代工具结果需标 fallbackWarning（规范条款），注记随 SessionHandle
+   * 到场、按路由键暂存供结果装饰面读取（execute 体内 acquire 不外传 handle，
+   * 键控暂存避免跨 async 交错串话——同键并发调用读到的是同代同值）。
+   */
+  const engineNoteByKey = new Map<string, string>();
+  /** 取隔离态（每工具调用主口——SessionHandle 携 rpc/session/capture/engineNote） */
+  const acquire = async (sessionId: string | undefined) => {
+    const handle = await service.acquireContext(sessionId);
+    // 注记随取用刷新：新代无回退即清键（簿不跨代漏报旧回退）
+    const key = sessionKeyOf(sessionId);
+    if (handle.engineNote === undefined) engineNoteByKey.delete(key);
+    else engineNoteByKey.set(key, handle.engineNote);
+    return handle;
+  };
 
   /** ---- browser_navigate（read）——SSRF 前置 + Page.navigate + 页态结算 ---- */
   const navigate: ToolDefinition = {
@@ -492,10 +506,15 @@ export function registerBrowserTools(deps: BrowserToolsDeps): Array<() => void> 
           { x: 0, y: 0, xDistance, yDistance, speed: 600 },
           { sessionId: session.sessionId },
         );
+        // 页面锚点回读（规范工具表 scroll 行承诺 title+url——与 navigate/back/
+        // forward 同律；滚动后模型直拿位置反馈，省一次补拍快照定位）
+        const state = await pageState(rpc, session.sessionId);
         const label = { up: '向上', down: '向下', left: '向左', right: '向右' }[direction];
         return {
-          content: [{ type: 'text', text: `已${label}滚动 ${amount}px` }],
-          details: { direction, amount },
+          content: [
+            { type: 'text', text: `已${label}滚动 ${amount}px\n页面：${state.url}\n标题：${state.title || '(无)'}` },
+          ],
+          details: { direction, amount, url: state.url, title: state.title },
         };
       } catch (err) {
         return asDataError(err);
@@ -578,6 +597,27 @@ export function registerBrowserTools(deps: BrowserToolsDeps): Array<() => void> 
     },
   };
 
+  /**
+   * 引擎回退披露装饰（遗漏大扫 20260901-b #27）：发现序回退代（engineNote
+   * 在场）——工具结果文本尾附回退自述 + details 标 fallbackWarning。规范
+   * 「工具结果标 fallbackWarning」条款的模型面通道（用户面 logger/notify
+   * 原已有——此前模型对回退引擎全盲，engineNote 组装了却零消费）。
+   */
+  const withEngineNote = (def: ToolDefinition): ToolDefinition => ({
+    ...def,
+    execute: async (args, tctx) => {
+      const result = await def.execute(args, tctx);
+      const note = engineNoteByKey.get(sessionKeyOf(tctx.sessionId));
+      if (note === undefined) return result;
+      const content = result.content.map((c) =>
+        c.type === 'text' ? { ...c, text: `${c.text}\n（引擎回退：${note}）` } : c,
+      );
+      // details 形态未知（工具各自定义）——原样并键保序，fallbackWarning 追加
+      const details = { ...((result.details as Record<string, unknown> | undefined) ?? {}), fallbackWarning: note };
+      return { ...result, content, details };
+    },
+  });
+
   // 十件注册（顺序即清单序：navigate/back/forward/snapshot/click/type/press/scroll/screenshot/console）
   const defs = [
     navigate,
@@ -591,5 +631,5 @@ export function registerBrowserTools(deps: BrowserToolsDeps): Array<() => void> 
     screenshot,
     console_,
   ];
-  return defs.map((def) => register(def));
+  return defs.map((def) => register(withEngineNote(def)));
 }

@@ -298,7 +298,13 @@ export function renderAccessibilitySnapshot(
     if (!render(r, 0)) break;
   }
   if (truncated) {
-    lines.push(`（快照超 ${Math.floor(maxBytes / 1024)}KiB 已截断——页面过大，建议分区操作或直接用 selector 侧工具）`);
+    // 指引只指向真实在场的工具（遗漏大扫 20260901-b #19：原「直接用 selector
+    // 侧工具」指向不存在的能力——工具面十件无 selector 定位路，巨页截断时刻
+    // 恰是模型最需真指引的时刻）。截断处之后的元素与 @ref 未收录——诚实后果
+    // + 两条在场出路（锚点导航缩小页面 / 截图目视）。
+    lines.push(
+      `（快照超 ${Math.floor(maxBytes / 1024)}KiB 已截断——截断处之后的元素与 @ref 未收录；需要页面后部时先 browser_navigate 到目标锚点/子页重拍，或 browser_screenshot 目视确认）`,
+    );
   }
   return { text: lines.join('\n'), refs, truncated };
 }

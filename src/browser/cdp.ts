@@ -60,7 +60,9 @@ export interface CdpVersionInfo {
 export async function fetchVersionInfo(endpoint: string, timeoutMs = 5_000): Promise<CdpVersionInfo> {
   let base: string;
   if (endpoint.startsWith('ws://') || endpoint.startsWith('wss://')) {
-    // ws url 直用形态：无 HTTP 探测——以 0.0.0.0 形回填（端点即真相）
+    // ws url 直用形态：无 HTTP 探测——browser 自报名以 '(endpoint)' 字面量
+    // 回填（端点即真相；遗漏大扫 20260901-b #21：原注释「0.0.0.0 形回填」为
+    // 起草残留——该形态从未实现，与实现漂移）
     return { browser: '(endpoint)', webSocketDebuggerUrl: endpoint };
   }
   if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {

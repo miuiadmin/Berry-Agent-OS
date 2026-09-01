@@ -21,7 +21,8 @@
  * 只断连 / 起链失败即清算本 child（树杀+净退+closed）/ context 建链半途失败
  * 回滚三表 + 重武装闲置钟 / 连接期失败统一 BROWSER_CONNECT_FAILED / 收场
  * 代际护栏（closeEngine await 窗内换代只结算本代——context 归属判据 = 开
- * context 所用的连接）。
+ * context 所用的连接）。另两前置闸：运行时 Node 版本闸（#15）与双配冲突闸
+ * （#26——cdpEndpoint×executablePath 同给 BROWSER_CONFIG_CONFLICT）。
  *
  * 回卷面：ctx.effect('browser-engine') → dispose（行卸载/作用域终结 = 永久
  * 关停，复活走行重装载）。子进程登记簿自持 `<dataDir>/browser/children.json` +
@@ -32,7 +33,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppLogger } from '../contracts/app.js';
-import { AppError, BROWSER_CONNECT_FAILED, BROWSER_NODE_UNSUPPORTED } from '../contracts/errors.js';
+import {
+  AppError,
+  BROWSER_CONFIG_CONFLICT,
+  BROWSER_CONNECT_FAILED,
+  BROWSER_NODE_UNSUPPORTED,
+} from '../contracts/errors.js';
 import { applyCaptureEvent, SessionCapture } from './capture.js';
 import {
   CdpConnection,
@@ -314,6 +320,16 @@ export class BrowserEngine {
     // 把失败提前到 spawn/连接之前 + 错误码带升级指引（不留半建态不留野进程）。
     const problem = nodeVersionProblem(process.versions.node);
     if (problem !== undefined) throw new AppError(BROWSER_NODE_UNSUPPORTED, problem);
+    // 双配冲突闸（遗漏大扫 20260901-b #26）：attach 既有引擎（cdpEndpoint）与
+    // 指定引擎路径（executablePath）互斥——规范「配置错 fail-loud」条款的执法位。
+    // 静默走 attach 丢弃 executablePath = 用户自配路径被无声吞掉（types.ts 注释
+    // 自书「互斥」却零执法）；闸在 spawn/连接之前，status 原地可改配置后重试。
+    if (this.deps.config.cdpEndpoint !== undefined && this.deps.config.executablePath !== undefined) {
+      throw new AppError(
+        BROWSER_CONFIG_CONFLICT,
+        'cdpEndpoint 与 executablePath 互斥（同给 = 配置错）——前者连既有引擎不 spawn，后者指定引擎路径，两者不能同时生效；请只保留其一',
+      );
+    }
     if (this.deps.config.cdpEndpoint !== undefined) {
       await this.bringUpAttach(this.deps.config.cdpEndpoint);
       return;
