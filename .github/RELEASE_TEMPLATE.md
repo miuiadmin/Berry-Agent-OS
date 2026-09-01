@@ -19,7 +19,7 @@
 
 ### 新增功能
 
-- （一句人话：用户能得到什么；可附 [文档](https://github.com/miuiadmin/berry-agent/blob/vX.Y.Z/docs/使用指南.md#锚点) 链接）
+- （一句人话：用户能得到什么；可附 [文档](https://github.com/miuiadmin/Berry-Agent-OS/blob/vX.Y.Z/docs/使用指南.md#锚点) 链接）
 
 ### 问题修复
 
@@ -53,4 +53,4 @@
 
 -
 
-**Full Changelog**: https://github.com/miuiadmin/berry-agent/compare/vPREV...vX.Y.Z
+**Full Changelog**: https://github.com/miuiadmin/Berry-Agent-OS/compare/vPREV...vX.Y.Z

@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/berryagent"><img alt="npm" src="https://img.shields.io/badge/version-1.0.0--alpha-blue?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/berry-agent-os"><img alt="npm" src="https://img.shields.io/badge/version-1.0.0--alpha-blue?style=flat-square"></a>
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D22.19-green?style=flat-square">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green?style=flat-square">
@@ -106,9 +106,9 @@ Requiere Node.js ≥ 22.19. Tres formas de instalar (guía completa en [docs/使
 # Opción 1: instalador de una línea (muestra el estado paso a paso; URL del repo se completará al publicar)
 curl -fsSL <repo>/scripts/install.sh | sh
 # Opción 2: npm (disponible tras la publicación)
-npm i -g berryagent
+npm i -g berry-agent-os
 # Opción 3: desde el código (desarrolladores)
-git clone <este repositorio> && cd berry && npm install && npm run build && npm link
+git clone <este repositorio> && cd Berry-Agent-OS && npm install && npm run build && npm link
 ```
 
 ```bash

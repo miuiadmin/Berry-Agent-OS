@@ -106,7 +106,7 @@ curl -fsSL <仓库>/scripts/install.sh | sh
 # 方式二：npm 直装（发布后可用）
 npm i -g berry-agent-os
 # 方式三：源码（开发者）
-git clone <本仓库> && cd berry && npm install && npm run build && npm link
+git clone <本仓库> && cd Berry-Agent-OS && npm install && npm run build && npm link
 ```
 
 ```bash

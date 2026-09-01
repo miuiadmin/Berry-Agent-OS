@@ -15,9 +15,9 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'vitest';
 
@@ -81,4 +81,55 @@ test('format 射界含公开文档面：README 四语 + docs 全纳（#22）', (
     pkg.scripts?.['format'],
     'format 与 format:check 射界不同步',
   );
+});
+
+test('npm 身份零残留：旧包名/旧私有仓 URL 不入公开安装面（成熟度扫描 20260901 P0-1/P0-4）', () => {
+  // npm 身份（包名 berry-agent-os）与虚拟模块名（berryagent 六键——含 /llm /sqlite
+  // 两子键）分立：后者是 loader 注入的 API 标识符，src/ 与 docs 合法在场。故按
+  // 「npm 身份形态」断言而非裸词清零——本测试管的是安装命令/徽章/装机路径/仓 URL
+  // 四类形态，恰好是改名批曾漏扫的面（三语镜像 + examples README + Release 模板）
+  const faces = [
+    // 根 README 族（glob 展开——与 check-tense ROOT_FILES 同射界，新语种自动纳管）
+    ...readdirSync(repoRoot)
+      .filter((f) => /^README.*\.md$/.test(f))
+      .map((f) => join(repoRoot, f)),
+    // docs 公开文档面 + examples 教学例 + scripts 安装链 + .github 仓配套
+    ...readdirSync(join(repoRoot, 'docs'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => join(repoRoot, 'docs', f)),
+    ...readdirSync(join(repoRoot, 'examples'), { recursive: true })
+      .map((f) => String(f))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => join(repoRoot, 'examples', f)),
+    ...readdirSync(join(repoRoot, 'scripts'))
+      .filter((f) => f.endsWith('.sh'))
+      .map((f) => join(repoRoot, 'scripts', f)),
+    ...readdirSync(join(repoRoot, '.github'), { recursive: true })
+      .map((f) => String(f))
+      .filter((f) => /\.(md|yml)$/.test(f))
+      .map((f) => join(repoRoot, '.github', f)),
+  ];
+  const bad = [];
+  for (const abs of faces) {
+    const rel = relative(repoRoot, abs);
+    const text = readFileSync(abs, 'utf8');
+    // 形态一：npm 安装命令 / npmjs 徽章链接 / 装机路径 指旧包名 berryagent
+    if (/npm\s+(i|install)\s+(-g\s+)?berryagent/.test(text)) bad.push(`${rel}: 安装命令指旧包名`);
+    if (/package\/berryagent/.test(text)) bad.push(`${rel}: npmjs 链接指旧包名`);
+    if (/npm root[^`\n]*berryagent\//.test(text)) bad.push(`${rel}: 装机路径指旧包名`);
+    // 形态二：旧私有仓 URL（现仓 = Berry-Agent-OS 大写 B；小写带斜杠形态即旧仓残留）
+    if (/miuiadmin\/berry-agent\//.test(text)) bad.push(`${rel}: 旧私有仓 URL 残留`);
+    // 形态三：克隆指引进错目录（仓目录名已是 Berry-Agent-OS）
+    if (/\bcd berry\b/.test(text)) bad.push(`${rel}: 克隆指引目录名漂移`);
+  }
+  assert.deepEqual(bad, [], `npm 身份残留（应改 berry-agent-os / Berry-Agent-OS）:\n${bad.join('\n')}`);
+});
+
+test('package-lock 与 package.json 名字同步（成熟度扫描 20260901 P0-1）', () => {
+  // 改名批曾漏 lockfile 顶层 name——npm ci 不炸但工作树常驻非己所改 diff，且违
+  // 「破坏性变更一笔原子化」纪律。锁两处：顶层 name 与 packages[""] name 同源。
+  const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+  const lock = JSON.parse(readFileSync(join(repoRoot, 'package-lock.json'), 'utf8'));
+  assert.equal(lock.name, pkg.name, 'lockfile 顶层 name 与 package.json 漂移');
+  assert.equal(lock.packages?.['']?.name, pkg.name, 'lockfile packages[""].name 与 package.json 漂移');
 });
