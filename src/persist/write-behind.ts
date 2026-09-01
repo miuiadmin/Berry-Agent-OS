@@ -39,7 +39,7 @@ export class WriteBehind {
   private readonly chains = new Map<string, Promise<void>>();
   /** 窗口定时器（单实例轮转全部会话；unref 不阻塞进程退出） */
   private timer: NodeJS.Timeout | null = null;
-  /** 失败后暂停自动重试标记（flush() 显式调用会清除并重试） */
+  /** 失败后暂停自动重试标记（任一批成功即复位——显式 flush / 他会话批次成功都是恢复机会） */
   private paused = false;
 
   constructor(store: Store, incarnation: string, options: WriteBehindOptions = {}) {
@@ -159,7 +159,7 @@ export class WriteBehind {
     return next;
   }
 
-  /** 实际写批：失败 = 保留批次 + 暂停自动重试 + 响亮上报 */
+  /** 实际写批：失败 = 保留批次 + 暂停自动重试 + 响亮上报；成功 = 复位暂停并灌积压 */
   private async writeBatch(sessionId: string, batch: SessionEvent[]): Promise<void> {
     const reg = this.registrations.get(sessionId)!;
     try {
@@ -208,6 +208,15 @@ export class WriteBehind {
       this.onError?.(err);
       throw err;
     }
+    // 成功即复位暂停旗（遗漏大扫 20260901-b #6）：任一批成功 = 故障条件已消除
+    // （显式 flush 重试成功 / 他会话批次成功）——恢复自动调度，暂停期积压队列
+    // 即刻灌链（不等下一窗口）。修前唯一复位位 close()：一次失败后 durable 退
+    // 化为纯机会性落盘（只有显式 flush/close 兜底），恒败会话之外的健康流量也被
+    // 拖停。持续失败则每次重试照旧逐次响亮上报（失败分支在上）。
+    if (this.paused) {
+      this.paused = false;
+      this.drainAll();
+    }
   }
 
   /** 是否暂停中（诊断用） */
@@ -225,10 +234,14 @@ export class WriteBehind {
     await this.flush();
   }
 
-  /** 把全部待写队列灌入对应 chain */
+  /**
+   * 把全部待写队列灌入对应 chain（成功复位后的 piggyback 灌链口）。
+   * 屏障结果吞掉：失败已由 writeBatch 的 onError 响亮上报（逐次触发），
+   * 屏障 reject 只服务显式 flush 的调用方——此处吞掉防 unhandled rejection。
+   */
   private drainAll(): void {
     for (const sessionId of [...this.pending.keys()]) {
-      void this.drainSession(sessionId);
+      this.drainSession(sessionId).catch(() => undefined);
     }
   }
 }

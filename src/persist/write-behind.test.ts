@@ -267,6 +267,64 @@ describe('write-behind 失败语义（响亮失败，不静默丢批）', () => 
     mine.store.close();
     other.store.close();
   });
+  // 【回归锁·遗漏大扫 20260901-b #6】flush 重试成功后 paused 复位——自动调度恢复。
+  // 修前：writeBatch 成功路径不复位 paused（唯一复位位 close()）——显式 flush 救回
+  // 本批后自动落盘仍永久停摆，此后全部事件只排队不落盘（durable 退化机会性落盘，
+  // 直到下一次显式 flush/close 兜底）。
+  it('失败恢复：flush 重试成功后 paused 复位——后续事件自动落盘（不永久停摆）', async () => {
+    const flaky = { current: 1 };
+    const store = makeFlakyStore(flaky);
+    const onError = vi.fn();
+    const wb = new WriteBehind(store, 'inc-test', { windowMs: 20, onError });
+    const session = new Session({ sessionId: 's-resume' });
+    wb.enqueue(session, session.append('user/message', { content: 'r1' }));
+    await sleep(60); // 窗口触发 → 失败 → paused
+    expect(wb.isPaused).toBe(true);
+    // 显式 flush 重试成功（故障已移除）
+    await wb.flush();
+    expect(store.loadEvents('s-resume')).toHaveLength(1);
+    // 修前红：成功后 paused 仍 true——自动调度永久停摆
+    expect(wb.isPaused).toBe(false);
+    // 新事件经窗口自动落盘（无需再显式 flush）
+    wb.enqueue(session, session.append('user/message', { content: 'r2' }));
+    await sleep(60);
+    expect(store.loadEvents('s-resume')).toHaveLength(2); // 修前红：仍 1（只排队不落盘）
+    await wb.close();
+    store.close();
+  });
+
+  it('跨会话恢复：他会话批次成功即解除全局暂停——积压队列即刻灌链', async () => {
+    // 定向失败替身：只有 s-stuck 会话恒败（双开冲突形态），健康会话照常落盘
+    const real = Persistence.open({ path: nextPath(), windowMs: 60_000 });
+    const store = real.store;
+    const origAppend = store.appendCore.bind(store);
+    (store as unknown as { appendCore: Store['appendCore'] }).appendCore = (reg, batch, inc) => {
+      if (reg.sessionId === 's-stuck') throw new Error('模拟该会话恒败（双开冲突形态）');
+      return origAppend(reg, batch, inc);
+    };
+    const onError = vi.fn();
+    const wb = new WriteBehind(store, 'inc-test', { windowMs: 20, onError });
+    const a = new Session({ sessionId: 's-stuck' });
+    const b = new Session({ sessionId: 's-healthy' });
+    wb.enqueue(a, a.append('user/message', { content: 'a1' }));
+    await sleep(60);
+    expect(wb.isPaused).toBe(true);
+    // 暂停期 B 入队（只排队）+ A 积压 → 显式 flush：B 批成功 → 全局复位 →
+    // A 积压 piggyback 再灌链（再败再暂停——逐次响亮上报，恒败会话不静默）
+    wb.enqueue(b, b.append('user/message', { content: 'b1' }));
+    wb.enqueue(a, a.append('user/message', { content: 'a2' }));
+    await expect(wb.flush()).rejects.toThrow(); // A 批仍败（flush 屏障如实 reject）
+    // onError 三次 = 窗口初败 + flush 重试败 + 复位后 piggyback 再试败
+    // （修前 2 次：成功不复位 → 无 piggyback——本断言即恢复行为的红锁）
+    expect(onError).toHaveBeenCalledTimes(3);
+    expect(onError.mock.calls[0]![0].code).toBe(PERSIST_BATCH_WRITE_FAILED);
+    expect(wb.isPaused).toBe(true); // A 再败 → 重新暂停（止血与恢复往复，非一次失败终身停摆）
+    // 健康会话与故障会话分账：B 已落盘（不被 A 拖死）
+    expect(store.loadEvents('s-healthy')).toHaveLength(1);
+    // 关停屏障如实上抛（规范：恒败会话 close 的再试也拒——护栏响亮终态非吞错）
+    await expect(wb.close()).rejects.toThrow();
+    store.close();
+  });
 });
 
 describe('顺序保证', () => {
