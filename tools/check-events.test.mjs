@@ -40,10 +40,25 @@ beforeAll(() => {
   fixtureRoot = mkdtempSync(join(tmpdir(), 'berry-check-events-fix-'));
   // 两数皆错位 + 各恰一次命中（锚正则要求恰一次——结构漂移会另红，本测锁计数漂移）。
   // 真值 = 本器 jiti 实导的目录实数（真仓 src——事件目录真相不随夹具变），99/98
-  // 对任意真值必错。src 扫描面/目录真源恒读真仓 → 夹具模式其余规则全绿，红聚焦锚面
+  // 对任意真值必错。src 扫描面/目录真源恒读真仓 → 夹具模式其余规则全绿，红聚焦锚面。
+  // 全家桶锚（L-1）：统计行写 99、表实列 2 行——同文档两基互斥位 + 节头锚均在场
   writeFileSync(
     join(fixtureRoot, 'README.md'),
-    ['# 夹具 README', '', '**99** 生命周期钩子 · **98** 类 durable 事件（两数皆错位）', ''].join('\n'),
+    [
+      '# 夹具 README',
+      '',
+      '**99** 生命周期钩子 · **98** 类 durable 事件（两数皆错位）',
+      '',
+      '**99** 件官方全家桶（件数错位）',
+      '',
+      '### 官方全家桶（Ring 2，件件可卸）',
+      '',
+      '| 件 | 职能 |',
+      '| --- | --- |',
+      '| `a` | 甲 |',
+      '| `b` | 乙 |',
+      '',
+    ].join('\n'),
   );
 });
 
@@ -63,5 +78,16 @@ describe('check-events 锚负例（遗漏大扫 20260901 O-4②）', () => {
     // 锚规则（或镜像面根缝）被静默删除/退化时此断言先红
     expect(run.stderr).toContain('README.md 头部统计「生命周期钩子」写 99');
     expect(run.stderr).toContain('README.md 头部统计「durable 事件类」写 98');
+  });
+
+  it('夹具全家桶计数 99 ≠ 表行数 2 → exit 1 点名两基互斥——族 5③ 锚整块删除后本测必红（L-1）', () => {
+    const run = spawnSync(process.execPath, [join('tools', 'check-events.mjs')], {
+      cwd: ROOT,
+      env: { ...process.env, CHECK_ROOT: fixtureRoot },
+      encoding: 'utf8',
+    });
+    expect(run.status).toBe(1);
+    // 同文档互证锚（头部统计行 vs 全家桶表行数）——O-2 事故型（统计行换基表未跟）
+    expect(run.stderr).toContain('README.md 头部全家桶计数 99 ≠ 表行数 2');
   });
 });

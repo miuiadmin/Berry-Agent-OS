@@ -29,7 +29,7 @@ Ce n'est pas de la science-fiction. C'est l'objectif de conception de Berry : **
 
 Le noyau minimal de Berry fait exactement **installer, exécuter, protéger, stocker** ; tout le reste — conversation, agent de code, mémoire, objectifs longs, tâches planifiées, MCP, LSP, observabilité, interface web — se charge comme **application** sur l'arbre de composition. **Installable, déchargeable, remplaçable** — tandis que les cinq lignes de vie de votre Agent (identifiants, mémoire, historique de confiance, budgets, registres) ne s'accumulent qu'une seule fois. **Nouveau cerveau, même corps.**
 
-**27** modules (tous implémentés) · **27** crochets de cycle de vie · **25** types d'événements durables · **14** pièces officielles (chacune déchargeable) · **2 400+** tests · **0** télémétrie.
+**27** modules (tous implémentés) · **27** crochets de cycle de vie · **25** types d'événements durables · **15** pièces officielles (14 Ring 2 + l'application par défaut coder, chacune déchargeable) · **2 400+** tests · **0** télémétrie.
 
 **Objectif plancher : la couche par défaut d'usine atteint le niveau d'usage quotidien de Codex / Claude Code.**
 
@@ -130,23 +130,23 @@ Le premier lancement crée le répertoire de données dans `~/.berry/`. Le modè
 
 ### Ensemble officiel (Ring 2, chaque pièce déchargeable)
 
-| Pièce       | Rôle                                                                          |
-| ----------- | ----------------------------------------------------------------------------- |
-| `coder`     | App d'agent de code par défaut (manifeste pur, `/app` pour changer)           |
-| `chat`      | App de conversation (ancre de repli)                                          |
-| `memory`    | Mémoire : extraction/fusion/injection double/recherche/évolution/TTL/versions |
-| `subagent`  | Délégation de sous-agents + sous-agents déclaratifs                           |
-| `goal`      | Machine à états d'objectifs + frein budgétaire + horloge                      |
-| `scheduler` | Tâches `/tick` — enregistreur launchd/crontab, sans processus résident        |
-| `mcp`       | Pont client MCP (stdio, zéro dépendance)                                      |
-| `lsp`       | Pont LSP : diagnostics/symboles/définitions/références                        |
-| `web`       | Fetch + hygiène SSRF en cinq pièces                                           |
-| `compaction`| Compactage des longues conversations : masquage surfaceOp + flux durable en cinq étapes |
-| `checkpoint`| Restauration par instantanés : magasin de blobs sha256 + `/rewind` restauration transactionnelle en deux phases |
-| `obs`       | Observabilité : agrégats + `obs_query` + `/obs` + alertes                     |
-| `admin`     | Administration : apps_list / events_query / verbes d'installation             |
-| `webui`     | Web en loopback (`--port` ponctuel, SSE + SPA)                                |
-| `browser`   | Automatisation de navigateur : pont CDP minimal écrit à la main + outils de navigation/instantané/interaction |
+| Pièce        | Rôle                                                                                                            |
+| ------------ | --------------------------------------------------------------------------------------------------------------- |
+| `coder`      | App d'agent de code par défaut (manifeste pur, `/app` pour changer)                                             |
+| `chat`       | App de conversation (ancre de repli)                                                                            |
+| `memory`     | Mémoire : extraction/fusion/injection double/recherche/évolution/TTL/versions                                   |
+| `subagent`   | Délégation de sous-agents + sous-agents déclaratifs                                                             |
+| `goal`       | Machine à états d'objectifs + frein budgétaire + horloge                                                        |
+| `scheduler`  | Tâches `/tick` — enregistreur launchd/crontab, sans processus résident                                          |
+| `mcp`        | Pont client MCP (stdio, zéro dépendance)                                                                        |
+| `lsp`        | Pont LSP : diagnostics/symboles/définitions/références                                                          |
+| `web`        | Fetch + hygiène SSRF en cinq pièces                                                                             |
+| `compaction` | Compactage des longues conversations : masquage surfaceOp + flux durable en cinq étapes                         |
+| `checkpoint` | Restauration par instantanés : magasin de blobs sha256 + `/rewind` restauration transactionnelle en deux phases |
+| `obs`        | Observabilité : agrégats + `obs_query` + `/obs` + alertes                                                       |
+| `admin`      | Administration : apps_list / events_query / verbes d'installation                                               |
+| `webui`      | Web en loopback (`--port` ponctuel, SSE + SPA)                                                                  |
+| `browser`    | Automatisation de navigateur : pont CDP minimal écrit à la main + outils de navigation/instantané/interaction   |
 
 ### Pile de sécurité
 

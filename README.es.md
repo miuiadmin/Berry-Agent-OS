@@ -29,7 +29,7 @@ Esto no es ciencia ficción. Es el objetivo de diseño de Berry: **un sistema op
 
 El kernel mínimo de Berry hace exactamente **instalar, ejecutar, proteger, almacenar**; todo lo demás — conversación, agente de código, memoria, objetivos largos, tareas programadas, MCP, LSP, observabilidad, interfaz web — se carga como **aplicación** sobre el árbol de composición. **Instalable, desinstalable, reemplazable** — mientras las cinco líneas de vida de tu Agent (credenciales, memoria, historial de confianza, presupuestos, libros de cuenta) se acumulan una sola vez. **Cerebro nuevo, mismo cuerpo.**
 
-**27** módulos (todos con código) · **27** ganchos de ciclo de vida · **25** tipos de eventos durables · **14** piezas oficiales (todas desinstalables) · **2.400+** pruebas · **0** telemetría.
+**27** módulos (todos con código) · **27** ganchos de ciclo de vida · **25** tipos de eventos durables · **15** piezas oficiales (14 de Ring 2 + la aplicación por defecto coder, todas desinstalables) · **2.400+** pruebas · **0** telemetría.
 
 **Objetivo mínimo: la capa por defecto de fábrica alcanza el nivel de uso diario de Codex / Claude Code.**
 
@@ -130,23 +130,23 @@ El primer arranque crea el directorio de datos en `~/.berry/`. El modelo por def
 
 ### Paquete oficial (Ring 2, cada pieza desinstalable)
 
-| Pieza       | Función                                                                                               |
-| ----------- | ----------------------------------------------------------------------------------------------------- |
-| `coder`     | App de agente de código por defecto (manifiesto puro, `/app` para cambiar)                            |
-| `chat`      | App de conversación (ancla de repliegue)                                                              |
-| `memory`    | Memoria: extracción/fusión/inyección doble/búsqueda entre sesiones/evolución/TTL/cadenas de versiones |
-| `subagent`  | Delegación de subagentes + subagentes declarativos                                                    |
-| `goal`      | Máquina de estados de objetivos + freno presupuestario + reloj                                        |
-| `scheduler` | Tareas `/tick` — registrador launchd/crontab, sin proceso residente                                   |
-| `mcp`       | Puente cliente MCP (stdio, cero dependencias nuevas)                                                  |
-| `lsp`       | Puente LSP: diagnósticos/símbolos/definiciones/referencias                                            |
-| `web`       | Fetch + higiene SSRF de cinco piezas                                                                  |
-| `compaction`| Compactación de conversaciones largas: enmascaramiento surfaceOp + flujo durable de cinco pasos        |
-| `checkpoint`| Reversión por instantáneas: almacén de blobs sha256 + `/rewind` reversión transaccional en dos fases   |
-| `obs`       | Observabilidad: rollups + `obs_query` + `/obs` + alertas                                              |
-| `admin`     | Administración: apps_list / events_query / verbos de instalación                                      |
-| `webui`     | Web en loopback (`--port` puntual, SSE + SPA)                                                         |
-| `browser`   | Automatización de navegador: puente CDP mínimo manuscrito + herramientas de navegación/instantánea/interacción |
+| Pieza        | Función                                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------- |
+| `coder`      | App de agente de código por defecto (manifiesto puro, `/app` para cambiar)                                     |
+| `chat`       | App de conversación (ancla de repliegue)                                                                       |
+| `memory`     | Memoria: extracción/fusión/inyección doble/búsqueda entre sesiones/evolución/TTL/cadenas de versiones          |
+| `subagent`   | Delegación de subagentes + subagentes declarativos                                                             |
+| `goal`       | Máquina de estados de objetivos + freno presupuestario + reloj                                                 |
+| `scheduler`  | Tareas `/tick` — registrador launchd/crontab, sin proceso residente                                            |
+| `mcp`        | Puente cliente MCP (stdio, cero dependencias nuevas)                                                           |
+| `lsp`        | Puente LSP: diagnósticos/símbolos/definiciones/referencias                                                     |
+| `web`        | Fetch + higiene SSRF de cinco piezas                                                                           |
+| `compaction` | Compactación de conversaciones largas: enmascaramiento surfaceOp + flujo durable de cinco pasos                |
+| `checkpoint` | Reversión por instantáneas: almacén de blobs sha256 + `/rewind` reversión transaccional en dos fases           |
+| `obs`        | Observabilidad: rollups + `obs_query` + `/obs` + alertas                                                       |
+| `admin`      | Administración: apps_list / events_query / verbos de instalación                                               |
+| `webui`      | Web en loopback (`--port` puntual, SSE + SPA)                                                                  |
+| `browser`    | Automatización de navegador: puente CDP mínimo manuscrito + herramientas de navegación/instantánea/interacción |
 
 ### Pila de seguridad
 

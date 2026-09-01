@@ -29,7 +29,7 @@ This is not science fiction. This is Berry's design goal: **an operating system 
 
 Berry's minimal kernel does exactly **install, run, guard, store**; everything else — conversation, coding agent, memory, long goals, scheduled tasks, MCP, LSP, observability, web UI — loads as an **application** on the composition tree. **Installable, unloadable, replaceable** — while your Agent's five lifelines (credentials, memory, trust history, budgets, ledgers) accumulate only once. Every app grows on the same state — **new brain, same body**.
 
-**27** modules (all implemented) · **27** lifecycle hooks · **25** durable event types · **14** official bundle pieces (each unloadable) · **2,400+** tests · **0** telemetry.
+**27** modules (all implemented) · **27** lifecycle hooks · **25** durable event types · **15** official bundle pieces (14 Ring 2 + default coder app, each unloadable) · **2,400+** tests · **0** telemetry.
 
 **Floor goal: the factory default layer ships at the daily-usable level of Codex / Claude Code.**
 
@@ -131,23 +131,23 @@ First launch creates the data directory at `~/.berry/`. The default model is `an
 
 ### Official Bundle (Ring 2, each unloadable)
 
-| Piece       | Role                                                                                                              |
-| ----------- | ----------------------------------------------------------------------------------------------------------------- |
-| `coder`     | Default coding-agent app (pure manifest, `/app` to switch)                                                        |
-| `chat`      | Conversation app (fallback anchor)                                                                                |
-| `memory`    | Memory store: extraction/merging/dual-path injection/cross-session retrieval/utility evolution/TTL/version chains |
-| `subagent`  | Sub-agent delegation + declarative sub-agents                                                                     |
-| `goal`      | Long-goal state machine + budget brake + clock wake                                                               |
-| `scheduler` | `/tick` scheduled tasks — launchd/crontab registrar, no resident process                                          |
-| `mcp`       | MCP client bridge (stdio, zero new dependencies)                                                                  |
-| `lsp`       | Language-server bridge: diagnostics/symbols/definitions/references + post-write diagnostic injection              |
-| `web`       | Fetch tool + SSRF five-part hygiene                                                                               |
-| `compaction`| Long-conversation compaction: surfaceOp masking + five-step durable flow                                           |
-| `checkpoint`| Workspace snapshot rollback: sha256 blob store + `/rewind` two-phase transactional rollback                         |
-| `obs`       | Observability: hourly rollups + `obs_query` + `/obs` overview + alerting                                          |
-| `admin`     | Platform admin: apps_list / events_query / install verbs                                                          |
-| `webui`     | Loopback web UI (`--port` one-shot, SSE + SPA)                                                                    |
-| `browser`   | Browser automation: hand-written minimal CDP bridge + navigate/snapshot/interaction tools                          |
+| Piece        | Role                                                                                                              |
+| ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `coder`      | Default coding-agent app (pure manifest, `/app` to switch)                                                        |
+| `chat`       | Conversation app (fallback anchor)                                                                                |
+| `memory`     | Memory store: extraction/merging/dual-path injection/cross-session retrieval/utility evolution/TTL/version chains |
+| `subagent`   | Sub-agent delegation + declarative sub-agents                                                                     |
+| `goal`       | Long-goal state machine + budget brake + clock wake                                                               |
+| `scheduler`  | `/tick` scheduled tasks — launchd/crontab registrar, no resident process                                          |
+| `mcp`        | MCP client bridge (stdio, zero new dependencies)                                                                  |
+| `lsp`        | Language-server bridge: diagnostics/symbols/definitions/references + post-write diagnostic injection              |
+| `web`        | Fetch tool + SSRF five-part hygiene                                                                               |
+| `compaction` | Long-conversation compaction: surfaceOp masking + five-step durable flow                                          |
+| `checkpoint` | Workspace snapshot rollback: sha256 blob store + `/rewind` two-phase transactional rollback                       |
+| `obs`        | Observability: hourly rollups + `obs_query` + `/obs` overview + alerting                                          |
+| `admin`      | Platform admin: apps_list / events_query / install verbs                                                          |
+| `webui`      | Loopback web UI (`--port` one-shot, SSE + SPA)                                                                    |
+| `browser`    | Browser automation: hand-written minimal CDP bridge + navigate/snapshot/interaction tools                         |
 
 ### Security Stack
 

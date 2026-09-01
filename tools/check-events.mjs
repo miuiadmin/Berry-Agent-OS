@@ -514,6 +514,58 @@ for (const entry of liveCatalog) {
       }
     }
   }
+
+  // ④ README 四语全家桶计数锚（遗漏大扫 20260901 L-1/O-2 根治面——契约篇 §6.3#4
+  // 族 5③）：头部统计行「N 件官方全家桶」≡ 同文档全家桶表行数 + 四语横向一致。
+  // 真值取同文档表行数（件数 = 注册表 14 行 + 默认应用 coder 的跨轴和，无代码单点
+  // 目录——表即公开承诺面）；批3 曾同 commit 内统计行换基、表沿用旧基（14 vs 15
+  // 互斥躺了整批），此锚防同型再漂。
+  {
+    /** 文件 → (统计行件数提取正则〔恰一次〕, 全家桶表节头正则)——四语同面 */
+    const FAMILY_ANCHORS = [
+      ['README.md', /\*\*(\d+)\*\* 件官方全家桶/g, /^### 官方全家桶（Ring 2，件件可卸）$/m],
+      ['README.en.md', /\*\*(\d+)\*\* official bundle pieces/g, /^### Official Bundle \(Ring 2, each unloadable\)$/m],
+      [
+        'README.es.md',
+        /\*\*(\d+)\*\* piezas oficiales/g,
+        /^### Paquete oficial \(Ring 2, cada pieza desinstalable\)$/m,
+      ],
+      [
+        'README.fr.md',
+        /\*\*(\d+)\*\* pièces officielles/g,
+        /^### Ensemble officiel \(Ring 2, chaque pièce déchargeable\)$/m,
+      ],
+    ];
+    const statedByFile = [];
+    for (const [relPath, headRe, sectionRe] of FAMILY_ANCHORS) {
+      const full = join(MIRROR_ROOT, relPath);
+      if (!existsSync(full)) continue; // 缺席跳过同 ③（夹具树不炸器）
+      const source = readFileSync(full, 'utf8');
+      const head = [...source.matchAll(headRe)];
+      if (head.length !== 1) {
+        v(`[镜像] ${relPath} 全家桶计数锚命中 ${head.length} 次（须恰一次）——表结构漂移 fail-loud`);
+        continue;
+      }
+      const sec = sectionRe.exec(source);
+      if (sec === null) {
+        v(`[镜像] ${relPath} 全家桶表节头锚缺席——表结构漂移 fail-loud`);
+        continue;
+      }
+      const stated = Number(head[0][1]);
+      // 表行 = 节内以「| `」起头的数据行（表头/分隔行不携反引号件名）
+      const after = source.slice(sec.index + sec[0].length);
+      const nextSec = after.search(/^#{2,3} /m);
+      const section = nextSec === -1 ? after : after.slice(0, nextSec);
+      const rows = [...section.matchAll(/^\| `/gm)].length;
+      if (stated !== rows) {
+        v(`[镜像] ${relPath} 头部全家桶计数 ${stated} ≠ 表行数 ${rows}——同文档两基互斥（遗漏大扫 O-2 事故型）`);
+      }
+      statedByFile.push([relPath, stated]);
+    }
+    if (new Set(statedByFile.map(([, n]) => n)).size > 1) {
+      v(`[镜像] 四语全家桶计数不一致：${statedByFile.map(([f, n]) => `${f}=${n}`).join(' ')}`);
+    }
+  }
 }
 
 // ---- 汇总 ----

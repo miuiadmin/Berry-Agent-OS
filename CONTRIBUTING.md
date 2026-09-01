@@ -41,6 +41,11 @@ berry/
 │   ├── web/           # Ring 2 官方件：fetch + SSRF 卫生件
 │   ├── compaction/    # Ring 2 官方件：长会话压缩
 │   ├── admin/         # Ring 2 官方件：平台管理面工具
+│   ├── checkpoint/    # Ring 2 官方件：工作区快照与回退（/rewind）
+│   ├── lsp/           # Ring 2 官方件：语言服务器桥（诊断/符号/定义/引用）
+│   ├── webui/         # Ring 2 官方件·件聚落：Web 通道（SSE + 微路由 + SPA）
+│   ├── obs/           # Ring 2 官方件：观测面（rollup 四表 + /obs 告警）
+│   ├── browser/       # Ring 2 官方件：浏览器自动化（CDP 桥 + 工具面）
 │   ├── app/           # 组合根（装配序/CLI/组合树/官方件注册表——纯「装」）
 │   └── bridge/        # 内核固定机制件：分域舰队（worker/external 双载体进程隔离）
 ├── docs/              # 公开文档（架构/使用/应用开发/开发指南/运维）
