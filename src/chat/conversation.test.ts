@@ -883,6 +883,87 @@ describe('ConversationDriver 驱动级取消模型（S6 形态①②③）', () 
     expect(settled).toEqual(['completed']); // 终值如实 = 最后批完整（形态③：间隙窗不改判）
   });
 
+  it('工具执行中 interrupt × 窗口期新输入：垂死 run 不偷队（turn 边界拒抽闸）——followUp 换新控制器捎跑（20260901-c #6，Path B）', async () => {
+    // Path B（与上例 Path A 分立）：interrupt 落在工具执行中——工具批 abort
+    // break 后流程仍走 turn_end → steering 轮询（与流中断路的终态短路不同）。
+    // 修前轮询不查 run 信号 aborted，把收尾窗内新入队消息偷进垂死 run：落账
+    // 回显后永无应答（下一轮 aborted 终态收场、followUp 见空队列不捎跑）。
+    // 修后拒抽闸空手而归，消息留给 followUp 循环换新控制器捎跑（形态② 承诺）。
+    const toolStarted: boolean[] = [];
+    // 合作形挂起工具：执行即报告在飞，挂住直到 run 信号 abort（对齐 signal 取消）
+    const slowTool: AgentTool = {
+      name: 'slow',
+      description: '挂起直到 run 取消（Path B 编排用）',
+      parameters: { type: 'object', properties: {} },
+      execute: (_id, _args, signal) =>
+        new Promise((resolve) => {
+          toolStarted.push(true);
+          const finish = () => resolve({ content: [{ type: 'text', text: '工具被取消' }], isError: true });
+          if (signal?.aborted) {
+            finish();
+            return;
+          }
+          signal?.addEventListener('abort', finish, { once: true });
+        }),
+    };
+    const session = new Session();
+    const calls: LlmContext[] = [];
+    const abortedFlags: boolean[] = []; // 每次模型调用时刻的 run 信号态（换新控制器证明）
+    const streamFn: StreamFn = (context, _options, signal) => {
+      calls.push(context);
+      abortedFlags.push(signal?.aborted ?? false);
+      // abort 诚实编码（loop 终态短路的输入形）：垂死 run 的下一轮立即 aborted
+      if (signal?.aborted) return doneIterator({ ...okAssistant('垂死'), stopReason: 'aborted' });
+      if (calls.length === 1) {
+        return doneIterator({
+          ...okAssistant('调工具'),
+          content: [{ type: 'toolCall', id: 'call-slow-1', name: 'slow', arguments: {} }],
+          stopReason: 'toolUse',
+        });
+      }
+      return doneIterator(okAssistant('窗口期答'));
+    };
+    const driver = new ConversationDriver({
+      sessionId: 's6-pathb',
+      context: { messages: [], tools: [slowTool] },
+      loopConfig: { streamFn, model: 'test/model', convertToLlm: minimalConvert },
+      durable: createDurableSinks(session),
+      session,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    const pending = driver.submitOnce('慢活');
+    // 等工具真在执行（宏任务自旋有界——挂起点在工具 promise，非流迭代）
+    for (let i = 0; i < 200 && toolStarted.length === 0; i += 1) await tick();
+    expect(toolStarted).toHaveLength(1);
+    expect(driver.isRunning).toBe(true);
+
+    // interrupt 落在工具执行中（abort 同步达工具监听器）；不等结算紧接窗口期新输入
+    const interruptSettled = driver.interrupt();
+    driver.submit('窗口期新输入'); // running 仍真 → steer 入队（收尾窗内——缺陷现场）
+    await interruptSettled; // runPromise 涵盖 followUp 捎跑批（同一 launch）
+    const result = await pending;
+
+    // 调用序三段（工具路垂死形态）：[0] 工具轮 / [1] 垂死轮（工具批 abort break
+    // 后内层仍迭代一次模型步——aborted 终态短路收场，Path B 与流中断路的分野）/
+    // [2] followUp 换新控制器轮（信号未取消——修前队列被 [1] 前的轮询偷走，
+    // 此轮不发生，calls 止于 2）
+    expect(calls.length).toBe(3);
+    expect(abortedFlags[1]).toBe(true); // 垂死轮如实 aborted（打断当轮弃置）
+    expect(abortedFlags[2]).toBe(false); // 换新控制器——被打断不传染
+    const secondBatch = (calls[2]!.messages as Array<{ role: string; content: unknown }>)
+      .filter((m) => m.role === 'user')
+      .map((m) => (typeof m.content === 'string' ? m.content : ''));
+    expect(secondBatch).toContain('窗口期新输入'); // 窗口期消息真被答到
+    expect(result?.status).toBe('completed'); // 修前 run 整体 aborted（消息无应答）
+    expect(settled).toEqual(['completed']);
+    // 应答真落账（修前只有消息落账没有应答——「看得到、永远不答」的反面）
+    const answer = session.events.find(
+      (e) => e.type === 'assistant/message' && JSON.stringify(e.data).includes('窗口期答'),
+    );
+    expect(answer).toBeDefined();
+  });
+
   it('退避窗 interrupt：aborted 落账 + 终值统一 aborted + 不停摆（S6 形态③验证）', async () => {
     // 首跑 transient 失败 → 长退避中 interrupt：requestQuit 同款 abort 路，但驱动不停摆
     const session = new Session();

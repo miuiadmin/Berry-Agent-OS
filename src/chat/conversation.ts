@@ -332,6 +332,10 @@ export class ConversationDriver {
       ...deps.loopConfig,
       getSteeringMessages: async () => {
         if (!this.running) return [];
+        // 垂死 run 不抽队（20260901-c #6，骨架篇 §1.3 S6 形态②补条款）：run 信号
+        // 已 abort 的收尾窗内，turn 边界轮询空手而归——窗口期新入队消息不得被垂死
+        // run 偷走（偷走即落账回显后永无应答），留给 followUp 循环换新控制器捎跑
+        if (this.runAbort.signal.aborted) return [];
         return this.transformBatch(this.consumeMeta(this.queue.drain()));
       },
       getFollowUpMessages: async () => [],
