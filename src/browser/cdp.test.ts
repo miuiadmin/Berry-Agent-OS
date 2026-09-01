@@ -828,7 +828,49 @@ describe('browser 引擎生命周期', () => {
     await engine.dispose();
   });
 
-  // 【遗漏大扫 20260901-b #15】运行时版本闸：bringUp 两形态共用入口先验
+  // 【遗漏大扫 20260901-d #17】失败起链腿状态回放：旧代 closeEngine 的
+  // Browser.close await 窗（应答扣押）内新代起链失败——复位合取因旧连接在位
+  // 不成立，修复前 status 残留新代所置 starting（≤2s 窗诊断面谎报，旧代清算
+  // 落位才自愈）。修复：失败腿 teardown 后按 bringUp 入口快照回放（窗内入口值
+  // = 旧代先置的 closed）。
+  it('#17 失败起链腿状态回放：旧收场 await 窗内新起链失败——窗内不谎报 starting', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const cfg: Parameters<typeof makeEngine>[0] = {
+      dataDir,
+      idleMs: 250,
+      pids: [424_242, 424_243, 424_244],
+    };
+    const { engine, killTree } = makeEngine(cfg);
+    await engine.acquireContext('sess-A'); // 第一代引擎（pid 424242）
+    // 扣押 Browser.close 应答：闲置两跳后 closeEngine 进 await 窗（#23 同款编排）
+    fake.holdMethods.add('Browser.close');
+    const until = async (pred: () => boolean, ms = 2_000): Promise<void> => {
+      const start = Date.now();
+      while (!pred()) {
+        if (Date.now() - start > ms) throw new Error('until 轮询超时');
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    };
+    await until(() => fake.receivedFrames.some((f) => f.method === 'Browser.close'));
+    expect(engine.getStatus().state).toBe('closed'); // closeEngine 入场已置 closed（await 窗内）
+    // 窗内并发取用：第二代 spawn 即死（引擎先死腿——首次 poll 即拒，毫秒级快败）
+    cfg.alive = () => false;
+    cfg.noPortFile = true;
+    await expect(engine.acquireContext('sess-A')).rejects.toThrow();
+    // ★ 窗内状态面（旧代清算仍扣押未落位）：不得谎报 starting——修复前红
+    expect(engine.getStatus().state).toBe('closed');
+    // 放行旧收场：第一代照常清算（两代各清各的账——#23 语义不回归）
+    fake.releaseHeld();
+    await until(() => killTree.mock.calls.some((c) => c[0] === 424_242));
+    expect(engine.getStatus().state).toBe('closed');
+    // 下一调用照常复活（回放不楔死起链）：第三代正常起
+    cfg.alive = () => true;
+    cfg.noPortFile = false;
+    const handle3 = await engine.acquireContext('sess-A');
+    expect(handle3.session.sessionId).toBe('SESS-1');
+    expect(engine.getStatus().state).toBe('running');
+    await engine.dispose();
+  });
   // process.versions.node ≥ 22.19——不达标落 BROWSER_NODE_UNSUPPORTED，且闸在
   // spawn/连接之前：零野进程、零半建态、status 不谎报 starting（保持 idle，
   // 修复后升级 Node 再调即重试）。修复前红：无闸——spawn 照走，WebSocket

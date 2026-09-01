@@ -305,9 +305,13 @@ export interface WorkerDomain {
   /** 宿主半激活（loadApps activateOne 消费——经 makeRowLoader 包装） */
   applyRow(row: AppPlanRow, scope: ContextScope, opts?: { signal?: AbortSignal }): Promise<void>;
   /**
-   * 域收尾（**刻意收尾**——编舞既知终点非事故）：端点 dispose（在途全结算
-   * WORKER_EXITED）→ worker terminate。不触发 onExit、不做域死回卷（行作用域
-   * 随锚/行回卷自行收）。行级卸载不走这里，域级退出（/reload/关停）才用。
+   * 域收尾（**刻意收尾**——编舞既知终点非事故）：不触发 onExit 通知（terminated
+   * 旗标拦），行作用域回卷仍由 exit 监听器统一执行（P7：exit/error/terminate 即
+   * 回卷——运行时骨架篇；terminate() 恒诱发 'exit'，监听器对 bindings 全行
+   * scope.dispose，与 kill 同一监听器）。/reload/关停编舞中 terminate 与锚/ctx
+   * LIFO 回卷竞速、dispose 幂等先到先收（遗漏大扫 20260901-d #14 勘正——原
+   * 「不做域死回卷」子句与实现/规范 P7/关停序兄弟注释三方相反）。行级卸载不走
+   * 这里，域级退出（/reload/关停）才用。
    */
   terminate(reason?: string): void;
   /**

@@ -355,6 +355,10 @@ export class BrowserEngine {
       '--remote-allow-origins=*',
       ...((this.deps.config.headless ?? true) ? ['--headless=new'] : []),
     ];
+    // 入口状态快照（遗漏大扫 20260901-d #17）：失败腿回放锚——交叠窗内（旧代
+    // closeEngine 先置 closed 后 await Browser.close）入口值即 closed，常态冷
+    // 启动入口亦 closed，两形一致
+    const entryStatus = this.status;
     this.status = { state: 'starting' };
     const child = this.deps.spawnEngine({ command: discovered.path, args });
     this.child = child;
@@ -382,6 +386,11 @@ export class BrowserEngine {
       // 尾部置 this.connection），此刻现值必属别代——传现值会抢别代连接的
       // tornDown 幂等闸位，别代自身收场的树杀/登记簿净退被闸吞
       this.teardownGeneration({ conn: undefined, child });
+      // 交叠窗状态回放（遗漏大扫 20260901-d #17，契约篇 §6.10 修⑤ 勘正）：复位
+      // 合取可能因旧代连接仍在位而不成立（旧代 closeEngine 的 Browser.close 2s
+      // await 窗交叠）——status 残留本腿所置 starting 即回放入口快照（窗内入口值
+      // = 旧代先置的 closed），诊断面不谎报；常态腿复位已落 closed 时守卫不命中
+      if (this.status.state === 'starting') this.status = entryStatus;
       throw err;
     }
     this.deps.notify('浏览器引擎已启动（本地 CDP 回环）');
@@ -389,6 +398,8 @@ export class BrowserEngine {
 
   /** attach 形态起链（只连不杀——无 spawn/登记簿/树杀链） */
   private async bringUpAttach(endpoint: string): Promise<void> {
+    // 入口状态快照（d 轮 #17，与 spawn 腿同律）：失败腿回放锚
+    const entryStatus = this.status;
     this.status = { state: 'starting' };
     // 端点发现与握手产物（通知面消费浏览器自报名——收进 try 保持单出口）
     let browserName = '(unknown)';
@@ -405,6 +416,8 @@ export class BrowserEngine {
       // conn 恒传 undefined（#23，与 spawn 失败腿同律）：此刻 this.connection
       // 现值属别代（本代从未收养），不得借 teardown 抢别代幂等闸位
       this.teardownGeneration({ conn: undefined, child: undefined });
+      // 交叠窗状态回放（d 轮 #17，与 spawn 失败腿同律——契约篇 §6.10 修⑤ 勘正）
+      if (this.status.state === 'starting') this.status = entryStatus;
       throw err;
     }
     this.deps.notify(`浏览器引擎已 attach（${browserName}）`);

@@ -16,7 +16,9 @@
  *   bridge 纯机制：spawn/协议/树杀/结算）。
  * - **死亡结算**：exit → 端点 dispose（在途全结算 WORKER_EXITED）+ 组杀兜底
  *   （孙进程随组收割——域死 = 组死语义）+ 域死回卷 + onExit（worker 同款；
- *   diagnostic = stderr 两头缓存——头保 V8 OOM 判据行、尾保最深栈帧）。
+ *   diagnostic = stderr 两头缓存——头保 V8 OOM 判据行、尾保最深栈帧；spawn
+ *   失败腿例外：无进程可退 stderr 恒空，diagnostic = child 'error' 消息
+ *   缀入/独占——契约篇 §1.7，d 轮 #15 同笔收口）。
  *   spawn 失败腿同走此结算（'error' 无伴随 'exit'——一次性闸两路汇流，
  *   20260901-c #3：无监听即 uncaughtException 杀宿主）。
  * - **关停编舞**（PoC ⑪ 三段）：terminate（编舞终点）= SIGTERM 组 → 宽限
@@ -86,7 +88,10 @@ export interface ExternalDomainOptions {
   /**
    * 域退出通知（死亡结算挂钩——与 spawnWorkerDomain.onExit 同契约：意外
    * 死亡才回调、域死回卷已先行完成、rows = 死亡时点绑定行、reason 仅 kill
-   * 执法路径携带、diagnostic = stderr 两头缓存——头判据行 + 尾最深帧）。
+   * 执法路径携带、diagnostic = stderr 两头缓存——头判据行 + 尾最深帧；
+   * **spawn 失败腿例外（20260901-c #3，d 轮 #15 同步注）**：无进程可退
+   * stderr 恒空，diagnostic = child 'error' 消息缀入/独占（契约篇 §1.7
+   * spawn 失败条款——error 消息是唯一第一手））。
    */
   readonly onExit?: (info: {
     readonly workerId: string;

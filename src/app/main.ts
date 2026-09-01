@@ -85,33 +85,6 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
                消息内容（如让模型解释某旗标）经 berry run -- "--foo bar" 保真送达；
                未识别的 -- 旗标（含 --app=chat 等 = 取值形/拼写错写）全入口用法错退 2`;
 
-/** 解析结果：首个非旗标参数为子命令，其余顺次为参数 */
-interface ParsedArgs {
-  command: string;
-  args: string[];
-  debug: boolean;
-  /** run 子命令只读档（tick 子进程复用同入口——技术栈篇 §5） */
-  readOnly: boolean;
-  /** run 子命令后台记账道（tick 子进程复用同入口——席 13 第二刀 blocker 修） */
-  background: boolean;
-  /** run 子命令到点编排形态（取值旗标——值为任务名；undefined = 普通单发） */
-  tick: string | undefined;
-  /** run 子命令应用身份（第三纵切，取值旗标——值为应用 id；undefined = 对话应用域） */
-  app: string | undefined;
-  /** Web 通道端口（契约篇 §6.8 刀一，取值旗标——值为端口串，入口层转数执法）；TUI/run 收，dump-config 不收 */
-  port: string | undefined;
-  /** 安全模式（--no-apps，技术栈篇 §5）：boot 组合树空装只保 Ring 1 硬装配行 */
-  noApps: boolean;
-  /** e1 宿主沙箱包裹（--sandbox-host，技术栈篇 §5 第二十八批题 3A）：run 限定，wrapper 重 exec */
-  sandboxHost: boolean;
-  /** daemon 前台常驻（--foreground，契约篇 §6.8 刀一）：daemon 限定——start spawn 的目标形态 */
-  foreground: boolean;
-  /** 裸 berry 显式单开（--standalone，契约篇 §6.8 刀二）：跳过 daemon 检测——其余入口无害忽略 */
-  standalone: boolean;
-  /** 快速试件路径（--app-file <path>，开发指南 §8）：berry/run 两入口收——组合树注入临时行，零装机零挂载零落盘 */
-  appFile: string | undefined;
-}
-
 /**
  * 手写 argv 解析（不引 commander——第九批拍板 #15）。
  * `--tick` / `--app` 是取值旗标：吃掉紧随其后的一个参数作值（与位置参数的
