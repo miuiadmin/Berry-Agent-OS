@@ -17,6 +17,8 @@ import {
 } from '../contracts/errors.js';
 import type { SessionEvent, SurfaceOp } from '../contracts/events.js';
 import { getSessionEventType } from './event-types.js';
+// 配对完整性表检查的类型面（data 逐字段判 toolCallId——20260901-d #7）
+import type { ToolCallData, ToolResultData } from './event-types.js';
 import { createFoldState, stepFold, snapshotProjection, occludedSeqs } from './derive.js';
 import type { FoldState, ProjectedMessage } from './derive.js';
 import { interruptedTurnClosers } from './recover.js';
@@ -229,24 +231,51 @@ export class Session {
         `溯源不完整：sourceEventSeqs 未覆盖被遮蔽区间 seq ${[...required].sort((a, b) => a - b).join(', ')}`,
       );
     }
-    // 配对不切断断言（会话篇 §2 边缘纪律 1——切点永不落在 tool 配对中间）：
-    // 区间首事件是 tool/result ⇒ 其配对 tool/call（紧邻前一事件）必在区间外 = 切断；
-    // 区间末事件是 tool/call ⇒ 其配对 tool/result（紧邻后一事件）必在区间外 = 切断。
-    // 恢复时投影出无 result 的 call / 无 call 的 result 都是 loop 侧必炸形态
-    // （pi 出生 7 天重写的直接教训）——宿主级不变式，任何遮蔽写者统一受保护。
+    // 配对不切断断言（会话篇 §2 边缘纪律 1——切点永不落在 tool 配对中间）。
+    // 20260901-d #7 勘正：原「区间首/末事件类型」两断言是边界近似——真实
+    // 事件流 tool/call 与 tool/result 恒隔 gate/decision（+审批流 approval/*），
+    // 压缩切界恒落夹层事件、两检查恒不命中；判据升级为**全日志配对完整性
+    // 表检查**：按 toolCallId 建 call/result 全日志位置表，区间内每个
+    // tool/call 的配对 tool/result 必也在区间内、区间内每个 tool/result 的
+    // 配对 tool/call 必也在区间内。另一半不存在于全日志 = 无对可切、放行
+    // （遮蔽已无对事件只消灭既有孤儿不制造新孤儿——auto-retry 伴生 call 组
+    // 形态）。恢复时投影出无 result 的 call / 无 call 的 result 都是 loop 侧
+    // 必炸形态（pi 出生 7 天重写的直接教训）——宿主级不变式，任何遮蔽写者
+    // 统一受保护。
     // 豁免：type==='tool/result' 的单点自遮蔽 replace 是既有合法特例（下方
     // 「只改 content」校验全权管辖——op.start 即 op.end 即目标本身，非切断）。
-    if (type !== 'tool/result' && this.log[op.start]!.type === 'tool/result') {
-      throw new AppError(
-        SESSION_SURFACE_OP_INVALID,
-        `遮蔽区间起点 seq ${op.start} 是 tool/result——切断了 tool 配对（区间应整体含入或排除配对，边缘纪律 1）`,
-      );
-    }
-    if (this.log[op.end]!.type === 'tool/call') {
-      throw new AppError(
-        SESSION_SURFACE_OP_INVALID,
-        `遮蔽区间终点 seq ${op.end} 是 tool/call——切断了 tool 配对（区间应整体含入或排除配对，边缘纪律 1）`,
-      );
+    if (type !== 'tool/result') {
+      // 全日志配对位置表（toolCallId 一次调用唯一——重复 id 后写覆盖即可，
+      // 表只用于判「另一半是否在区间外」的存在性定位）
+      const callSeqs = new Map<string, number>();
+      const resultSeqs = new Map<string, number>();
+      for (const event of this.log) {
+        if (event.type === 'tool/call') {
+          callSeqs.set((event.data as ToolCallData).toolCallId, event.seq);
+        } else if (event.type === 'tool/result') {
+          resultSeqs.set((event.data as ToolResultData).toolCallId, event.seq);
+        }
+      }
+      for (let seq = op.start; seq <= op.end; seq++) {
+        const event = this.log[seq]!;
+        if (event.type === 'tool/call') {
+          const resultSeq = resultSeqs.get((event.data as ToolCallData).toolCallId);
+          if (resultSeq !== undefined && (resultSeq < op.start || resultSeq > op.end)) {
+            throw new AppError(
+              SESSION_SURFACE_OP_INVALID,
+              `遮蔽区间切断了 tool 配对（tool/call seq ${seq} 的 tool/result seq ${resultSeq} 不在区间 [${op.start},${op.end}] 内——区间应整体含入或排除配对，边缘纪律 1）`,
+            );
+          }
+        } else if (event.type === 'tool/result') {
+          const callSeq = callSeqs.get((event.data as ToolResultData).toolCallId);
+          if (callSeq !== undefined && (callSeq < op.start || callSeq > op.end)) {
+            throw new AppError(
+              SESSION_SURFACE_OP_INVALID,
+              `遮蔽区间切断了 tool 配对（tool/result seq ${seq} 的 tool/call seq ${callSeq} 不在区间 [${op.start},${op.end}] 内——区间应整体含入或排除配对，边缘纪律 1）`,
+            );
+          }
+        }
+      }
     }
     // tool/result 的 replace 限定只能改 content（toolCallId/error/meta 均不得变）
     if (type === 'tool/result') {

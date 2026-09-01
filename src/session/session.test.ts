@@ -290,6 +290,66 @@ describe('surfaceOp 遮蔽校验', () => {
     expect(s.deriveMessages().map((m) => m.type)).not.toContain('toolResult');
   });
 
+  // 配对完整性表检查回归锁（20260901-d #7 勘正）：真实事件流 tool/call 与
+  // tool/result 恒隔 gate/decision（+审批流 approval/*）——压缩切界恒落夹层
+  // 事件，原「区间首/末事件类型」边界近似两断言恒不命中（夹具必须带 gate
+  // 构造真实形态，紧邻配对测不出盲区）。
+  it('夹层形态：call 在区间内、result 在区间外（夹层掩住旧断言）= 切断配对拒绝', () => {
+    const s = new Session();
+    appendToolTurn(s, { gate: 'allow' });
+    // 日志：0 turn/start / 1 user / 2 assistant / 3 tool/call / 4 gate/decision /
+    // 5 tool/result / 6 assistant / 7 turn/end
+    // [2,4] 遮 assistant+call+gate：result(5) 留区间外——旧边界断言（首=assistant
+    // 末=gate）双双放行，投影产孤儿 call → 修死
+    expect(() =>
+      s.append(
+        'user/message',
+        { content: '压缩摘要' },
+        { surfaceOp: { op: 'replace', start: 2, end: 4 }, sourceEventSeqs: [2, 3, 4] },
+      ),
+    ).toThrowError(/切断了 tool 配对/);
+  });
+
+  it('夹层形态反向：result 在区间内、call 在区间外 = 切断配对拒绝（孤儿 toolResult 400 修死）', () => {
+    const s = new Session();
+    appendToolTurn(s, { gate: 'allow' });
+    // [4,6] 遮 gate+result+assistant：call(3) 留区间外——孤儿 toolResult 引用
+    // 不存在的 tool_use id，provider 400 不可续聊
+    expect(() =>
+      s.append(
+        'user/message',
+        { content: '压缩摘要' },
+        { surfaceOp: { op: 'replace', start: 4, end: 6 }, sourceEventSeqs: [4, 5, 6] },
+      ),
+    ).toThrowError(/切断了 tool 配对/);
+  });
+
+  it('整对含夹层（call+gate+result 全入区间）通过——真实压缩切界形态', () => {
+    const s = new Session();
+    appendToolTurn(s, { gate: 'allow' });
+    // [3,5] = tool/call + gate/decision + tool/result：配对完整含入夹层，合法
+    s.append(
+      'user/message',
+      { content: '压缩摘要', source: 'app:compaction' },
+      { surfaceOp: { op: 'replace', start: 3, end: 5 }, sourceEventSeqs: [3, 4, 5] },
+    );
+    expect(s.deriveMessages().map((m) => m.type)).not.toContain('toolResult');
+  });
+
+  it('无对可切放行：孤儿 call（result 不存在于全日志）的伴生遮蔽通过', () => {
+    const s = new Session();
+    appendToolTurn(s, { gate: 'allow', withResult: false });
+    // 日志：0 turn/start / 1 user / 2 assistant / 3 tool/call / 4 gate/decision（流中
+    // 断终值——auto-retry 伴生组形态：call 无 result）。[2,4] 遮掉孤儿 call 组：
+    // 另一半不存在于全日志 = 无对可切，放行（遮蔽只消灭既有孤儿不制造新孤儿）
+    s.append(
+      'user/message',
+      { content: '压缩摘要', source: 'app:compaction' },
+      { surfaceOp: { op: 'replace', start: 2, end: 4 }, sourceEventSeqs: [2, 3, 4] },
+    );
+    expect(s.deriveMessages().map((m) => m.type)).not.toContain('toolCall');
+  });
+
   it('tool/result 的 replace：只改 content 通过，动 toolCallId 拒绝', () => {
     const s = new Session();
     appendToolTurn(s);
