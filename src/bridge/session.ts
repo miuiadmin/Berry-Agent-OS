@@ -24,6 +24,7 @@ import {
   AppError,
   BRIDGE_CALL_TIMEOUT,
   BRIDGE_CANCELLED,
+  BRIDGE_ENCODE_FAILED,
   BRIDGE_HANDLER_FAILED,
   BRIDGE_METHOD_NOT_FOUND,
   BRIDGE_WORKER_EXITED,
@@ -172,7 +173,18 @@ export class BridgeEndpoint {
         );
       }
 
-      this.send({ kind: 'ask', callId, service, method, args });
+      // ask 帧编码失败（args 含 BigInt/循环引用等）：**只结算本调用**，端点
+      // 与其余在途调用不株连——消息未发出、对端无入站调用，无 cancel 必要
+      //（20260901-c #4：旧形 catch 一律 dispose——单条坏消息株连全端点，
+      // 且 stdio 腿子进程仍活 → exit 永不来 = 僵尸域）
+      if (this.send({ kind: 'ask', callId, service, method, args }) === 'message-dropped') {
+        this.settleFailure(
+          entry,
+          callId,
+          BRIDGE_ENCODE_FAILED,
+          '调用参数不可编码（JSON 通道：BigInt/循环引用）——消息未发出',
+        );
+      }
     });
   }
 
@@ -308,8 +320,21 @@ export class BridgeEndpoint {
       try {
         const value = await fn([...args], ctl.signal);
         // 执行中途被取消也照发 result：调用方已本地结算，这条「迟到 result」
-        // 由对端丢弃分支吸收——结局必达的消息对称性优于就地吞掉
-        this.send({ kind: 'result', callId, ok: true, value });
+        // 由对端丢弃分支吸收——结局必达的消息对称性优于就地吞掉。
+        // result 帧编码失败（处理方返回值不可编码）：降级为可编码的错误信封
+        // 回应——对端调用不挂死；信封恒字符串面，降级帧再失败不可达
+        if (this.send({ kind: 'result', callId, ok: true, value }) === 'message-dropped') {
+          this.send({
+            kind: 'result',
+            callId,
+            ok: false,
+            error: {
+              code: BRIDGE_HANDLER_FAILED,
+              message: '处理方返回值不可编码（JSON 通道：BigInt/循环引用）——已降级为错误信封',
+              origin: this.origin,
+            },
+          });
+        }
       } catch (err) {
         this.send({ kind: 'result', callId, ok: false, error: toEnvelope(err, this.origin) });
       } finally {
@@ -346,16 +371,32 @@ export class BridgeEndpoint {
     }
   }
 
-  /** 发送唯一出口：dispose 后丢弃；载体抛错（端口已死）按域死收尾 */
-  private send(message: BridgeMessage): void {
+  /** 发送唯一出口（三态返回——20260901-c #4 分桶）：
+   * - 'sent'：消息已交载体；
+   * - 'message-dropped'：**消息级失败**（dispose 后丢弃 / 编码失败 BRIDGE_ENCODE_FAILED）
+   *   ——单消息丢弃 + onDropped 可观测，调用方按帧语义决定是否补结算
+   *   （ask 帧结算本调用 / result 帧降级错误信封）；
+   * - 'carrier-failed'：**载体级失败**——按域死 dispose 收尾（在途全结算），
+   *   调用方无需再动（本端点条目已随 dispose 结算）。
+   * 分桶判据 = 载体在编码边界打的 BRIDGE_ENCODE_FAILED 型（stdio 腿
+   * JSON.stringify 同步抛点；worker 腿结构化克隆失败集只剩函数/symbol 等宿主
+   * 代码 bug 形，维持载体死 fail-loud——契约篇 §1.7 消息面分桶条款）。 */
+  private send(message: BridgeMessage): 'sent' | 'message-dropped' | 'carrier-failed' {
     if (this.disposed) {
       this.dropped(message);
-      return;
+      return 'message-dropped';
     }
     try {
       this.port.postMessage(message);
+      return 'sent';
     } catch (err) {
+      if (err instanceof AppError && err.code === BRIDGE_ENCODE_FAILED) {
+        // 消息级编码失败：只丢这条消息（可观测），端点与其余在途调用不株连
+        this.dropped(message);
+        return 'message-dropped';
+      }
       this.dispose(`载体发送失败：${err instanceof Error ? err.message : String(err)}`);
+      return 'carrier-failed';
     }
   }
 

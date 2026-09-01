@@ -12,6 +12,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import {
   existsSync,
   mkdtempSync,
@@ -216,7 +217,7 @@ describe('daemon-state：daemon.json 生命周期 + token 文件', () => {
 /* 命令族（start/stop/status）——stop 判活路真子进程实证                 */
 /* ------------------------------------------------------------------ */
 
-/** 假子进程（start 路不真 spawn——exitCode/kill/pid 面可控；pid 缺省 424242） */
+/** 假子进程（start 路不真 spawn——exitCode/kill/pid/on 面可控；pid 缺省 424242） */
 function fakeChild(exitCode: number | null, pid = 424_242): { child: ChildProcess; killed: () => boolean } {
   let killed = false;
   const child = {
@@ -227,6 +228,9 @@ function fakeChild(exitCode: number | null, pid = 424_242): { child: ChildProces
       killed = true;
       return true;
     },
+    // daemon.ts 已监听 'error'（spawn 失败腿，20260901-c #3）——假面补齐 on，
+    // 吞掉监听注册即可（现有用例无人 emit error）
+    on: () => child,
   } as unknown as ChildProcess;
   return { child, killed: () => killed };
 }
@@ -332,6 +336,31 @@ describe('daemon 命令族：start（gate/清扫/超时）', () => {
         probe: { startId: () => undefined },
       }),
     ).rejects.toThrowError(/启动即退/);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('start 子进程 spawn 失败（20260901-c #3）：error 无伴随 exit → 循环内即查即败（修前无监听即 uncaughtException）', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-cmd-'));
+    // 真实 spawn 失败形态：Node 只发 'error' 不发 'exit'（没有进程可退），
+    // exitCode/signalCode 双空、pid 未定义——EventEmitter 手工还原该事件面
+    const child = new EventEmitter() as unknown as ChildProcess;
+    Object.assign(child, { pid: undefined, exitCode: null, unref: () => undefined, kill: () => true });
+    await expect(
+      daemonCommandMain('start', 7860, {
+        dataRoot: root,
+        spawnFn: () => {
+          queueMicrotask(() =>
+            child.emit('error', Object.assign(new Error('spawn no-such-runner ENOENT'), { code: 'ENOENT' })),
+          );
+          return child as ChildProcess;
+        },
+        probeHttp: async () => undefined,
+        probe: { startId: () => undefined },
+      }),
+    ).rejects.toMatchObject({
+      code: DAEMON_START_TIMEOUT,
+      message: expect.stringMatching(/拉起失败（spawn：spawn no-such-runner ENOENT）/),
+    });
     rmSync(root, { recursive: true, force: true });
   });
 

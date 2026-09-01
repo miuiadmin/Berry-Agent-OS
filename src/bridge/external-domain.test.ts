@@ -484,6 +484,36 @@ describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/c
     },
   );
 
+  it(
+    'spawn 失败腿（20260901-c #3）：runner 缺失 ENOENT → error 自触发死亡结算（在途调用 WORKER_EXITED + onExit code -1 + diagnostic 第一手 + reason 缺席），无 uncaughtException',
+    { timeout: 20_000 },
+    async () => {
+      // Node 在 spawn 失败时只发 'error' 不发 'exit'（没有进程可退）——修前
+      // 零监听即冒泡 uncaughtException 杀宿主；在途 svc/load 调用也永挂
+      const exits: Array<{
+        workerId: string;
+        code: number;
+        rows: readonly string[];
+        reason?: string;
+        diagnostic?: string;
+      }> = [];
+      const d = spawnTestDomain({
+        argvWrapper: () => [join(fixtureDir, 'no-such-runner-enoent')],
+        onExit: (info) => exits.push(info),
+      });
+      const loadP = d.load({ id: 'sx', entry: echoEntry, sandbox: { carrier: 'external' } });
+      const err = await rejection(loadP); // 在途调用按域死结算（不等 loadTimeout）
+      expect(err.code).toBe('BRIDGE_WORKER_EXITED');
+      await until(() => exits.length > 0);
+      expect(exits[0]!.code).toBe(-1); // exitCode null → -1（信号死/spawn 失败同形）
+      expect(exits[0]!.diagnostic).toContain('ENOENT'); // 第一手 spawn 错误（stderr 恒空——error 消息是唯一归因）
+      expect(exits[0]!.reason).toBeUndefined(); // reason 契约：仍仅 kill 执法携带（diagnostic 是事实面）
+      // 结算后端点拒新调用（deathSettled 闸与 exit 路同一收场）
+      const again = await rejection(d.endpoint.call('svc', 'load', [{ id: 'sx2', entry: echoEntry }]));
+      expect(again.code).toBe('BRIDGE_WORKER_EXITED');
+    },
+  );
+
   it('externalEntryUrl：按宿主半自身形态判别 fork 入口（.ts 源 → external-entry.ts / 编译产物 → .js）', () => {
     expect(externalEntryUrl('file:///repo/dist/bridge/bootstrap.js').href).toBe(
       'file:///repo/dist/bridge/external-entry.js',

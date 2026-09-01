@@ -8,6 +8,7 @@
  */
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import { AppError } from '../contracts/errors.js';
 import { StdioBridgePort } from './port-stdio.js';
 
 /** 对接一对端口：两条 PassThrough 互为两向（A 读 BA 写 AB；B 读 AB 写 BA） */
@@ -95,5 +96,23 @@ describe('StdioBridgePort — NDJSON 行协议（流对接）', () => {
     inbound.write('\n   \n');
     inbound.write('{"kind":"after-blank"}\n');
     await expect(got).resolves.toEqual({ kind: 'after-blank' });
+  });
+
+  it('编码失败打型（20260901-c #4）：BigInt 载荷 → AppError(BRIDGE_ENCODE_FAILED) 上抛（消息级——载体健康，好消息照常过界）', async () => {
+    const { a } = makePair();
+    // BigInt 过不了 JSON.stringify：修前裸 TypeError 上抛（端点无从分桶）
+    try {
+      a.postMessage({ kind: 'ask', args: [1n] });
+      expect.unreachable('预期编码失败上抛');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError);
+      expect((err as AppError).code).toBe('BRIDGE_ENCODE_FAILED');
+      expect((err as AppError).message).toContain('BigInt');
+    }
+    // 载体本身健康：同向好消息照常过界（打型不伤通道）
+    const { a: a2, b } = makePair();
+    const got = nextMessage(b);
+    a2.postMessage({ kind: 'fine', v: 1 });
+    await expect(got).resolves.toEqual({ kind: 'fine', v: 1 });
   });
 });

@@ -235,11 +235,26 @@ export async function daemonCommandMain(
     });
     child.unref();
     closeSync(logFd);
+    // spawn 失败兜底（20260901-c 刀四 #3 同扫）：Node 在 spawn 失败（runner
+    // 缺失 ENOENT 等）时只发 'error' 不发 'exit'（exitCode 恒 null）——无监听
+    // 即 uncaughtException 杀掉 `berry daemon start` 本身；有监听不核则下方
+    // ready-gate 空转到超时。捕获后在循环内即查即败（与「启动即退」同族——
+    // 子进程没能起来，复用 DAEMON_START_TIMEOUT 码族、消息携带第一手错误）。
+    let spawnError: Error | undefined;
+    child.on('error', (err) => {
+      spawnError = err;
+    });
     // ready-gate：须 token 端点真握手（GET /api/sessions 返 200）——health 探活
     // 不构成活证（M4）；子进程启动即退也在此响亮失败（带日志路径）
     const probeHttp = deps.probeHttp ?? httpProbe;
     const deadline = Date.now() + (deps.startGateBudgetMs ?? DAEMON_START_GATE_BUDGET_MS);
     for (;;) {
+      if (spawnError !== undefined) {
+        throw new AppError(
+          DAEMON_START_TIMEOUT,
+          `daemon 子进程拉起失败（spawn：${spawnError.message}）——日志见 ${daemonLogPath(dataRoot)}`,
+        );
+      }
       if (child.exitCode !== null) {
         throw new AppError(
           DAEMON_START_TIMEOUT,

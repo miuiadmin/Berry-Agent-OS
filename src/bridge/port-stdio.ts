@@ -19,6 +19,7 @@
  */
 
 import { createInterface } from 'node:readline';
+import { AppError, BRIDGE_ENCODE_FAILED } from '../contracts/errors.js';
 import type { BridgePort } from './session.js';
 
 /** StdioBridgePort 构造参数 */
@@ -60,9 +61,22 @@ export class StdioBridgePort implements BridgePort {
     lines.on('line', (line) => this.dispatch(line));
   }
 
-  /** BridgePort.postMessage：一行一消息写出（背压自愈——见头注 PoC ⑩） */
+  /** BridgePort.postMessage：一行一消息写出（背压自愈——见头注 PoC ⑩）。
+   * 编码失败在此打型为 BRIDGE_ENCODE_FAILED 上抛——**消息级属性**（该消息含
+   * BigInt/循环引用等 JSON 编不过的值，载体本身健康），端点 send() 据此分桶
+   * 「单消息丢弃」而非误判载体死 dispose（20260901-c #4：旧形误 dispose 后
+   * 子进程仍活、exit 永不来 = 宿主侧僵尸域）。 */
   postMessage(message: unknown): void {
-    this.out.write(`${JSON.stringify(message)}\n`);
+    let line: string;
+    try {
+      line = `${JSON.stringify(message)}\n`;
+    } catch (err) {
+      throw new AppError(
+        BRIDGE_ENCODE_FAILED,
+        `消息编码失败（JSON 不可编码字段——BigInt/循环引用）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    this.out.write(line);
   }
 
   /** BridgePort.on('message')：登记监听器（本类自 dispatch 逐行派发） */

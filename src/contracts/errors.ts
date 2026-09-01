@@ -282,7 +282,7 @@ export const SKILLS_PROVIDER_INVALID = registerErrorCode('SKILLS_PROVIDER_INVALI
 /* ------------------------------------------------------------------ */
 /* 桥接协议码族（契约篇 §1.7 错误面，2026-08-26 第二十七批刀二）——      */
 /* carrier 级失败模式：AppError 家族词过界保码（信封 {code,message}）， */
-/* 非家族异常入桶码；六码全部有消费者（bridge 模块），不预造。          */
+/* 非家族异常入桶码；七码全部有消费者（bridge 模块），不预造。          */
 /* ------------------------------------------------------------------ */
 
 /** bridge：调用方主动取消的本地结算（AbortSignal 永不过界——取消消息化 + 桩本地立即结算不等对端往返；迟到 result 由迟到丢弃分支吸收，契约篇 §1.7） */
@@ -297,6 +297,8 @@ export const BRIDGE_METHOD_NOT_FOUND = registerErrorCode('BRIDGE_METHOD_NOT_FOUN
 export const BRIDGE_HANDLER_FAILED = registerErrorCode('BRIDGE_HANDLER_FAILED');
 /** bridge：worker 域 v1 同步收窄面（parallel/serial/waterfall/registerMessageRole/registerSessionEventType 等桩上直接 throw——收窄清单入册契约篇 §1.7，宁响亮不静默假实现） */
 export const BRIDGE_SURFACE_NARROWED = registerErrorCode('BRIDGE_SURFACE_NARROWED');
+/** bridge：消息编码失败（send 时点载荷不可编码——BigInt/循环引用等；**消息级失败**：载体仍健康，单消息丢弃/单调用结算不株连端点——2026-09-01 遗漏大扫 20260901-c #4 修死，载体在编码边界打型、端点 send() 据此分桶，契约篇 §1.7 消息面） */
+export const BRIDGE_ENCODE_FAILED = registerErrorCode('BRIDGE_ENCODE_FAILED');
 
 /* ------------------------------------------------------------------ */
 /* 事件词汇执法码族（契约篇 §1.1，2026-08-23 M2 /reload 纵切）——        */

@@ -17,6 +17,8 @@
  * - **死亡结算**：exit → 端点 dispose（在途全结算 WORKER_EXITED）+ 组杀兜底
  *   （孙进程随组收割——域死 = 组死语义）+ 域死回卷 + onExit（worker 同款；
  *   diagnostic = stderr 两头缓存——头保 V8 OOM 判据行、尾保最深栈帧）。
+ *   spawn 失败腿同走此结算（'error' 无伴随 'exit'——一次性闸两路汇流，
+ *   20260901-c #3：无监听即 uncaughtException 杀宿主）。
  * - **关停编舞**（PoC ⑪ 三段）：terminate（编舞终点）= SIGTERM 组 → 宽限
  *   → SIGKILL 组——给域内告别窗；kill（watchdog 执法，域已冻结收不到信号）
  *   = 直接 SIGKILL 组，按意外死亡全流程结算。
@@ -215,6 +217,9 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
   let killReason: string | undefined;
   // 心跳是否已起表（首次 svc.load 成功起表——与 worker 腿同款两窗分工）
   let heartbeatArmed = false;
+  // spawn/进程错误的第一手消息（'error' 路写入——diagnostic 组装时缀入；
+  // spawn 失败的 stderr 两头缓存恒空，error 消息是唯一第一手）
+  let processError: string | undefined;
 
   /**
    * 组杀原语：负 pid 信号投给进程组（孙进程全收——PoC ⑨ 实证组死透）。
@@ -235,9 +240,14 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
    */
   const childAlive = (): boolean => child.exitCode === null && child.signalCode === null;
 
-  // 域死（崩溃/被杀/自然退）全流程：端点收尾 + 组杀兜底 + 域死回卷 + 结算通知
-  child.on('exit', (code) => {
-    endpoint.dispose('external 域退出（exit 事件）——在途调用按域死结算');
+  // 域死（崩溃/被杀/自然退/spawn 失败）全流程：端点收尾 + 组杀兜底 + 域死回卷 +
+  // 结算通知。一次性闸汇流 exit 与 error 两路（20260901-c #3：spawn 失败时
+  // Node 只发 'error' 不发 'exit'——没有进程可退），先到者结算、后到者空转。
+  let deathSettled = false;
+  const settleDomainDeath = (code: number | null): void => {
+    if (deathSettled) return;
+    deathSettled = true;
+    endpoint.dispose('external 域退出（exit/error 事件）——在途调用按域死结算');
     // 组杀兜底：域死 = 组死语义——子先退而孙进程仍持组（应用 spawn 的后代）
     // 一并收割；SIGKILL 直杀（主已死，孙的告别窗无意义）
     killGroup('SIGKILL');
@@ -250,8 +260,10 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
     metaCache.clear();
     void Promise.allSettled(rollbacks).then(() => {
       if (!terminated) {
-        // 两头缓存单点拼装（头判据 + 尾最深帧；中段丢省略号衔接——全量 <10KiB）
-        const diagnostic =
+        // 两头缓存单点拼装（头判据 + 尾最深帧；中段丢省略号衔接——全量 <10KiB）；
+        // processError 在场即缀入（spawn 失败腿的第一手——归因走 diagnostic
+        // 事实面，reason 契约不变仍仅 kill 执法携带）
+        const stderrDiag =
           stderrHead !== '' && stderrTail !== ''
             ? stderrHead === stderrTail
               ? stderrTail
@@ -259,6 +271,8 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
             : stderrHead !== ''
               ? stderrHead
               : stderrTail;
+        const diagnostic =
+          processError === undefined ? stderrDiag : stderrDiag === '' ? processError : `${stderrDiag}\n${processError}`;
         opts.onExit?.({
           workerId,
           code: code ?? -1,
@@ -268,6 +282,17 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
         });
       }
     });
+  };
+  child.on('exit', (code) => settleDomainDeath(code));
+  // spawn 失败兜底（20260901-c #3）：Node 在 spawn 失败（runner 缺失 ENOENT/
+  // 权限 EACCES 等）时只发 'error' 不发 'exit'——无监听即 EventEmitter 冒泡
+  // uncaughtException 杀整个宿主。判活必须含 pid：spawn 失败时 exitCode/
+  // signalCode 双空（childAlive 误报活）而 pid 未定义 = 从未起来；子确实
+  // 存在且活着（kill/信号投递失败类错误）则只吸收、等 exit 自然结算。
+  child.on('error', (err) => {
+    processError = `${err.constructor.name}: ${err.message}`;
+    if (child.pid !== undefined && childAlive()) return; // 子活着——exit 终将到达
+    settleDomainDeath(null);
   });
 
   const domain: ExternalDomain = {

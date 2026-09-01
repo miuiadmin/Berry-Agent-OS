@@ -7,9 +7,17 @@
  * 回归锁：迟到纪律、本地结算不等往返、取消消息化。
  */
 import { MessageChannel, type MessagePort } from 'node:worker_threads';
-import { AppError, APP_CONFIG_INVALID } from '../contracts/errors.js';
+import { PassThrough } from 'node:stream';
+import {
+  AppError,
+  APP_CONFIG_INVALID,
+  BRIDGE_ENCODE_FAILED,
+  BRIDGE_HANDLER_FAILED,
+  BRIDGE_WORKER_EXITED,
+} from '../contracts/errors.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeEndpoint, type BridgeEndpointOptions, type BridgePort } from './session.js';
+import { StdioBridgePort } from './port-stdio.js';
 
 /** 本文件全部开过的端口——afterEach 统一收口（防事件循环悬挂） */
 const openPorts: MessagePort[] = [];
@@ -247,5 +255,78 @@ describe('BridgeEndpoint：心跳冻结检测', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(freezes.length).toBe(0);
     a.stopHeartbeat();
+  });
+});
+
+/* ---------------- 消息级编码失败分桶（20260901-c #4 修死） ---------------- */
+
+/**
+ * 搭一对 JSON 通道端点（StdioBridgePort × PassThrough）：编码失败面
+ * （BigInt/循环引用——JSON.stringify 抛）只有这条腿有，MessageChannel 腿
+ * 结构化克隆对 BigInt/循环引用天然可过（两腿失败集不同，契约篇 §1.7）。
+ */
+function makeJsonPair(optsA: BridgeEndpointOptions = {}, optsB: BridgeEndpointOptions = {}) {
+  const ab = new PassThrough(); // A→B 向
+  const ba = new PassThrough(); // B→A 向
+  const a = new BridgeEndpoint(new StdioBridgePort(ba, ab), optsA);
+  const b = new BridgeEndpoint(new StdioBridgePort(ab, ba), optsB);
+  return { a, b };
+}
+
+describe('BridgeEndpoint：载荷不可编码的失败分桶（20260901-c #4）', () => {
+  it('ask 参数不可编码 → 只结算该调用（BRIDGE_ENCODE_FAILED），端点不 dispose——同端点后续调用照常（修前：坏一条消息株连全端点 dispose）', async () => {
+    const { a, b } = makeJsonPair();
+    b.handle('svc', 'echo', (args) => ({ got: args[0] }));
+    // BigInt 过不了 JSON.stringify——消息级编码失败
+    const err = await a.call('svc', 'echo', [10n]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe('BRIDGE_ENCODE_FAILED');
+    // 端点活着：后续好调用照常往返（修前此处 BRIDGE_WORKER_EXITED——dispose 已株连）
+    await expect(a.call('svc', 'echo', ['ok'])).resolves.toEqual({ got: 'ok' });
+    expect(a.isDisposed).toBe(false);
+    expect(a.pendingCount).toBe(0); // 坏调用簿记已清
+  });
+
+  it('处理方返回值不可编码 → 降级错误信封回应（对端不挂死），端点不 dispose', async () => {
+    const { a, b } = makeJsonPair();
+    b.handle('svc', 'big', () => 99n); // 返回值过不了 JSON——result 帧编码失败
+    const err = await a.call('svc', 'big', []).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe(BRIDGE_HANDLER_FAILED);
+    expect((err as AppError).message).toContain('不可编码');
+    expect(b.isDisposed).toBe(false);
+    // 端点活着：同 handler 路后续好往返照常
+    b.handle('svc', 'fine', () => 'good');
+    await expect(a.call('svc', 'fine', [])).resolves.toBe('good');
+  });
+
+  it('tell 载荷不可编码 → 单消息丢弃（onDropped 可观测）不 dispose；后续 tell 照达', async () => {
+    const dropped: unknown[] = [];
+    const tells: unknown[] = [];
+    const { a, b } = makeJsonPair({ onDropped: (m) => dropped.push(m) }, { onTell: (_e, p) => tells.push(p) });
+    a.tell('log', { v: 1n }); // fire-and-forget：丢单是正确语义
+    a.tell('log', { v: 'good' });
+    await new Promise((r) => setTimeout(r, 30)); // 流异步面到达
+    expect(dropped.length).toBe(1);
+    expect((dropped[0] as { kind: string }).kind).toBe('tell');
+    expect(tells).toEqual([{ v: 'good' }]);
+    expect(a.isDisposed).toBe(false);
+  });
+
+  it('载体真死（非编码型抛错）→ 仍按域死 dispose 收尾（fail-loud 不随本修窄化）', async () => {
+    // postMessage 抛非 BRIDGE_ENCODE_FAILED 错误 = 载体级失败（端口已死形态）
+    const bad = new BridgeEndpoint(
+      {
+        postMessage() {
+          throw new Error('EPIPE-ish 载体已死');
+        },
+        on() {},
+      },
+      {},
+    );
+    const err = await bad.call('svc', 'x', []).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe(BRIDGE_WORKER_EXITED); // 域死结算（在途全结算）
+    expect(bad.isDisposed).toBe(true);
   });
 });
