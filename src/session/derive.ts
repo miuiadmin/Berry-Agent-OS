@@ -56,7 +56,7 @@ export type ProjectedMessage =
     };
 
 /** fold 内部状态（open assistant 缓冲 + 未结算 tool/call 配对表） */
-interface FoldState {
+export interface FoldState {
   messages: ProjectedMessage[];
   /** 当前打开的 assistant 消息缓冲：assistant/message 开缓冲，遇到 user/message 或 tool/result 先冲刷 */
   openAssistant: {
@@ -76,8 +76,17 @@ function emptyFoldState(): FoldState {
   return { messages: [], openAssistant: null, pendingCalls: new Map() };
 }
 
-/** 单事件步进（就地修改 state）——全量 fold 与未来增量缓存共用的唯一转换函数 */
-function stepFold(state: FoldState, event: SessionEvent): void {
+/**
+ * 新建空 fold 状态（增量缓存协作面之一，会话篇 §3.1 增量推进落码注记）：
+ * Session 活体缓存与全量 deriveMessages 共用 stepFold——单一转换源，结构上
+ * 不可能分歧（本文件头注的「永不二写」保证）。
+ */
+export function createFoldState(): FoldState {
+  return emptyFoldState();
+}
+
+/** 单事件步进（就地修改 state）——全量 fold 与增量缓存共用的唯一转换函数 */
+export function stepFold(state: FoldState, event: SessionEvent): void {
   switch (event.type) {
     case 'user/message': {
       flushAssistant(state);
@@ -151,16 +160,39 @@ function flushAssistant(state: FoldState): void {
   if (!state.openAssistant) {
     return;
   }
-  const buf = state.openAssistant;
-  state.messages.push({
+  state.messages.push(assistantMessageOf(state.openAssistant));
+  state.openAssistant = null;
+}
+
+/**
+ * 活缓冲 → 投影消息（冲刷与快照发布共用——同一缓冲只能折出同一消息）。
+ * toolCalls 取数组拷贝：冲刷后缓冲即弃（数组本定格），而快照发布后活缓冲仍可
+ * 收迟到 tool/call——拷贝切断共享，发布物形状不随活缓冲增长（O-6 增量缓存前提）。
+ */
+function assistantMessageOf(
+  buf: NonNullable<FoldState['openAssistant']>,
+): Extract<ProjectedMessage, { type: 'assistant' }> {
+  return {
     type: 'assistant',
     seq: buf.seq,
     content: buf.content,
-    toolCalls: buf.toolCalls,
+    toolCalls: [...buf.toolCalls],
     usage: buf.usage,
     stopReason: buf.stopReason,
-  });
-  state.openAssistant = null;
+  };
+}
+
+/**
+ * 投影快照发布（增量缓存协作面之二）：拷贝 state.messages + 把 pending
+ * assistant 缓冲折成消息**追加进拷贝**——活态零改动（缓冲继续接收迟到
+ * tool/call，下次推进自然冲刷进活数组）。返回独立新数组，调用方可安全持有。
+ */
+export function snapshotProjection(state: FoldState): ProjectedMessage[] {
+  const snapshot = [...state.messages];
+  if (state.openAssistant) {
+    snapshot.push(assistantMessageOf(state.openAssistant));
+  }
+  return snapshot;
 }
 
 /** 计算被遮蔽的 seq 集合：遍历所有 surfaceOp 的 [start,end] 区间取并集 */

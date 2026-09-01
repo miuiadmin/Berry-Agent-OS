@@ -82,6 +82,11 @@ interface SessionsCompactionFace {
   appendWithSurfaceOp(carrier: SurfaceCarrier): Promise<SessionEvent | undefined>;
   eventsOfType(type: string): SessionEvent[];
   deriveMessages(): ProjectedMessage[];
+  /**
+   * 投影 JSON 字符总长（判据底账——遗漏大扫 20260901 O-6）：恒等于
+   * JSON.stringify(deriveMessages()).length，但增量维护不随读频 stringify。
+   */
+  projectedJsonChars(): number;
   /** 当前调用链会话 id（ALS 路由——溢出压缩互斥键与语境断言用；脱链 undefined） */
   currentSessionId(): string | undefined;
 }
@@ -412,12 +417,11 @@ export function createCompactionApp(): BuiltinAppModule {
           }
         }
 
-        // ② 观测采集 + 判阈
-        const projected = sessions.deriveMessages();
+        // ② 观测采集 + 判阈（字符账走 sessions 窄面增量计数——O-6，不再全量 stringify）
         const verdict = evaluateThreshold({
           lastLoopUsageInput: lastLoopUsageInput(),
           contextWindow: currentContextWindow(),
-          projectedChars: JSON.stringify(projected).length,
+          projectedChars: sessions.projectedJsonChars(),
           thresholdRatio: cfg.thresholdRatio,
           fallbackWindowTokens: cfg.fallbackWindowTokens,
         });

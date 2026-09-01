@@ -17,8 +17,8 @@ import {
 } from '../contracts/errors.js';
 import type { SessionEvent, SurfaceOp } from '../contracts/events.js';
 import { getSessionEventType } from './event-types.js';
-import { deriveMessages } from './derive.js';
-import type { ProjectedMessage } from './derive.js';
+import { createFoldState, stepFold, snapshotProjection, occludedSeqs } from './derive.js';
+import type { FoldState, ProjectedMessage } from './derive.js';
 import { interruptedTurnClosers } from './recover.js';
 import type { SyntheticCloser } from './recover.js';
 import { deepFreeze, jsonBytes, snapshotJsonValue } from './snapshot.js';
@@ -75,14 +75,39 @@ export interface AppendOptions {
 /** 单事件体积护栏默认值：64 KiB */
 const DEFAULT_MAX_EVENT_BYTES = 64 * 1024;
 
+/**
+ * 投影增量缓存形状（deriveMessages / projectedJsonChars 共同底账，会话篇
+ * §3.1 增量推进落码注记——2026-09-01 遗漏大扫 O-6 兑现）。
+ */
+interface FoldCache {
+  /** 活体折算状态：推进到 foldedUpto；openAssistant 活缓冲只在发布拷贝时冲刷（缓冲仍可收迟到 tool/call） */
+  readonly state: FoldState;
+  /** 遮蔽 seq 集（代际重建时从全日志 surfaceOp 重建；无新遮蔽则增量路径零维护） */
+  occluded: Set<number>;
+  /** state 已折算到的事件数（= log.length 快照；落后即待推进） */
+  foldedUpto: number;
+  /** 发布物（拷贝数组——未推进时复用同一引用，O(1) 读） */
+  published: ProjectedMessage[] | null;
+  /** 发布物 JSON 字符总长（= JSON.stringify(published).length，全等式增量维护） */
+  publishedChars: number;
+  /** state.messages 已计字符的条数前缀（冲刷进活数组即定格，按条恰计一次） */
+  countedUpto: number;
+  /** state.messages[0..countedUpto) 各条 JSON.stringify 长度和 */
+  sumLens: number;
+}
+
 export class Session {
   readonly header: SessionHeader;
   /** 事件日志（冻结事件；仅构造与 append 写入，无 update/delete） */
   private readonly log: SessionEvent[] = [];
   private readonly maxEventBytes: number;
   private readonly emitLive?: (event: SessionEvent) => void;
-  /** 投影缓存（同长度直接复用；append-only + 遮蔽只增使失效条件简单可靠） */
-  private cache: { length: number; messages: ProjectedMessage[] } | null = null;
+  /**
+   * 投影增量缓存（§3.1 增量推进 + §10#5「首发纯内存增量缓存」）：读时惰性推进
+   * ——append 零缓存动作（每事件在下次读时恰折一次 O(new)），surfaceOp 代际
+   * 失效见 advanceFold 注记。
+   */
+  private fold: FoldCache | null = null;
 
   constructor(options: SessionOptions = {}) {
     this.maxEventBytes = options.maxEventBytes ?? DEFAULT_MAX_EVENT_BYTES;
@@ -162,7 +187,7 @@ export class Session {
       ...(options.sourceEventSeqs ? { sourceEventSeqs: options.sourceEventSeqs } : {}),
     };
     this.log.push(event);
-    this.cache = null; // append-only 但遮蔽语义随新事件变化，统一失效最简可靠
+    // append 零缓存动作：增量缓存读时惰性推进（advanceFold），失效判定集中在读侧
 
     // ⑥同步活体通知（观察者异常隔离由 ctx.emit 的 per-handler catch 提供；本层不吞装配错误）
     this.emitLive?.(event);
@@ -247,14 +272,100 @@ export class Session {
 
   /**
    * 模型历史投影（缓存复用；纯函数转换见 derive.ts——单一转换源，此处仅缓存层）。
+   * 增量缓存（§3.1 增量推进落码注记 + §10#5）：日志未推进时返回**同一引用** O(1)
+   * ——引用稳定性是锁定的可观察契约（session.test.ts 回归锁，遗漏大扫 20260901 O-6）。
    */
   deriveMessages(): ProjectedMessage[] {
-    if (this.cache && this.cache.length === this.log.length) {
-      return this.cache.messages;
+    return this.advanceFold().published!;
+  }
+
+  /**
+   * 投影 JSON 字符总长（compaction 阈值判据底账）：恒等于
+   * JSON.stringify(deriveMessages()).length，但按严格可加性增量维护
+   * （公式见 advanceFold 尾注），不随读频全量 stringify。
+   */
+  projectedJsonChars(): number {
+    return this.advanceFold().publishedChars;
+  }
+
+  /**
+   * 折算推进（读时惰性，四步）：
+   * ①O(1) 命中：foldedUpto === log.length 且已发布 → 原样复用（引用与字符双 O(1)）。
+   * ②代际失效判定：冷启动（fold 为空）或新段含 surfaceOp 事件 → 全量重建。
+   *   遮蔽只能指回更早 seq（validateSurfaceOp 保证），增量步进无法回溯摘除已折
+   *   节点，故遇新遮蔽整体清态重折——仍走 stepFold 同一转换函数（单一转换源不破）。
+   *   「从遮蔽起点重折」的精化形挂 checkpoint 持久化批（§3.1 注记），v1 取退化形。
+   * ③增量步进：foldedUpto..log.length 逐事件 stepFold（新段事件不可能命中旧遮蔽
+   *   ——遮蔽只指向更早 seq；判定照做求统一），每事件恰折一次 O(new)。
+   * ④发布：snapshotProjection 拷贝发布（pending assistant 缓冲冲刷进**拷贝**，活缓冲
+   *   继续收迟到 tool/call）；字符按可加性维护——
+   *   JSON.stringify(arr).length = 2 + Σ len(JSON.stringify(item)) + (n-1)
+   *   sumLens 只累计已冲刷条目（冲刷即定格、条目从此不变），pending 条目每次发布
+   *   现算（缓冲跨发布可增，不缓存）。
+   */
+  private advanceFold(): FoldCache {
+    const upto = this.log.length;
+    let fold = this.fold;
+    if (fold && fold.foldedUpto === upto && fold.published) {
+      return fold; // ①命中：引用与字符都不动
     }
-    const messages = deriveMessages(this.log);
-    this.cache = { length: this.log.length, messages };
-    return messages;
+    // ②代际失效：冷启动或新段携带 surfaceOp → 整体重建（occludedSeqs 全日志重建遮蔽集）
+    let rebuild = !fold;
+    for (let i = fold?.foldedUpto ?? 0; i < upto; i++) {
+      if (this.log[i]!.surfaceOp) {
+        rebuild = true;
+        break;
+      }
+    }
+    if (rebuild) {
+      const occluded = occludedSeqs(this.log);
+      const state = createFoldState();
+      for (const event of this.log) {
+        if (!occluded.has(event.seq)) {
+          stepFold(state, event);
+        }
+      }
+      this.fold = fold = this.publish({
+        state,
+        occluded,
+        foldedUpto: upto,
+        published: null,
+        publishedChars: 0,
+        countedUpto: 0,
+        sumLens: 0,
+      });
+      return fold;
+    }
+    // ③增量步进：新事件逐个折入活态（不可达遮蔽，判定照做）
+    fold = fold!;
+    for (let i = fold.foldedUpto; i < upto; i++) {
+      const event = this.log[i]!;
+      if (!fold.occluded.has(event.seq)) {
+        stepFold(fold.state, event);
+      }
+    }
+    fold.foldedUpto = upto;
+    // ④发布（就地更新 published/publishedChars 并返回同一缓存对象）
+    this.fold = this.publish(fold);
+    return this.fold;
+  }
+
+  /**
+   * 发布步进后的缓存（就地更新 fold 并返回）：推进前缀字符计数（已冲刷条目
+   * 恰计一次）→ 生成发布拷贝 → 按可加式合成总长。
+   */
+  private publish(fold: FoldCache): FoldCache {
+    const msgs = fold.state.messages;
+    for (let i = fold.countedUpto; i < msgs.length; i++) {
+      fold.sumLens += JSON.stringify(msgs[i]!).length;
+    }
+    fold.countedUpto = msgs.length;
+    fold.published = snapshotProjection(fold.state);
+    const n = fold.published.length;
+    // pending 条目（若有）只在拷贝尾——每次发布现算，不缓存
+    const pendingLen = n > msgs.length ? JSON.stringify(fold.published[n - 1]!).length : 0;
+    fold.publishedChars = n === 0 ? 2 : 2 + fold.sumLens + pendingLen + (n - 1);
+    return fold;
   }
 
   /**

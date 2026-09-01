@@ -95,6 +95,8 @@ function setup(opts?: { agent?: boolean }): Harness {
     appendEvent: (type: string, data: unknown): SessionEvent | undefined => session.append(type, data),
     eventsOfType: (type: string): SessionEvent[] => session.events.filter((e) => e.type === type),
     deriveMessages: (): ProjectedMessage[] => session.deriveMessages(),
+    // 字符账直通真 Session 增量计数（O-6——判据腿与宿主装配同源）
+    projectedJsonChars: (): number => session.projectedJsonChars(),
     currentSessionId: (): string | undefined => session.header.sessionId,
     appendWithSurfaceOp: async (carrier: {
       readonly type: 'user/message';

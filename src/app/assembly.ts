@@ -1216,6 +1216,12 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     /** 模型历史投影只读（增补 7 装配缺口第 2 件——应用读当前会话投影走此面，禁自扫原始流绕投影） */
     deriveMessages: (): ProjectedMessage[] => registry.routed()?.session.deriveMessages() ?? [],
     /**
+     * 投影 JSON 字符总长（遗漏大扫 20260901 O-6——compaction 判据底账）：
+     * = JSON.stringify(deriveMessages()).length 的增量维护形（Session 增量缓存）。
+     * persist:false 诊断装配返 2（空数组「[]」——deriveMessages 空数组同款降级）。
+     */
+    projectedJsonChars: (): number => registry.routed()?.session.projectedJsonChars() ?? 2,
+    /**
      * 跨会话有界时间窗查询（会话篇 §3.4 单原语，2026-08-27 刀 1）——sanctioned
      * 直读事实表（不派生状态不攒第二份账）：管理面 events_query 工具与 uninstall
      * 受影响会话数反查的公共取数面。读物理库（write-behind 未 flush 尾部不可见

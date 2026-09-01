@@ -14,6 +14,7 @@ import {
   lastClosedTurnBoundary,
   registerSessionEventType,
 } from './index.js';
+import { deriveMessages as fullFold } from './derive.js';
 
 /** 构造一个小会话的标准前缀：turn 0 = user + assistant 纯文本 */
 function makeChatSession(): Session {
@@ -369,6 +370,92 @@ describe('deriveMessages 投影（单一转换源）', () => {
     const second = s.deriveMessages();
     expect(second).not.toBe(first);
     expect(second).toHaveLength(first.length + 1);
+  });
+});
+
+describe('增量投影缓存（§3.1 增量推进 / §10#5——遗漏大扫 20260901 O-6）', () => {
+  /** 全阶段一致性互证：活体投影 ≡ 全量纯函数折算；字符账 ≡ stringify 实长 */
+  function expectConsistent(s: Session): void {
+    expect(s.deriveMessages()).toEqual(fullFold(s.events));
+    expect(s.projectedJsonChars()).toBe(JSON.stringify(s.deriveMessages()).length);
+  }
+
+  it('多形态日志全阶段等价：增量步进 / surfaceOp 代际重建 / pending 缓冲发布全覆盖', () => {
+    const s = new Session();
+    expectConsistent(s); // 空日志：字符 = 2（「[]」）
+    s.append('turn/start', {});
+    s.append('user/message', { content: '第一问' });
+    s.append('assistant/message', { content: [{ type: 'text', text: '第一答' }], stopReason: 'end_turn' });
+    expectConsistent(s); // pending assistant 折进发布拷贝
+    s.append('turn/end', { reason: 'completed' });
+    appendToolTurn(s, { gate: 'allow' }); // 工具 turn：toolCalls 内联 + toolResult 配对
+    expectConsistent(s);
+    // 代际重建路径：遮蔽事件进新段（增量步进无法回溯摘除，整体重折）
+    s.append(
+      'user/message',
+      { content: '压缩摘要' },
+      { surfaceOp: { op: 'replace', start: 1, end: 3 }, sourceEventSeqs: [1, 2, 3] },
+    );
+    expectConsistent(s);
+    // 重建后再增量（两路径交替）
+    s.append('user/message', { content: '新的一轮' });
+    expectConsistent(s);
+    // 二次遮蔽（重建 → 重建）
+    s.append(
+      'user/message',
+      { content: '再压一刀' },
+      { surfaceOp: { op: 'replace', start: 5, end: 6 }, sourceEventSeqs: [5, 6] },
+    );
+    expectConsistent(s);
+  });
+
+  it('敞开 assistant 缓冲的发布拷贝不随活缓冲增长（toolCalls 拷贝切断共享）', () => {
+    const s = new Session();
+    s.append('turn/start', {});
+    s.append('user/message', { content: '跑工具' });
+    s.append('assistant/message', { content: [], stopReason: 'tool_use' });
+    s.append('tool/call', { toolCallId: 'tc-1', name: 'read', arguments: '{}' });
+    const held = s.deriveMessages();
+    const heldTail = held.at(-1);
+    expect(heldTail?.type).toBe('assistant');
+    if (heldTail?.type !== 'assistant') return;
+    // 缓冲迟到新调用后：旧发布物形状定格不变；新发布物可见新增
+    s.append('tool/call', { toolCallId: 'tc-2', name: 'write', arguments: '{}' });
+    expect(heldTail.toolCalls).toHaveLength(1);
+    const freshTail = s.deriveMessages().at(-1);
+    if (freshTail?.type !== 'assistant') throw new Error('新发布物尾条应为 assistant');
+    expect(freshTail.toolCalls).toHaveLength(2);
+  });
+
+  it('字符账全等式逐步互证：长短内容交错 + 遮蔽重建后仍 === stringify 实长', () => {
+    const s = new Session();
+    const lines = ['短', '中等长度的句子'.repeat(3), JSON.stringify({ k: [1, 2, 3] }), 'x'.repeat(200), '尾句'];
+    s.append('turn/start', {});
+    for (const [i, line] of lines.entries()) {
+      s.append('user/message', { content: line });
+      s.append('assistant/message', { content: [{ type: 'text', text: `答 ${i}` }], stopReason: 'end_turn' });
+      // 每步互证（pending 条目现算路径 + 已冲刷条目增量累计路径都被踩到）
+      expect(s.projectedJsonChars()).toBe(JSON.stringify(s.deriveMessages()).length);
+    }
+    s.append('turn/end', { reason: 'completed' });
+    s.append(
+      'user/message',
+      { content: '遮蔽前半' },
+      { surfaceOp: { op: 'replace', start: 1, end: 4 }, sourceEventSeqs: [1, 2, 3, 4] },
+    );
+    expect(s.projectedJsonChars()).toBe(JSON.stringify(s.deriveMessages()).length);
+  });
+
+  it('引用稳定：遮蔽代际重建后未再推进的重复读仍同一引用（O(1) 读契约）', () => {
+    const s = makeChatSession();
+    s.append(
+      'user/message',
+      { content: '摘要' },
+      { surfaceOp: { op: 'replace', start: 1, end: 1 }, sourceEventSeqs: [1] },
+    );
+    const first = s.deriveMessages();
+    expect(s.deriveMessages()).toBe(first);
+    expect(s.projectedJsonChars()).toBe(JSON.stringify(first).length);
   });
 });
 
