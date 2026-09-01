@@ -186,6 +186,8 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
                 manifestFetch: (url, opts) => fetchSvc.fetch(url, opts),
                 download: (url, opts) => fetchSvc.downloadToFile(url, opts),
                 dataDir: deps.dataDir,
+                // 降级可见面：摘要账本损坏/写失败点名（P1-4——纯保护面不 brick 装机）
+                warn: (message) => ctx.logger.warn(message),
               });
               if (report.alreadyInstalled) {
                 ui.notify(
@@ -196,7 +198,7 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
               ui.notify(
                 `装机完成：Chrome for Testing ${report.version}（${report.slot.key}）\n` +
                   `路径：${report.enginePath ?? '(布局表未命中——请检查 engine/ 目录)'}\n` +
-                  `校验：SHA256 ${report.sha256.slice(0, 12)}…（${report.bytes} 字节，记档 install.json 供人工核）`,
+                  `校验：SHA256 ${report.sha256.slice(0, 12)}…（${report.bytes} 字节，锚定摘要账本 digests.json + 记档 install.json）`,
               );
             } catch (err) {
               ui.notify(`装机失败：${describeError(err)}`, { level: 'error' });

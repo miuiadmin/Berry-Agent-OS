@@ -102,7 +102,7 @@ const MODULE_EDGES = {
   // contracts 类型边 + web 卫生件边（刀二 navigate SSRF 前置真用入册——
   // assertPublicHost/requireHttpUrl 复用同码第三消费面）。spawn/kill/桥核/
   // 登记簿全经组合根闭包注入（app/browser-spawn.ts）——结构上不见 exec/mcp/context
-  browser: ['contracts', 'web'],
+  browser: ['contracts', 'web', 'persist'],
   app: [
     'contracts',
     'context',

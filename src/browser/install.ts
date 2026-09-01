@@ -4,8 +4,17 @@
  *
  * 流程：with-downloads 清单拉取（ctx.fetch.fetch——KB 级 JSON，抓取预算
  * 足够且 URL 直给免拼装）→ Stable 通道按 platform 键匹配 → downloadToFile
- * （白名单 = CfT 两域）→ 手写 zip 读取器解包至 `engine/<version>/` →
- * 布局表尾件 chmod 0o755（双保险）→ 锁档 `install.json` → 删 zip。
+ * （白名单 = CfT 两域）→ **摘要账本比对（P1-4：键命中且不符即拒解压执行）**
+ * → 手写 zip 读取器解包至 `engine/<version>/` → 布局表尾件 chmod 0o755
+ * （双保险）→ 锁档 `install.json` + **账本锚定（键缺席即写入——TOFU 首装锚）**
+ * → 删 zip。
+ *
+ * 摘要账本（成熟度扫描 20260901 P1-4）：`engine/digests.json`（engine/ 根——
+ * 删版本目录重装不丢锚），键 = `<version>/<platform>` → sha256。上游实测无
+ * per-file 摘要通道（with-downloads 清单与每版 JSON 均只 platform+url——契约
+ * 篇 §6.10 实测勘误），故对照面取「同版本字节不变式」（CfT 不重发已发版本）：
+ * 重装回执与锚不符即损坏/篡改，拒解压执行；首装键缺席 = TOFU 锚定本次字节。
+ * 账本自身损坏 = warn 点名 + 空表降级（纯保护面 sidecar：不 brick 装机）。
  *
  * 幂等：同版本锁档在场即回执不重下（幂等判据 = 锁档；发现序判据 = X_OK
  * 探测——两判据不同源：锁档在而尾件损时 install 回执已装、发现序落④，
@@ -19,6 +28,7 @@ import { accessSync, constants } from 'node:fs';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AppError, BROWSER_INSTALL_FAILED } from '../contracts/errors.js';
+import { writeAtomicFile } from '../persist/index.js';
 import { ENGINE_LAYOUTS } from './discover.js';
 import { extractZip } from './zip.js';
 
@@ -53,6 +63,8 @@ export interface InstallDeps {
   readonly download: InstallDownloadFace;
   /** 数据目录（engine/ 物理锚——与 BrowserAppDeps.dataDir 同源） */
   readonly dataDir: string;
+  /** 降级可见面（ctx.logger.warn）：摘要账本损坏/写失败点名——缺席即静默降级（纯保护面不 brick 装机） */
+  readonly warn?: (message: string) => void;
 }
 
 /** 平台档位（两级键：JSON platform 键 + zip 顶层目录名——契约篇钉死换算） */
@@ -89,7 +101,7 @@ export interface InstallReport {
   readonly slot: PlatformSlot;
   /** 引擎可执行绝对路径（布局表命中位） */
   readonly enginePath: string | undefined;
-  /** zip SHA256（记档供人工核——v1 不对照远端 checksum） */
+  /** zip SHA256（摘要账本锚 + 锁档记档供人工核——P1-4 TOFU 语义） */
   readonly sha256: string;
   /** zip 字节数 */
   readonly bytes: number;
@@ -120,6 +132,74 @@ function installFail(detail: string): AppError {
  * 表恒空（每键自清），无常驻条目。
  */
 const inflightInstalls = new Map<string, Promise<InstallReport>>();
+
+/* ---------------- 摘要账本（成熟度扫描 20260901 P1-4） ---------------- */
+
+/** 账本档名（engine/ 根——刻意在 versionDir 外：删版本目录重装不丢锚） */
+const DIGESTS_FILE = 'digests.json';
+
+/** 账本键：`<version>/<platform>`——同版本字节不变式的对照键（版本+平台唯一定位一份 zip） */
+function digestKey(version: string, slotKey: string): string {
+  return `${version}/${slotKey}`;
+}
+
+/**
+ * 读摘要账本：档缺席 = 空表（首装态——TOFU 锚定语义，静默）；在场但读失败/
+ * 不可解/非对象形态 = warn 点名 + 空表降级（纯保护面 sidecar：账本坏了不能
+ * brick 装机，但降级必可见——操作者据此人工处置重锚）。
+ */
+async function loadDigests(engineRoot: string, warn?: (message: string) => void): Promise<Record<string, string>> {
+  const ledgerPath = join(engineRoot, DIGESTS_FILE);
+  let raw: string;
+  try {
+    raw = await readFile(ledgerPath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}; // 缺席是首装常态非异常
+    warn?.(
+      `browser 装机摘要账本不可读（${ledgerPath}）——按空账本降级：${err instanceof Error ? err.message : String(err)}`,
+    );
+    return {};
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('非对象形态');
+    return parsed as Record<string, string>;
+  } catch (err) {
+    warn?.(
+      `browser 装机摘要账本损坏（${ledgerPath}）——按空账本降级重锚：${err instanceof Error ? err.message : String(err)}`,
+    );
+    return {};
+  }
+}
+
+/**
+ * 账本写入串行链（进程级）：读-改-写非原子，两装机流交叠写即丢更新（后写
+ * 覆盖先写刚锚的键）。链化后天然全串行；丢更新竞速本 benign（同键同值无害），
+ * 串行链是廉价正确性。生命周期 = 进程级单链：无在飞写时恒为已解决 promise。
+ */
+let digestsWriteChain: Promise<void> = Promise.resolve();
+
+/**
+ * 记摘要入账本：键同值在场即零改写（比对相符腿不重锚）；否则写回。写面走
+ * persist 原子写公共件（O_EXCL temp + rename——账本自身防撕裂）。失败原样
+ * 上抛（调用方降级 warn——产物已落盘，保护面缺席可见即可，不 brick 装机）。
+ */
+function recordDigest(
+  engineRoot: string,
+  key: string,
+  sha256: string,
+  warn?: (message: string) => void,
+): Promise<void> {
+  const run = async (): Promise<void> => {
+    const digests = await loadDigests(engineRoot, warn);
+    if (digests[key] === sha256) return; // 已锚同值——零改写
+    digests[key] = sha256;
+    await writeAtomicFile(join(engineRoot, DIGESTS_FILE), `${JSON.stringify(digests, null, 2)}\n`);
+  };
+  // 尾链接力：前写成败均放行本写（链不断）；返回链尾供调用方 await 本写结果
+  digestsWriteChain = digestsWriteChain.then(run, run);
+  return digestsWriteChain;
+}
 
 /**
  * 装机主口（/browser install 命令消费）。
@@ -200,6 +280,18 @@ export async function installEngine(
     });
     // 解包（失败腿：extractZip 自清半解包目录后 throw——zip 档同笔清理见下）
     try {
+      // 摘要账本比对（P1-4）：下载后、解包前——键命中且不符即拒解压执行（撕裂/
+      // 篡改数据绝不落执行位）；键缺席 = 首装 TOFU（无对照面——锚定本次字节）。
+      // 在 try 内 = 拒绝腿同享 zip 即清 finally（下载物零残留）
+      const ledgerKey = digestKey(version, slot.key);
+      const anchored = (await loadDigests(engineRoot, deps.warn))[ledgerKey];
+      if (anchored !== undefined && anchored !== downloaded.sha256) {
+        throw installFail(
+          `重装摘要漂移拒解压执行：${ledgerKey} 已锚 ${anchored}、本次下载回执 ${downloaded.sha256}` +
+            `（同版本同平台字节应不变——CfT 不重发已发版本；漂移即下载损坏或源头篡改）。` +
+            `处置：确认本次下载可信后删除 ${join(engineRoot, DIGESTS_FILE)} 重锚（TOFU 语义将重新锚定）`,
+        );
+      }
       await extractZip(zipPath, versionDir);
       // 布局表尾件 chmod 0o755（双保险——zip 权限位缺席时发现序 X_OK 仍可命中）
       for (const tail of layoutTailsFor(slot.layoutDir)) {
@@ -214,6 +306,16 @@ export async function installEngine(
         installedAt: new Date().toISOString(),
       };
       await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
+      // 账本锚定（P1-4）：键缺席即写入（TOFU 首装锚；相符腿 recordDigest 内零改写）。
+      // 写失败 = warn 降级不 brick（产物已落盘且锁档在场——下次幂等腿不重下，
+      // 保护面缺席可见即可；删版本目录重装路自然重锚）
+      if (anchored === undefined) {
+        await recordDigest(engineRoot, ledgerKey, downloaded.sha256, deps.warn).catch((err: unknown) => {
+          deps.warn?.(
+            `browser 装机摘要账本写入失败（${join(engineRoot, DIGESTS_FILE)}）：${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
     } finally {
       await rm(zipPath, { force: true }).catch(() => {}); // zip 即用即清（tarball 自锁先例）
     }

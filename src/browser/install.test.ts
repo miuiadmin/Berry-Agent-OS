@@ -7,7 +7,7 @@
  * source='downloaded'（③ 下载引擎位与装机产物的闭环自证）。
  */
 
-import { access, constants, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { access, constants, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -370,6 +370,119 @@ describe('installEngine 并发重入互斥（#12）', () => {
       expect(retry.alreadyInstalled).toBe(false);
       expect(entered).toBe(2); // 重试腿真下载了一次
       expect(await exists(join(dir, 'browser', 'engine', CONC_VERSION, 'install.json'))).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/* ---------------- 摘要账本（成熟度扫描 20260901 P1-4——TOFU 首装锚 + 重装比对） ---------------- */
+
+/** 摘要账本组独立版本（独立目录独立版本——不沾染共享 dataDir 组的锁档串行链） */
+const LEDGER_VERSION = '137.0.99.9';
+const LEDGER_MANIFEST = JSON.stringify({
+  channels: {
+    Stable: {
+      version: LEDGER_VERSION,
+      downloads: { chrome: [{ platform: 'mac-arm64', url: 'https://storage.googleapis.com/cft/l.zip' }] },
+    },
+  },
+});
+/** 摘要账本档路径（engine/ 根——刻意在 versionDir 外：删版本重装不丢锚） */
+const digestsPath = (dir: string) => join(dir, 'browser', 'engine', 'digests.json');
+/** 账本组假下载回执摘要（与 fakeDownload 假体同串——比对逻辑的「相符」侧） */
+const LEDGER_SHA = 'ab12cd34ef56';
+
+describe('installEngine 摘要账本（P1-4）', () => {
+  it('重装摘要漂移 → 拒解压执行：BROWSER_INSTALL_FAILED + versionDir 零落盘 + 账本不被覆写', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'berry-install-d1-'));
+    try {
+      const zipBytes = singleEntryZip(LAYOUT_TAIL, Buffer.from([0xcf, 0xfa, 0xed, 0xfe]));
+      // 预置账本：该 version/platform 已锚 deadbeef——本次下载回执 ab12… 即漂移
+      await mkdir(join(dir, 'browser', 'engine'), { recursive: true });
+      await writeFile(digestsPath(dir), JSON.stringify({ [`${LEDGER_VERSION}/mac-arm64`]: 'deadbeef00' }));
+      const dlCalls: Array<{ url: string; destPath: string; allowedHosts: readonly string[] }> = [];
+      const deps: InstallDeps = {
+        manifestFetch: fakeManifest([], { status: 200, text: LEDGER_MANIFEST, truncated: false }),
+        download: fakeDownload(zipBytes, dlCalls),
+        dataDir: dir,
+      };
+
+      // 修前形态：无账本面——装机照常成功解包执行（本测红即证缺陷在场）
+      const err = await installEngine(deps, { platform: 'darwin', arch: 'arm64' }).then(
+        () => {
+          throw new Error('期望抛 AppError(BROWSER_INSTALL_FAILED)');
+        },
+        (e) => e,
+      );
+      expect(err).toBeInstanceOf(AppError);
+      expect((err as AppError).code).toBe(BROWSER_INSTALL_FAILED);
+      expect((err as Error).message).toContain('digests.json'); // 处置指引含重锚路
+
+      // 比对在下载后解包前：下载已发生、解压零落盘、zip 即清
+      expect(dlCalls).toHaveLength(1);
+      expect(await exists(join(dir, 'browser', 'engine', LEDGER_VERSION))).toBe(false);
+      expect(await exists(join(dir, 'browser', 'engine', `${LEDGER_VERSION}.zip`))).toBe(false);
+      // 拒绝腿不重锚（重锚是人工处置非自动——账本保持原值）
+      expect(JSON.parse(await readFile(digestsPath(dir), 'utf8'))).toEqual({
+        [`${LEDGER_VERSION}/mac-arm64`]: 'deadbeef00',
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('首装 TOFU 锚定落账本 + 重装比对相符放行（删 versionDir 强制重下形态）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'berry-install-d2-'));
+    try {
+      const zipBytes = singleEntryZip(LAYOUT_TAIL, Buffer.from([0xcf, 0xfa, 0xed, 0xfe]));
+      const deps: InstallDeps = {
+        manifestFetch: fakeManifest([], { status: 200, text: LEDGER_MANIFEST, truncated: false }),
+        download: fakeDownload(zipBytes, []),
+        dataDir: dir,
+      };
+
+      // 首装：账本键缺席 = TOFU 锚定（首下载无对照面——诚实披露语义）
+      await installEngine(deps, { platform: 'darwin', arch: 'arm64' });
+      // 修前形态：无账本文件（本断言红即证锚定缺席）
+      const anchored = JSON.parse(await readFile(digestsPath(dir), 'utf8'));
+      expect(anchored).toEqual({ [`${LEDGER_VERSION}/mac-arm64`]: LEDGER_SHA });
+
+      // 删整个版本目录（用户清理形态——账本在 engine/ 根不受牵连）→ 重下比对相符 → 放行
+      await rm(join(dir, 'browser', 'engine', LEDGER_VERSION), { recursive: true, force: true });
+      const second = await installEngine(deps, { platform: 'darwin', arch: 'arm64' });
+      expect(second.alreadyInstalled).toBe(false); // 锁档随版本目录已删——真重下
+      // 账本锚不变（比对相符腿零改写）
+      expect(JSON.parse(await readFile(digestsPath(dir), 'utf8'))).toEqual(anchored);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('账本损坏 → warn 点名 + 重锚降级不 brick：装机照常成功、账本重建为有效形', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'berry-install-d3-'));
+    try {
+      const zipBytes = singleEntryZip(LAYOUT_TAIL, Buffer.from([0xcf, 0xfa, 0xed, 0xfe]));
+      await mkdir(join(dir, 'browser', 'engine'), { recursive: true });
+      // 损坏账本（截断/半写形态）——纯保护面 sidecar：降级不 brick 装机，但降级必可见
+      await writeFile(digestsPath(dir), 'not json {{{');
+      const warns: string[] = [];
+      const deps: InstallDeps = {
+        manifestFetch: fakeManifest([], { status: 200, text: LEDGER_MANIFEST, truncated: false }),
+        download: fakeDownload(zipBytes, []),
+        dataDir: dir,
+        warn: (message) => warns.push(message),
+      };
+
+      // 修前形态：无 warn 面、无账本面——本测两断言红即证缺陷在场
+      const report = await installEngine(deps, { platform: 'darwin', arch: 'arm64' });
+      expect(report.alreadyInstalled).toBe(false);
+      // 降级可见：warn 点名损坏路径
+      expect(warns.some((w) => w.includes('digests.json'))).toBe(true);
+      // 账本重建为有效形（本次摘要入锚——后续重装恢复比对保护）
+      expect(JSON.parse(await readFile(digestsPath(dir), 'utf8'))).toEqual({
+        [`${LEDGER_VERSION}/mac-arm64`]: LEDGER_SHA,
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
