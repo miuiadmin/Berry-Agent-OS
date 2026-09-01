@@ -3,11 +3,18 @@
 # 仓库四道门禁（typecheck / test / lint:topology / format:check）此前只有
 # 本机手动钩子与发版时点（release 契约 1）执法，外部 PR / 新机器 clone 零
 # 强制——本工作流把四门禁搬上 GitHub Actions：push 与 pull_request 双触发
-# （外部贡献走 PR 面）。Node 22 单矩阵（运行时下限 = 22.19，22.x 最新即满足）。
+# （外部贡献走 PR 面）。Node 22 单线（运行时下限 = 22.19，22.x 最新即满足）。
 #
 # 关键细节：checkout 必须 fetch-depth: 0（全史）——check-tense 规则 1 把公开
 # 文档里的「已落码 <hash>」引用对照 git log 全量 commit 前缀集，浅克隆只见
 # 单 commit，数百条 hash 引用会全数误红。
+#
+# 2026-09-02 成熟度扫描 20260901 P1-1/P1-5/P1-2 面扩（技术栈篇 CI 门禁段）：
+# ①gates 矩阵 ubuntu + macOS 双跑（主开发平台 macOS 零远端执法的缺口——
+#   better-sqlite3 native 依赖 + 终端用户 CLI 双理由）；②npm audit 步（依赖
+#   漏洞防回归——只 CI 不进本地钩子，audit 需外网查询）；③release-dry-run
+#   并行 job（发布物六道契约日常执法——此前只在发版时点单机跑，构建配置漂移
+#   类事故最长隔整个周期才暴露）。
 name: CI
 
 on:
@@ -16,7 +23,12 @@ on:
 
 jobs:
   gates:
-    runs-on: ubuntu-latest
+    strategy:
+      # 单腿红不取消另一腿（macOS 红独占情报面——ubuntu 绿不代表 macOS 绿）
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,6 +47,9 @@ jobs:
         #    不来，探测照样失败（三连锁红：mcp e2e / self-build-loop external
         #    载体行装载 / sandbox probe）。runner 有 sudo，sysctl 放行即真跑。
         #    本机 docker 复现容器同因 seccomp 拦 userns 需 --privileged（环境差注记）
+        # macOS 腿跳过：本机沙箱走 seatbelt（sandbox-exec）不需 bwrap——只有
+        # Linux 腿需要此步。
+        if: runner.os == 'Linux'
         run: >
           sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap &&
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -48,3 +63,37 @@ jobs:
         run: npm run lint:topology
       - name: 门禁四 format:check
         run: npm run format:check
+      - name: 门禁五 npm audit（生产依赖漏洞——high 级以上红）
+        # 只查生产依赖（--omit=dev）：devDeps 漏洞不进发布物攻击面。锚 ubuntu 腿
+        # 单跑——同一 lockfile 双 OS 结果恒同，矩阵重复无情报增量。
+        if: matrix.os == 'ubuntu-latest'
+        run: npm audit --omit=dev --audit-level=high
+
+  # 发布物链路日常执法（P1-2）：release 契约 1 自含四门禁 = 本 job 的门禁步
+  #（与 gates job 去重靠并行分 job，非串行叠步）。dry-run 形态：门禁/净树/
+  # registry 探测/build/pack/装机冒烟全真做，publish 走 npm --dry-run 零上传。
+  release-dry-run:
+    runs-on: ubuntu-latest
+    permissions:
+      # id-token: write = provenance 预演（P0-5 条件位）：CI 环境检出
+      # GITHUB_ACTIONS 时 release 机自动挂 --provenance，dry-run 下 OIDC 请求
+      # 仍真发——缺 id-token 权限即红。此 job 即「发布面若迁 CI」的持续演习。
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装 bubblewrap 并解除 userns 限制（release 契约 1 门禁含全量 test——mcp e2e 同依赖）
+        if: runner.os == 'Linux'
+        run: >
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap &&
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: 安装依赖（npm ci——package-lock 精确复现）
+        run: npm ci
+      - name: 发布机器演习（六道契约 dry-run——探针只读、publish 干跑零上传）
+        run: node tools/release.mjs --dry-run
