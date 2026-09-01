@@ -171,6 +171,25 @@ export function assertDistTagTerminal(observed, { isPrerelease, version, nextBef
 }
 
 /**
+ * 解析 npm pack --json 的 stdout（CI run 33545358469 根因修）。
+ * npm pack 前会跑 prepare 生命周期脚本，其 stdout（如 install-hooks 的
+ * 「钩子已安装：core.hooksPath → …」）并入主命令 stdout 前置污染 JSON——
+ * 直接 JSON.parse 整串必炸。npm --json 产物恒为行首 `[` 起的 JSON 数组
+ * （嵌套结构都带缩进，行首 `[` 只在顶层），取首个行首 `[` 到串尾解析。
+ * @param {string} stdout 子命令原始 stdout
+ * @returns {object[]|null} tarball 描述数组；不可解析返回 null（调用方报原错）
+ */
+export function parseNpmPackJson(stdout) {
+  const m = stdout.match(/(?:^|\n)(\[[\s\S]*)$/);
+  if (!m) return null;
+  try {
+    return JSON.parse(m[1]);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 契约 3：pack 内容面检视（files 白名单机器验收）。
  * 必在：bin 入口 dist/app/main.js / SPA dist/webui/ / 官方件技能资产
  * *SKILL.md / README.md / LICENSE（2026-08-31 第四十八批——license=MIT 拍板后
@@ -444,7 +463,10 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
   if (build.code !== 0) throw new Error(`构建失败（退出码 ${build.code}）`);
   const inspect = await anchoredIo.exec('pack:inspect', 'npm', ['pack', '--dry-run', '--json']);
   if (inspect.code !== 0) throw new Error('npm pack --dry-run 失败');
-  const inspectResult = JSON.parse(inspect.stdout)[0];
+  // prepare 钩子 stdout 前置污染剥离（parseNpmPackJson 单源——CI 33545358469 根因）
+  const inspectParsed = parseNpmPackJson(inspect.stdout);
+  if (inspectParsed === null) throw new Error(`npm pack --dry-run 输出不可解析：${inspect.stdout.slice(0, 120)}`);
+  const inspectResult = inspectParsed[0];
   const verdict = inspectPackEntries(inspectResult.files ?? []);
   if (!verdict.ok) {
     throw new Error(`pack 检视不过：缺失 [${verdict.missing.join('; ')}] 违禁 [${verdict.violations.join('; ')}]`);
@@ -453,7 +475,9 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
   // pack:real 的 cwd 走包装层缺省（基建大扫 #21 统一后与全体调用点同源——不再单点显式传）
   const packReal = await anchoredIo.exec('pack:real', 'npm', ['pack', '--json']);
   if (packReal.code !== 0) throw new Error('npm pack 失败');
-  const tarballName = JSON.parse(packReal.stdout)[0].filename;
+  const packParsed = parseNpmPackJson(packReal.stdout);
+  if (packParsed === null) throw new Error(`npm pack 输出不可解析：${packReal.stdout.slice(0, 120)}`);
+  const tarballName = packParsed[0].filename;
   const tarballPath = join(workDir, tarballName);
   if (!existsSync(tarballPath)) throw new Error(`tarball 未落盘：${tarballPath}`);
   const localShasum = sha1(tarballPath);

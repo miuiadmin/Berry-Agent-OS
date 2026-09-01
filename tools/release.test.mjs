@@ -26,6 +26,7 @@ import {
   classifyProbe,
   decideIdempotent,
   inspectPackEntries,
+  parseNpmPackJson,
   planTagOperations,
   publishArgs,
   runRelease,
@@ -52,6 +53,23 @@ describe('契约 2 classifyProbe：registry 探测三态（E404 与网络错分�
       shasum: null,
       deferEqual: true,
     });
+  });
+});
+
+describe('契约 3 parseNpmPackJson：prepare 钩子 stdout 前置污染剥离（CI 33545358469 根因锁）', () => {
+  it('「钩子已安装」行前置的真实 pack JSON 剥离后可解析', () => {
+    // npm pack 前跑 prepare 生命周期（install-hooks console.log → stdout 并入
+    // 主命令 stdout）——直接 JSON.parse 整串必炸（Unexpected token '钩'）
+    const polluted =
+      '钩子已安装：core.hooksPath → .githooks（提交前四门禁执法）\n[\n  {\n    "filename": "x.tgz"\n  }\n]\n';
+    const out = parseNpmPackJson(polluted);
+    expect(out).toEqual([{ filename: 'x.tgz' }]);
+  });
+
+  it('干净 JSON 直通；不可解析串返回 null（调用方报原错）', () => {
+    expect(parseNpmPackJson('[{"a":1}]')).toEqual([{ a: 1 }]);
+    expect(parseNpmPackJson('根本不是 JSON')).toBeNull();
+    expect(parseNpmPackJson('prefix [broken')).toBeNull();
   });
 });
 
