@@ -130,6 +130,9 @@ export const MCP_CONNECT_FAILED = registerErrorCode('MCP_CONNECT_FAILED');
 /** lsp：connect 期一码收口（spawn 失败/initialize 握手失败/startup 超时/相对路径 command——契约篇 §6.7；调用期超时与服务器错误是数据不升 AppError，MCP 同律） */
 export const LSP_CONNECT_FAILED = registerErrorCode('LSP_CONNECT_FAILED');
 
+/** checkpoint：blob 损坏（磁盘内容与文件名承诺 hash 不符——掉电撕裂/外部损坏；读侧 sha256 复核 fail-loud，恢复中止未 fork 快照保留——会话篇 §5.3 读侧 sha256 校验，成熟度扫描 20260901 P1-6） */
+export const CHECKPOINT_BLOB_CORRUPT = registerErrorCode('CHECKPOINT_BLOB_CORRUPT');
+
 /** browser：引擎发现序全缺席（config executablePath / 系统 Chrome 知名位 / 数据目录专用引擎皆不在场）——工具结果附 /browser install 安装指引（契约篇 §6.10；诚实缺席不自动下载） */
 export const BROWSER_ENGINE_NOT_FOUND = registerErrorCode('BROWSER_ENGINE_NOT_FOUND');
 

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { canonicalize, serializeWrites } from '../tools/fs.js';
+import { AppError } from '../contracts/errors.js';
 import { restoreWorkspace } from './restore.js';
 import { hashContent, newManifestId, writeBlob, type CheckpointManifest } from './store.js';
 
@@ -74,6 +75,44 @@ describe('restoreWorkspace（写串行链义务——遗漏大扫 20260901-c #5�
       const report = await restoring;
       expect(report.restored).toBe(1);
       expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v1-快照内容');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('blob 损坏 → 恢复整体中止：拒读点名 + 现场内容不动（成熟度扫描 20260901 P1-6）', async () => {
+    // 读侧 sha256 校验的恢复面锁：blob 与其名字（承诺 hash）不符时，恢复必须
+    // fail-loud 中止——撕裂数据绝不静默写进工作区；「恢复失败不 fork」同句同判
+    // （快照保留可重试），现场文件保持恢复前状态。
+    const ws = mkdtempSync(join(tmpdir(), 'checkpoint-restore-corrupt-'));
+    try {
+      const v1 = Buffer.from('v1-快照内容');
+      const hash = hashContent(v1);
+      await writeBlob(dataRoot, hash, v1);
+      // 篡改磁盘 blob（掉电撕裂/外部损坏形态——文件名承诺 hash、内容已非该 hash）
+      writeFileSync(join(dataRoot, 'blobs', hash.slice(0, 2), hash), '撕裂数据');
+      const target: CheckpointManifest = {
+        id: newManifestId(),
+        sessionId: 'sess-restore-corrupt-test',
+        time: 1755900000000,
+        triggerTool: 'write',
+        guard: false,
+        forkSeq: null,
+        triggerText: null,
+        files: [{ rel: 'a.txt', hash, size: v1.length, mtimeMs: 1, mode: 0o644 }],
+        skipped: [],
+        newBytes: v1.length,
+        totalBytes: v1.length,
+      };
+      // 现场态：a.txt = v2（若校验缺席，撕裂数据将覆写此文件——修前形态）
+      writeFileSync(join(ws, 'a.txt'), 'v2-现场内容');
+
+      // 恢复整体中止（readBlob 抛 CHECKPOINT_BLOB_CORRUPT 经 serializeWrites 透传）。
+      // 断言形态同 apply-patch.test 先例：AppError 码在 .code 属性（非 message 前缀）
+      const err = await restoreWorkspace(ws, dataRoot, target).catch((e: unknown) => e);
+      expect((err as AppError).code).toBe('CHECKPOINT_BLOB_CORRUPT');
+      // 现场未被撕裂数据覆写（恢复中止 = 半事务零落盘；快照保留可重试）
+      expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v2-现场内容');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

@@ -81,7 +81,7 @@ const MODULE_EDGES = {
   // 后 session 边退役）；tools 边 = restore 写段入 per-canonical-path 写串行
   // 链（2026-09-01 遗漏大扫 20260901-c #5——serializeWrites/canonicalize 两
   // 单点，链覆盖面注记见骨架篇 §7.5②；非工具族装配依赖）
-  checkpoint: ['contracts', 'context', 'tools'],
+  checkpoint: ['contracts', 'context', 'tools', 'persist'],
   // admin = 平台管理面官方件（2026-08-27 契约篇 §3.4 第一刀，默认层第十行）：
   // apps_list/events_query 两只读工具 + 管理 Skill 随件携带。工具/服务全经
   // ctx.get 运行时取（结构子集类型本地收窄）——零跨模块 import，contracts

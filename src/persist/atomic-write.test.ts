@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { writeAtomicFile } from './atomic-write.js';
+import { writeAtomicBuffer, writeAtomicFile } from './atomic-write.js';
 
 /** 临时测试目录（realpath 归一——macOS /var 与 /private/var 差异教训） */
 function makeDir(): string {
@@ -41,5 +41,20 @@ describe('writeAtomicFile 原子写公共件', () => {
     // 临时文件已清（不留半写垃圾）、目标未被碰（仍是目录）
     expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
     expect(statSync(target).isDirectory()).toBe(true);
+  });
+
+  it('Buffer 形：字节完整落盘零残骸 + 覆盖整体替换（成熟度扫描 20260901 P1-6——checkpoint blob 仓首位消费面）', () => {
+    const dir = makeDir();
+    const target = join(dir, 'blob-payload');
+    // 含非 UTF-8 安全字节的二进制内容（字符串形态会丢/转——Buffer 形的存在依据）
+    const content = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0x0a, 0xd8]);
+    writeAtomicBuffer(target, content);
+    // 逐字节一致（equals 全量比对）
+    expect(readFileSync(target).equals(content)).toBe(true);
+    // 覆盖替换语义同 string 形：新 Buffer 整体替换旧内容
+    const second = Buffer.from([0x00, 0x01, 0x02]);
+    writeAtomicBuffer(target, second);
+    expect(readFileSync(target).equals(second)).toBe(true);
+    expect(readdirSync(dir)).toEqual(['blob-payload']); // 两轮写零残骸
   });
 });

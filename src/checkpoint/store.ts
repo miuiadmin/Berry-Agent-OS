@@ -12,14 +12,18 @@
  * 活集 = 文件、审计 = 事件的分居（§5.3 账的分居条）：manifest 是唯一活集，
  * durable 事件只是审计账——本模块只管文件域，不触会话库。
  *
- * 写入全走「temp + rename」原子换名（POSIX rename 原子性）——blob 与 manifest
- * 的读者永远只见完整文件；blob 内容寻址不可变，同 hash 重复写为幂等 no-op。
+ * 写入统一走 persist 原子写公共件（2026-09-02 成熟度扫描 P1-6 收编——blob 用
+ * Buffer 形 writeAtomicBuffer、manifest 用 string 形 writeAtomicFile；O_EXCL
+ * temp + fsync + rename，读者永不见半文件且掉电不回退）——blob 内容寻址不可
+ * 变，同 hash 重复写为幂等 no-op；读侧 sha256 复核（文件名即承诺 hash）。
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AppLogger } from '../contracts/app.js';
+import { AppError, CHECKPOINT_BLOB_CORRUPT } from '../contracts/errors.js';
+import { writeAtomicBuffer, writeAtomicFile } from '../persist/index.js';
 
 /** 单文件入快照上限（8 MiB——超限跳过并记入 manifest `skipped` 披露） */
 export const MAX_SNAPSHOT_FILE_BYTES = 8 * 1024 * 1024;
@@ -91,18 +95,10 @@ export async function ensureLayout(dataRoot: string): Promise<void> {
 }
 
 /**
- * 原子写入：temp 文件 + rename 换名（读者永不见半文件）。
- * temp 名带随机尾防并发写者互踩。
- */
-async function atomicWrite(path: string, content: string | Buffer): Promise<void> {
-  const tmp = `${path}.tmp-${randomBytes(4).toString('hex')}`;
-  await writeFile(tmp, content);
-  await rename(tmp, path);
-}
-
-/**
- * 写入 blob（内容寻址幂等：目标已存在即 no-op——内容相同无需重写；
- * rename 换名保证并发写者不产半文件）。返回是否实际落盘（新写计数用）。
+ * 写入 blob（内容寻址幂等：目标已存在即 no-op——内容相同无需重写）。
+ * 写面统一走 persist 原子写公共件 Buffer 形（O_EXCL temp + fsync + rename——
+ * 掉电撕裂防护是快照件的安全网属性，安全网自己必须是原子的；成熟度扫描
+ * 20260901 P1-6 收编，会话篇 §5.3 写侧纪律）。返回是否实际落盘（新写计数用）。
  */
 export async function writeBlob(dataRoot: string, hash: string, content: Buffer): Promise<boolean> {
   const path = blobPath(dataRoot, hash);
@@ -112,23 +108,33 @@ export async function writeBlob(dataRoot: string, hash: string, content: Buffer)
   } catch {
     // 不存在——落盘（先建分桶目录）
     await mkdir(join(path, '..'), { recursive: true });
-    const tmp = `${path}.tmp-${randomBytes(4).toString('hex')}`;
-    await writeFile(tmp, content);
-    await rename(tmp, path);
+    writeAtomicBuffer(path, content);
     return true;
   }
 }
 
-/** 读 blob（恢复路——hash 由 manifest 给出，理论上必在；缺失抛错由调用方如实报告） */
+/**
+ * 读 blob（恢复路——hash 由 manifest 给出）。读侧 sha256 复核（成熟度扫描
+ * 20260901 P1-6，会话篇 §5.3 读侧校验）：内容寻址仓的文件名即承诺 hash，
+ * 磁盘内容与其不符（掉电撕裂/外部损坏）时 fail-loud 拒读点名——撕裂数据绝不
+ * 静默进恢复面。缺失 blob 仍由 readFile 原生 ENOENT 抛错、调用方如实报告。
+ */
 export async function readBlob(dataRoot: string, hash: string): Promise<Buffer> {
-  return readFile(blobPath(dataRoot, hash));
+  const content = await readFile(blobPath(dataRoot, hash));
+  if (hashContent(content) !== hash) {
+    throw new AppError(
+      CHECKPOINT_BLOB_CORRUPT,
+      `blob 损坏：内容与文件名承诺 hash 不符（${blobPath(dataRoot, hash)}）——恢复中止、快照保留。处置：删除该 blob 文件后重试（后续捕获重写自愈）`,
+    );
+  }
+  return content;
 }
 
-/** 写 manifest（原子写；目录随建） */
+/** 写 manifest（原子写公共件 string 形；目录随建——fsync 纪律同 writeBlob 条） */
 export async function writeManifest(dataRoot: string, manifest: CheckpointManifest): Promise<void> {
   const path = manifestPath(dataRoot, manifest.sessionId, manifest.id);
   await mkdir(join(path, '..'), { recursive: true });
-  await atomicWrite(path, JSON.stringify(manifest));
+  writeAtomicFile(path, JSON.stringify(manifest));
 }
 
 /** 删 manifest（prune 执行面——ENOENT 幂等视为成功） */

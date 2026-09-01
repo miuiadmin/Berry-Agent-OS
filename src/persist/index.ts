@@ -12,7 +12,7 @@ export { spentBackgroundTokensSince, localDayStartMs, openTurnDepth } from './us
 export { WriteBehind } from './write-behind.js';
 export type { WriteBehindOptions } from './write-behind.js';
 /** 原子写公共件（契约篇 §1.5.1(b)——overlay 写回等落盘面统一用，禁逐应用复刻） */
-export { writeAtomicFile } from './atomic-write.js';
+export { writeAtomicFile, writeAtomicBuffer } from './atomic-write.js';
 export { APPLICATION_ID, SCHEMA_VERSION, CANONICAL_DDL, SESSION_APP_COLUMN_MIGRATION } from './schema.js';
 export { normalizeMigrations } from './migrations.js';
 export type { MigrationSpec } from './migrations.js';

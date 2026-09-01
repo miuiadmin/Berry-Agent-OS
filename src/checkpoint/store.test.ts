@@ -9,6 +9,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { AppError } from '../contracts/errors.js';
 import {
   deleteManifest,
   ensureLayout,
@@ -91,6 +92,20 @@ describe('blob 内容寻址（写幂等 + 读回环）', () => {
     const buckets = readdirSync(join(dataRoot, 'blobs'));
     expect(buckets).toContain(ha.slice(0, 2));
     expect(buckets).toContain(hb.slice(0, 2));
+  });
+
+  it('读侧 sha256 校验：blob 被篡改 → 拒读点名 CHECKPOINT_BLOB_CORRUPT（成熟度扫描 20260901 P1-6）', async () => {
+    // 内容寻址仓的承诺：文件名即 hash。磁盘上的 blob 与其名字不符（掉电撕裂/
+    // 外部损坏）时，恢复面绝不能把撕裂数据静默当快照内容写回工作区——读侧必复核。
+    const content = Buffer.from('integrity 原文', 'utf8');
+    const hash = hashContent(content);
+    expect(await writeBlob(dataRoot, hash, content)).toBe(true);
+    // 直接篡改磁盘 blob（绕过写面——模拟撕裂/外部损坏形态）
+    writeFileSync(join(dataRoot, 'blobs', hash.slice(0, 2), hash), '撕裂的假内容');
+    // 修前形态：readBlob 原样返回损坏内容（零校验）——本测红即证缺陷在场。
+    // 断言形态同 apply-patch.test 先例：AppError 码在 .code 属性（非 message 前缀）
+    const err = await readBlob(dataRoot, hash).catch((e: unknown) => e);
+    expect((err as AppError).code).toBe('CHECKPOINT_BLOB_CORRUPT');
   });
 });
 
