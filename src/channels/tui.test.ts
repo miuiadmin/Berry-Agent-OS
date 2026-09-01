@@ -159,6 +159,106 @@ describe('S3 repaint 清屏重画（focus 变化驱动）', () => {
     await flush();
     expect(terminal.frames.join('')).toContain('在飞会话的续流内容'); // 终值落正文可见
   });
+
+  it('单槽守卫（20260901-d #4）：repaint 占位槽后接 assistant message_start——旧槽自愈摘除不孤儿滞留', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      history: () => [],
+      entryStatus: (sessionId) => (sessionId === 'session-flying' ? 'running' : 'idle'),
+    });
+    // 场景：run 处于工具执行窗口时切入（message_end 已落、下一条 assistant
+    // message_start 未到）——repaint 开占位槽 A；工具结束后 message_start 到达
+    tui.repaint('session-flying');
+    await flush();
+    tui.handle({ type: 'message_start', message: assistantMessage('工具结束后的新回复') });
+    await flush();
+    tui.handle(messageUpdate('工具结束后的新回复'));
+    await flush();
+    tui.handle({ type: 'message_end', message: assistantMessage('工具结束后的新回复') });
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain('工具结束后的新回复');
+    // 占位 … 行只随 repaint 帧写一次：守卫生效时 message_start 的重开槽与旧槽
+    // 内容同位同形（差分渲染零新写）；无守卫则插入第二行 …（孤儿容器永驻正文）
+    expect(all.split('…').length - 1).toBe(1);
+  });
+});
+
+describe('直播路渲染单源（20260901-d #5）——消息事件唯一渲染源，tool_execution_* 不双帧', () => {
+  /** 带 toolCall 块的 assistant 消息（loop 真实转录形态：文本块 + 调用块同消息内联） */
+  const assistantWithTool = (text: string): AssistantMessage => ({
+    role: 'assistant',
+    content: [
+      { type: 'text', text },
+      { type: 'toolCall', id: 'call-1', name: 'bash', arguments: { cmd: 'ls' } },
+    ],
+    usage: NO_USAGE,
+    stopReason: 'stop',
+    timestamp: 1,
+  });
+
+  /** 工具结果消息（loop toolResultMessageOf 同形——toolResult 恒伴随 end 之后） */
+  const toolResultMessage = (): AgentMessage => ({
+    role: 'toolResult',
+    toolCallId: 'call-1',
+    toolName: 'bash',
+    content: [{ type: 'text', text: 'file1 file2' }],
+    details: {},
+    isError: false,
+    timestamp: 1,
+  });
+
+  it('同一工具轮：⚙ 与 ↳ 各恰一行（tool_execution_* 是执行层锚点不重复渲染）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    // loop 实序：assistant 消息终值落账（⚙ 随 message_end assistantToolLines）→
+    // tool_execution_start/end（执行层——不渲染）→ toolResult 消息（↳ 随其
+    // message_start renderAgentMessage——与 repaint 历史投影同一渲染器）
+    tui.handle({ type: 'agent_start' });
+    tui.handle({ type: 'message_start', message: assistantWithTool('我来看看目录') });
+    tui.handle({ type: 'message_end', message: assistantWithTool('我来看看目录') });
+    tui.handle({
+      type: 'tool_execution_start',
+      toolCallId: 'call-1',
+      toolName: 'bash',
+      args: { cmd: 'ls' },
+    });
+    tui.handle({
+      type: 'tool_execution_end',
+      toolCallId: 'call-1',
+      toolName: 'bash',
+      result: { content: [{ type: 'text', text: 'file1 file2' }], details: {}, isError: false },
+      isError: false,
+    });
+    tui.handle({ type: 'message_start', message: toolResultMessage() });
+    tui.handle({ type: 'message_end', message: toolResultMessage() });
+    tui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain('我来看看目录');
+    expect(all.split('⚙').length - 1).toBe(1); // 双源双帧修死：⚙ 只随 message_end 落一行
+    expect(all.split('↳').length - 1).toBe(1); // ↳ 只随 toolResult message 落一行
+  });
+
+  it('repaint 行集对照：同段历史重画 ⚙/↳ 亦各恰一行（直播与重画行集恒一致）', async () => {
+    const terminal = fakeTerminal();
+    const history: AgentMessage[] = [userHistory('列目录'), assistantWithTool('我来看看目录'), toolResultMessage()];
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      history: (sessionId) => (sessionId === 'session-replay' ? history : []),
+    });
+    tui.repaint('session-replay');
+    await flush();
+    const after = terminal.frames.join('');
+    expect(after).toContain('我来看看目录');
+    expect(after.split('⚙').length - 1).toBe(1); // 历史投影单源同律
+    expect(after.split('↳').length - 1).toBe(1);
+  });
 });
 
 describe('notify 级别前缀（NotifyLevel 四值，success 档 2026-08-27 P2-1 新增）', () => {

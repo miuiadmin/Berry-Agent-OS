@@ -33,7 +33,7 @@ import type { AgentEvent } from '../agent/events.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import { isStandardMessage } from '../contracts/messages.js';
 import { chainBackground } from '../context/chain.js';
-import { assistantText, assistantToolLines, formatToolEnd, formatToolStart, renderAgentMessage } from './render.js';
+import { assistantText, assistantToolLines, renderAgentMessage } from './render.js';
 import { accentColorizer } from './theme.js';
 import { createPromptQueue } from './prompt.js';
 import { createFileSegmentProvider, createMentionProvider, type FilesFace, type SymbolsFace } from './mention.js';
@@ -278,6 +278,10 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
 
   /** 打开流式块（首帧占位 …；后续 update 覆盖） */
   const openStreaming = (): void => {
+    // 单槽自愈守卫（20260901-d #4）：repaint 切入 running 条目已开占位槽后，
+    // 下一条 assistant message_start 无条件再进此处——先摘旧槽再开新，防旧
+    // 占位容器随 streaming 引用被覆盖而孤儿滞留正文（此前无任何摘除路径）
+    if (streaming) messages.removeChild(streaming.container);
     const container = new Container();
     const text = new Text(' …', 1);
     container.addChild(text);
@@ -399,12 +403,15 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         // user/toolResult/自定义角色在 message_start 已渲染，这里不重复
         break;
       case 'tool_execution_start':
-        appendLines([`  ${formatToolStart(event.toolName, event.args)}`]);
+        // 不渲染（直播路单源，20260901-d #5）：⚙ 行随 assistant message_end 的
+        // assistantToolLines 落（时点更早——message_end 先于执行发出）；本事件
+        // 是执行层锚点（webui 直播卡等消费面照用事件扇出），TUI 不双源双帧
         break;
       case 'tool_execution_update':
         break; // 工具进度 M1 不展示（进度渲染随 Web 通道形态定稿再补）
       case 'tool_execution_end':
-        appendLines([`  ${formatToolEnd(event.result, event.isError)}`]);
+        // 不渲染（#5 同批）：↳ 行随 toolResult message_start 的 renderAgentMessage
+        // 落——与历史投影（repaint）同一渲染器，直播/重画行集恒一致
         break;
     }
   };
