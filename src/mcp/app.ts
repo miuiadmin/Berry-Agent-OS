@@ -201,8 +201,12 @@ async function discoverAll(
   if (totalCount > CATALOG_THRESHOLD) {
     for (const { name, conn, tools: serverTools } of filtered) {
       for (const tool of serverTools) {
-        // 名为 'mcp' 的远端工具无法经目录路由（目录工具本身占用该名）——丢弃防撞
-        if (tool.name !== 'mcp') bag.catalog.set(tool.name, { server: name, tool, conn });
+        // 目录寻址键 = <server>__<tool> 复合名（契约篇 §6.6 勘正〔20260901-d #10〕）：
+        // 防跨服务器同名工具静默遮蔽——裸原名键下后连服务器恒胜、前者结构性不可达，
+        // 违「没生效必须有信号」纪律。复合名恒含 '__'，与目录工具自身的名字 'mcp'
+        // 结构性不可能相撞，旧 'mcp' 字面 guard 随之退役；call 落桥时换回服务器侧
+        // 原名（item.tool.name——复合名只是目录寻址面，不上线协议）
+        bag.catalog.set(`${name}__${tool.name}`, { server: name, tool, conn });
       }
     }
     const serversLine = filtered.map((it) => it.name).join(', ');
@@ -210,11 +214,13 @@ async function discoverAll(
       tools,
       {
         name: 'mcp',
-        description: `MCP 外部工具目录（服务器：${serversLine}；工具 ${totalCount} 件超 ${CATALOG_THRESHOLD} 阈值已降级目录形态）。action=search 按关键词找工具；action=describe 看某工具参数 schema；action=call 调用之`,
+        description: `MCP 外部工具目录（服务器：${serversLine}；工具 ${totalCount} 件超 ${CATALOG_THRESHOLD} 阈值已降级目录形态）。action=search 按关键词找工具（结果为 <server>__<tool> 复合名，与原生 mcp__<server>__<tool> 命名空间同律）；action=describe 看某工具参数 schema；action=call 调用之（describe/call 以复合名寻址）`,
         parameters: Type.Object({
           action: Type.Union([Type.Literal('search'), Type.Literal('describe'), Type.Literal('call')]),
           query: Type.Optional(Type.String({ description: 'search：工具名/描述关键词' })),
-          tool: Type.Optional(Type.String({ description: 'describe/call：目标工具名（服务器侧原名）' })),
+          tool: Type.Optional(
+            Type.String({ description: 'describe/call：目标工具（复合名 <server>__<tool>——search 结果里的名字）' }),
+          ),
           args: Type.Optional(Type.Record(Type.String(), Type.Unknown())), // call：工具参数对象（任意键值）
         }),
         // 目录内含可写调用——fail-closed 恒 write（契约篇 §6.6）
@@ -307,7 +313,8 @@ async function runCatalogAction(args: Record<string, unknown>, bag: DiscoverCtx)
           name.toLowerCase().includes(query) ||
           (item.tool.description ?? '').toLowerCase().includes(query),
       )
-      .map(([name, item]) => `- ${name}（${item.server}）：${item.tool.description ?? '无描述'}`)
+      // 复合名自带服务器前缀——陈列行不再追加 （server） 后缀（描述保留）
+      .map(([name, item]) => `- ${name}：${item.tool.description ?? '无描述'}`)
       .join('\n');
     return { content: [{ type: 'text', text: hits === '' ? '（无匹配工具）' : hits }] };
   }
@@ -322,9 +329,10 @@ async function runCatalogAction(args: Record<string, unknown>, bag: DiscoverCtx)
     const item = bag.catalog.get(target);
     if (item === undefined) return { content: [{ type: 'text', text: `未知工具：${target}` }], isError: true };
     try {
-      // 桥侧预算 +500ms 让管道先执法（目录工具 def.timeoutMs = 60s 同码）
+      // 桥侧预算 +500ms 让管道先执法（目录工具 def.timeoutMs = 60s 同码）；
+      // 落桥换回服务器侧原名（target 是复合名——只是目录寻址面，不上线协议）
       const out = await item.conn.call(
-        target,
+        item.tool.name,
         (args.args as Record<string, unknown>) ?? {},
         DEFAULT_TOOL_TIMEOUT_MS + 500,
       );

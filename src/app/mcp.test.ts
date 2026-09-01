@@ -321,16 +321,17 @@ describe('mcp 件 — 全局阈值目录形态', () => {
     });
     // 目录内含可写调用——恒 write
     expect(catalogTool.effect).toBe('write');
-    // search：按关键词命中跨服务器清单（tool-10* 前缀命中 srv-a 的 tool-10 与 srv-b 的 tool-100..109）
+    // search：按关键词命中跨服务器清单（tool-10* 前缀命中 srv-a 的 tool-10 与 srv-b 的 tool-100..109）；
+    // 陈列名 = <server>__<tool> 复合名（20260901-d #10——与原生 mcp__<server>__<tool> 同律）
     const search = await catalogTool.execute({ action: 'search', query: 'tool-10' }, { toolCallId: 't' });
-    expect(textOf(search)).toContain('tool-10（srv-a）');
-    expect(textOf(search)).toContain('tool-109（srv-b）');
-    // describe：参数 schema 原样透传
-    const describeOut = await catalogTool.execute({ action: 'describe', tool: 'tool-3' }, { toolCallId: 't' });
+    expect(textOf(search)).toContain('srv-a__tool-10');
+    expect(textOf(search)).toContain('srv-b__tool-109');
+    // describe：复合名寻址，参数 schema 原样透传
+    const describeOut = await catalogTool.execute({ action: 'describe', tool: 'srv-a__tool-3' }, { toolCallId: 't' });
     expect(textOf(describeOut)).toContain('"x"');
-    // call：经目录路由到真服务器
+    // call：复合名寻址、落桥换回服务器侧原名（echo 回显的是 wire 名——裸名锁此规则）
     const callOut = await catalogTool.execute(
-      { action: 'call', tool: 'tool-3', args: { x: '1' } },
+      { action: 'call', tool: 'srv-a__tool-3', args: { x: '1' } },
       { toolCallId: 't' },
     );
     expect(textOf(callOut)).toBe('ran:tool-3');
@@ -339,6 +340,43 @@ describe('mcp 件 — 全局阈值目录形态', () => {
     expect(unknown.isError).toBe(true);
     const badAction = await catalogTool.execute({ action: 'boom' }, { toolCallId: 't' });
     expect(badAction.isError).toBe(true);
+  });
+
+  // 同名工具不遮蔽回归锁（20260901-d #10）：目录键 = <server>__<tool> 复合名——
+  // 修前裸原名键下后连服务器恒胜、前者结构性不可达（静默遮蔽，违「没生效必须有信号」）
+  it('跨服务器同名工具：两条复合名条目并存、各自可寻址可路由', async () => {
+    const env = makeEnv();
+    roots.push(env.root);
+    // 两台服务器各出 1 件同名 dup + 10 件填充件（11+11 = 22 超阈值入目录形态）
+    const pad = (p: string): FakeToolSpec[] =>
+      Array.from({ length: 10 }, (_, i) => ({ name: `${p}-pad-${i}`, description: `${p} 侧填充件 ${i}` }));
+    const harness = makeHarness({
+      [cmd('srv-a')]: [{ name: 'dup', description: 'a 侧同名件' }, ...pad('a')],
+      [cmd('srv-b')]: [{ name: 'dup', description: 'b 侧同名件' }, ...pad('b')],
+    });
+    await applyAndWait(env, harness, { 'srv-a': { command: cmd('srv-a') }, 'srv-b': { command: cmd('srv-b') } });
+    const catalogTool = await vi.waitFor(() => {
+      const tool = env.tools.get('mcp');
+      expect(tool).toBeDefined();
+      return tool!;
+    });
+    // search：两条复合名条目并存（修前裸键只剩后连的 srv-b 一条——srv-a 结构性不可达）
+    const search = await catalogTool.execute({ action: 'search', query: 'dup' }, { toolCallId: 't' });
+    expect(textOf(search)).toContain('srv-a__dup');
+    expect(textOf(search)).toContain('srv-b__dup');
+    // call：复合名各自路由（echo 相同——两腿都换回 wire 名 dup，锁「不上线协议」规则）
+    const viaA = await catalogTool.execute({ action: 'call', tool: 'srv-a__dup' }, { toolCallId: 't' });
+    expect(textOf(viaA)).toBe('ran:dup');
+    const viaB = await catalogTool.execute({ action: 'call', tool: 'srv-b__dup' }, { toolCallId: 't' });
+    expect(textOf(viaB)).toBe('ran:dup');
+    // srv-b 退出：其复合名条目随之清退、srv-a 侧不受牵连（独立寻址面）
+    harness.servers.get(cmd('srv-b'))!.die(0);
+    await vi.waitFor(async () => {
+      const gone = await catalogTool.execute({ action: 'call', tool: 'srv-b__dup' }, { toolCallId: 't' });
+      expect(gone.isError).toBe(true);
+    });
+    const stillA = await catalogTool.execute({ action: 'call', tool: 'srv-a__dup' }, { toolCallId: 't' });
+    expect(textOf(stillA)).toBe('ran:dup');
   });
 });
 
@@ -376,9 +414,9 @@ describe('mcp 件 — 运行期退出与回卷', () => {
     const catalogTool = env.tools.get('mcp')!;
     await vi.waitFor(async () => {
       const out = await catalogTool.execute({ action: 'search', query: 't1' }, { toolCallId: 't' });
-      // srv-a 已退：其条目不再出现；srv-b 的（t1xx 前缀命中）仍在
-      expect(textOf(out)).not.toContain('（srv-a）');
-      expect(textOf(out)).toContain('（srv-b）');
+      // srv-a 已退：其复合名条目不再出现；srv-b 的（t1xx 前缀命中）仍在
+      expect(textOf(out)).not.toContain('srv-a__');
+      expect(textOf(out)).toContain('srv-b__');
     });
     // 目录工具本身仍在（其余服务器可路由——件级寿命盒语义）
     expect(env.tools.get('mcp')).toBeDefined();
