@@ -113,8 +113,19 @@ function installFail(detail: string): AppError {
 }
 
 /**
+ * 同 versionDir 在飞装机 promise 去重表（2026-09-01 遗漏大扫 20260901-c #12）：
+ * 键 = versionDir 全路径（已含 dataDir——多数据目录测试态天然分键）；值 = 在飞
+ * 装机 promise。重入腿直接共享同一 promise（回执同一份——不双下载不互删）；
+ * finally 出表（成败均出——失败不卡后续重试）。生命周期 = 进程级：装机完成后
+ * 表恒空（每键自清），无常驻条目。
+ */
+const inflightInstalls = new Map<string, Promise<InstallReport>>();
+
+/**
  * 装机主口（/browser install 命令消费）。
  * 幂等：同版本 install.json 在场即回执 alreadyInstalled（不重下）。
+ * 并发重入互斥：同 versionDir 在飞 promise 去重共享（重入腿回执同一份——
+ * 20260901-c #12；成败均出表，失败不卡重试）。
  * 失败面：清单解析/平台无发行/下载（WEB_* 原样透传）/解包（BROWSER_INSTALL_FAILED
  * 半解包已清）——调用方 catch 后 notify 人读。
  */
@@ -171,41 +182,57 @@ export async function installEngine(
     };
   }
 
-  /* ---- 下载（downloadToFile——.part 半档在其内部收口）→ 解包 → 锁档 ---- */
-  const zipPath = join(engineRoot, `${version}.zip`);
-  await mkdir(engineRoot, { recursive: true });
-  const downloaded = await deps.download(zipUrl, {
-    destPath: zipPath,
-    allowedHosts: CFT_ALLOWED_HOSTS,
-    caller: 'browser-install',
-  });
-  // 解包（失败腿：extractZip 自清半解包目录后 throw——zip 档同笔清理见下）
-  try {
-    await extractZip(zipPath, versionDir);
-    // 布局表尾件 chmod 0o755（双保险——zip 权限位缺席时发现序 X_OK 仍可命中）
-    for (const tail of layoutTailsFor(slot.layoutDir)) {
-      await chmod(join(versionDir, tail), 0o755).catch(() => {}); // 非本平台布局缺席即跳过
+  /* ---- 并发重入互斥（20260901-c #12）：幂等判据（锁档在场）与锁档写入之间隔着
+   * 分钟级下载窗——TUI 命令派发 fire-and-forget 下连敲两次即两条装机流并发（双
+   * 下载写同一 .part 交错互毁；解包失败腿 rm 整 versionDir 把另一条流刚解包的
+   * 产物一并删掉）。同 versionDir 在飞 promise 去重共享：重入腿回执同一份（§6.10
+   * 并发重入互斥条款）。跨进程不在此执法面（双开本就违 P6 双开律） ---- */
+  const running = inflightInstalls.get(versionDir);
+  if (running !== undefined) return running;
+  const attempt = (async (): Promise<InstallReport> => {
+    /* ---- 下载（downloadToFile——.part 半档在其内部收口）→ 解包 → 锁档 ---- */
+    const zipPath = join(engineRoot, `${version}.zip`);
+    await mkdir(engineRoot, { recursive: true });
+    const downloaded = await deps.download(zipUrl, {
+      destPath: zipPath,
+      allowedHosts: CFT_ALLOWED_HOSTS,
+      caller: 'browser-install',
+    });
+    // 解包（失败腿：extractZip 自清半解包目录后 throw——zip 档同笔清理见下）
+    try {
+      await extractZip(zipPath, versionDir);
+      // 布局表尾件 chmod 0o755（双保险——zip 权限位缺席时发现序 X_OK 仍可命中）
+      for (const tail of layoutTailsFor(slot.layoutDir)) {
+        await chmod(join(versionDir, tail), 0o755).catch(() => {}); // 非本平台布局缺席即跳过
+      }
+      const lock: InstallLock = {
+        version,
+        platform: slot.key,
+        sha256: downloaded.sha256,
+        bytes: downloaded.bytes,
+        url: downloaded.finalUrl,
+        installedAt: new Date().toISOString(),
+      };
+      await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
+    } finally {
+      await rm(zipPath, { force: true }).catch(() => {}); // zip 即用即清（tarball 自锁先例）
     }
-    const lock: InstallLock = {
+    return {
       version,
-      platform: slot.key,
+      slot,
+      enginePath: findLayoutExecutable(versionDir, slot.layoutDir),
       sha256: downloaded.sha256,
       bytes: downloaded.bytes,
-      url: downloaded.finalUrl,
-      installedAt: new Date().toISOString(),
+      alreadyInstalled: false,
     };
-    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
+  })();
+  // 入表与 IIFE 创建同一同步段（IIFE 首个 await 前无让位点）——并发重入腿必见表项
+  inflightInstalls.set(versionDir, attempt);
+  try {
+    return await attempt;
   } finally {
-    await rm(zipPath, { force: true }).catch(() => {}); // zip 即用即清（tarball 自锁先例）
+    inflightInstalls.delete(versionDir); // 成败均出表（失败不卡重试）
   }
-  return {
-    version,
-    slot,
-    enginePath: findLayoutExecutable(versionDir, slot.layoutDir),
-    sha256: downloaded.sha256,
-    bytes: downloaded.bytes,
-    alreadyInstalled: false,
-  };
 }
 
 /** 本平台布局尾件（布局表过滤——mac 布局只 chmod mac 档） */

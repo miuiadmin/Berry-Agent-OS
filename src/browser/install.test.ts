@@ -10,7 +10,7 @@
 import { access, constants, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { crc32 } from 'node:zlib';
 import { AppError, BROWSER_INSTALL_FAILED } from '../contracts/errors.js';
 import { discoverEngine } from './discover.js';
@@ -252,5 +252,126 @@ describe('installEngine 装机编排', () => {
       dataDir,
     };
     await expectInstallFail(installEngine(deps, { platform: 'darwin', arch: 'arm64' }));
+  });
+});
+
+/* ---------------- 并发重入互斥（2026-09-01 遗漏大扫 20260901-c #12 回归锁） ---------------- */
+
+/** 互斥用例独立版本（共享 dataDir 的 VERSION 锁档有串行依赖——幂等用例赖上一测
+ * 产物；本组用例各带独立数据目录 + 独立版本，互不沾染） */
+const CONC_VERSION = '139.0.1000.1';
+const CONC_MANIFEST = JSON.stringify({
+  channels: {
+    Stable: {
+      version: CONC_VERSION,
+      downloads: { chrome: [{ platform: 'mac-arm64', url: 'https://storage.googleapis.com/cft/c.zip' }] },
+    },
+  },
+});
+
+describe('installEngine 并发重入互斥（#12）', () => {
+  it('在飞窗内重入共享同一 promise：单下载、回执同一份（修前：双下载写同一 .part 交错互毁）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'berry-install-c1-'));
+    try {
+      const zipBytes = singleEntryZip(LAYOUT_TAIL, Buffer.from([0xcf, 0xfa, 0xed, 0xfe]));
+      // 门控下载假体：entered 计数 + 门放行后才写真 zip——分钟级下载窗的确定性替身
+      let entered = 0;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const download = async (
+        url: string,
+        opts: { destPath: string; allowedHosts: readonly string[]; caller?: string },
+      ) => {
+        entered += 1;
+        await gate;
+        await writeFile(opts.destPath, zipBytes);
+        return { finalUrl: url, bytes: zipBytes.byteLength, sha256: 'ab12cd34ef56' };
+      };
+      const manifestCalls: string[] = [];
+      const deps: InstallDeps = {
+        manifestFetch: fakeManifest(manifestCalls, { status: 200, text: CONC_MANIFEST, truncated: false }),
+        download,
+        dataDir: dir,
+      };
+
+      // 腿 1（首发）进入下载窗：entered=1 即已在门内挂起
+      const p1 = installEngine(deps, { platform: 'darwin', arch: 'arm64' });
+      await vi.waitFor(() => expect(entered).toBe(1), { timeout: 5000 });
+      // 腿 2：TUI 连敲窗内重入（命令派发 fire-and-forget 双跑形态）
+      const p2 = installEngine(deps, { platform: 'darwin', arch: 'arm64' });
+      // 一个宏任务位让腿 2 走完清单拉取/幂等检查/互斥检查的微任务链
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      release();
+
+      const [a, b] = await Promise.all([p1, p2]);
+      // 单下载（修前 = 2：两腿各写同一 destPath 的 .part 交错互毁）
+      expect(entered).toBe(1);
+      // 清单两腿各拉一次：互斥点在清单与幂等检查之后（KB 级重拉是裁决接受的代价）
+      expect(manifestCalls).toHaveLength(2);
+      // 回执同一份：重入腿共享在飞 promise（同一对象，非两份等值回执）
+      expect(a).toBe(b);
+      expect(a.alreadyInstalled).toBe(false);
+      // 产物恰一份：锁档 + 引擎档在场、zip 已清（无第二腿再解一遍）
+      expect(await exists(join(dir, 'browser', 'engine', CONC_VERSION, 'install.json'))).toBe(true);
+      expect(await exists(join(dir, 'browser', 'engine', CONC_VERSION, LAYOUT_TAIL))).toBe(true);
+      expect(await exists(join(dir, 'browser', 'engine', `${CONC_VERSION}.zip`))).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('失败腿共享同一拒绝且出表不卡重试：并发同错（同一错误对象）→ 修复后重装即成（成败均出表）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'berry-install-c2-'));
+    try {
+      const zipBytes = singleEntryZip(LAYOUT_TAIL, Buffer.from([0xcf, 0xfa, 0xed, 0xfe]));
+      let entered = 0;
+      let serveCorrupt = true; // 首轮供损坏字节（EOCD 未找到腿）；重试轮供真 zip
+      const download = async (
+        url: string,
+        opts: { destPath: string; allowedHosts: readonly string[]; caller?: string },
+      ) => {
+        entered += 1;
+        const bytes = serveCorrupt ? Buffer.from('不是 zip') : zipBytes;
+        await writeFile(opts.destPath, bytes);
+        return { finalUrl: url, bytes: bytes.byteLength, sha256: 'ab12cd34ef56' };
+      };
+      const deps: InstallDeps = {
+        manifestFetch: fakeManifest([], { status: 200, text: CONC_MANIFEST, truncated: false }),
+        download,
+        dataDir: dir,
+      };
+
+      // 同 tick 背靠背双跑（互斥点后全部同步段：腿 1 resume 内入表，腿 2 resume 必见表项）
+      const p1 = installEngine(deps, { platform: 'darwin', arch: 'arm64' });
+      const p2 = installEngine(deps, { platform: 'darwin', arch: 'arm64' });
+      const e1 = await p1.then(
+        () => {
+          throw new Error('期望装机失败');
+        },
+        (err) => err,
+      );
+      const e2 = await p2.then(
+        () => {
+          throw new Error('期望装机失败');
+        },
+        (err) => err,
+      );
+      // 双腿同一拒绝（共享在飞 promise——同一错误对象非两份同码错）
+      expect(e1).toBe(e2);
+      expect(e1).toBeInstanceOf(AppError);
+      expect((e1 as AppError).code).toBe(BROWSER_INSTALL_FAILED);
+      expect(entered).toBe(1); // 单下载（修前 = 2，且一腿 rm versionDir 毁另一腿产物）
+
+      // 出表验证：失败后重试不被在飞表卡（finally 删键）——重装成功
+      serveCorrupt = false;
+      const retry = await installEngine(deps, { platform: 'darwin', arch: 'arm64' });
+      expect(retry.alreadyInstalled).toBe(false);
+      expect(entered).toBe(2); // 重试腿真下载了一次
+      expect(await exists(join(dir, 'browser', 'engine', CONC_VERSION, 'install.json'))).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
