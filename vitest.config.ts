@@ -33,6 +33,9 @@ export default defineConfig({
       // vitest setup 密封面锁（基建大扫 #16/#47）：双身份探针——spawn 单文件
       // vitest 执法（哨兵外层值须被 delete + 临时根随 afterAll 清）
       'tools/vitest-setup.test.mjs',
+      // 冒烟代理 provider 共享层回归锁（基建大扫 #34）：两炮样板收编单点后的
+      // 构造面形态锁——真模型炮 CI 无 key 跑不了，漂移先在此红
+      'tools/smoke-provider.test.mjs',
     ],
     environment: 'node',
     // 每测试文件数据目录钉扎（20260901-d #2 同类；基建大扫 #16 勘正：setupFiles

@@ -17,7 +17,13 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** 仓库根（脚本自身位置上一级——基建大扫 #37：与同目录工具〔release/copy-app-assets/
+ *  check-*〕锚定惯例归一，消除对调用方 cwd 的隐式依赖——从非仓库根目录以绝对
+ *  路径调用时，git 与 rsync 此前落在 process.cwd() 的错误 git 仓上执行） */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** 知识域两目录（与 AGENTS.md 仓库管理节同源——改一处须同步另一处） */
 const DOCS_DIRS = ['设计文档', '真实测试题库'];
@@ -26,9 +32,12 @@ const REMOTE = 'legacy';
 /** 归档分支名（本地与 legacy 同名同链；基线 b395c44） */
 const BRANCH = 'private-archive';
 
-/** 同步跑 git 并返回 stdout（trim 后）；失败让异常直接炸出（fail-loud，不静默降级） */
+/** 同步跑 git 并返回 stdout（trim 后）；失败让异常直接炸出（fail-loud，不静默降级）。
+ *  缺省 cwd 锚 REPO_ROOT（基建大扫 #37）——主仓侧调用（preflight/worktree/rev-*）
+ *  不再吃调用方 cwd；worktree 内调用自带 -C 覆盖，不受此缺省影响 */
 function git(args, opts = {}) {
   return execFileSync('git', args, {
+    cwd: REPO_ROOT,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
     ...opts,
@@ -61,11 +70,16 @@ const worktreeDir = mkdtempSync(join(tmpdir(), 'knowledge-archive-'));
 try {
   git(['worktree', 'add', '--quiet', worktreeDir, BRANCH]);
 
-  // 2) 镜像拷贝知识域进归档树（--delete 同步删除侧；排除 macOS 目录垃圾）
+  // 2) 镜像拷贝知识域进归档树（--delete 同步删除侧；排除 macOS 目录垃圾；
+  //    源路径锚 REPO_ROOT——基建大扫 #37，rsync 无 git 的 -C 语义，必须显式绝对路径）
   for (const dir of DOCS_DIRS) {
-    execFileSync('rsync', ['-a', '--delete', '--exclude', '.DS_Store', `${dir}/`, join(worktreeDir, dir, '/')], {
-      stdio: 'inherit',
-    });
+    execFileSync(
+      'rsync',
+      ['-a', '--delete', '--exclude', '.DS_Store', join(REPO_ROOT, dir, '/'), join(worktreeDir, dir, '/')],
+      {
+        stdio: 'inherit',
+      },
+    );
   }
 
   // 3) 提交知识域差异（-f 防归档分支 .gitignore 语义漂移；status 空则幂等收场）

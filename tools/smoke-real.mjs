@@ -41,25 +41,20 @@ import { join } from 'node:path';
 import { createRuntime } from '../src/app/assembly.js';
 import { createLlmRuntime, createStreamFn } from '../src/llm/index.js';
 import { runSmokeFlow } from './smoke-flow.mjs';
-import { createProvider } from '@earendil-works/pi-ai';
-import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
+import { PROXY_PROVIDER_ID, buildProxyProvider, requireProxyEnv } from './smoke-provider.mjs';
 
 /* ---------------- 环境与参数 ---------------- */
 
-/** 代理端点（Claude Code 约定；缺省即退出——本脚本只为代理场景存在） */
-const baseUrl = process.env['ANTHROPIC_BASE_URL'];
-/** Bearer 凭证（Claude Code 约定；只读不回显） */
-const token = process.env['ANTHROPIC_AUTH_TOKEN'];
+/** 代理环境约定（缺参即用法退出——共享层单点，基建大扫 #34） */
+const { baseUrl, token } = requireProxyEnv('tools/smoke-real.mjs "提示词" [模型id]');
 /** 提示词（argv[2]） */
 const prompt = process.argv[2];
 /** 模型 id（argv[3]，缺省 glm-5.3——本环境代理的缺省服务模型） */
 const modelId = process.argv[3] ?? 'glm-5.3';
-/** 自定义 provider id（模型标识 = `${providerId}/${modelId}`） */
-const providerId = 'anthropic-proxy';
 /** 金样录制路径（可选——设了才逐调用录制） */
 const goldenPath = process.env['SMOKE_GOLDEN_RECORD'];
 
-if (!baseUrl || !token || !prompt) {
+if (!prompt) {
   console.error('用法: ANTHROPIC_BASE_URL=… ANTHROPIC_AUTH_TOKEN=… npx tsx tools/smoke-real.mjs "提示词" [模型id]');
   process.exit(2);
 }
@@ -80,42 +75,9 @@ const smokeHome = mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-home-'))
 // 用户装机状态，录制/回放隔离形态也随之分叉。
 process.env['APP_DATA_DIR'] = smokeData;
 
-/* ---------------- provider 构造（与 pi-ai anthropicProvider 同形，仅 baseUrl/认证来源不同） ---------------- */
+/* ---------------- provider 构造（共享层单点——基建大扫 #34，与 smoke-carrier 同源） ---------------- */
 
-const provider = createProvider({
-  id: providerId,
-  name: 'Anthropic 兼容代理（Claude Code 环境约定）',
-  baseUrl,
-  auth: {
-    // 单一 api-key 认证位：resolve 返回 Bearer 头（与 pi-ai anthropic 的
-    // ANTHROPIC_AUTH_TOKEN 分支同形——存储凭证优先级在此不适用，冒烟只走 env）
-    apiKey: {
-      name: 'ANTHROPIC_AUTH_TOKEN (Bearer)',
-      login: async () => {
-        throw new Error('冒烟 provider 不支持交互登录');
-      },
-      resolve: async () => ({
-        auth: { headers: { Authorization: `Bearer ${token}` } },
-        source: 'ANTHROPIC_AUTH_TOKEN',
-      }),
-    },
-  },
-  models: [
-    {
-      id: modelId,
-      name: modelId,
-      api: 'anthropic-messages',
-      provider: providerId,
-      baseUrl,
-      reasoning: false,
-      input: ['text'],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 200_000,
-      maxTokens: 8_192,
-    },
-  ],
-  api: anthropicMessagesApi(),
-});
+const provider = buildProxyProvider({ baseUrl, token, modelId });
 
 /* ---------------- 金样录制包装（record-once；SMOKE_GOLDEN_RECORD 设了才装） ---------------- */
 
@@ -156,7 +118,7 @@ function finalizeGolden() {
   const meta = {
     _meta: {
       recordedAt: new Date().toISOString(),
-      model: `${providerId}/${modelId}`,
+      model: `${PROXY_PROVIDER_ID}/${modelId}`,
       prompt,
       entryCount: recordEntries.length,
       berryCommit: execSync('git rev-parse --short HEAD', { cwd: new URL('..', import.meta.url).pathname })
@@ -178,7 +140,7 @@ function finalizeGolden() {
 const streamFn = goldenPath ? recordWrap(createStreamFn(createLlmRuntime({ providers: [provider] }))) : undefined;
 
 const runtime = await createRuntime({
-  model: `${providerId}/${modelId}`,
+  model: `${PROXY_PROVIDER_ID}/${modelId}`,
   ...(streamFn ? { streamFn } : {}),
   dbPath: join(smokeData, 'sessions.db'),
   workspace: smokeWorkspace,

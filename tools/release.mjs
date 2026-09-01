@@ -31,10 +31,11 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 
 /** 仓库根（脚本自身位置上一级——与 copy-app-assets.mjs 同款锚定） */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -54,6 +55,24 @@ export function readPackageFace(workDir = REPO_ROOT) {
     throw new Error('package.json 缺 name/version/bin——发布面不完整，拒跑');
   }
   return { name: pkg.name, version: pkg.version, binName };
+}
+
+/**
+ * 仓内官方清单的默认应用 id（基建大扫 #36：安装冒烟断言串动态读真源——
+ * apps/<id>.app.yaml 的 default: true 键，与 readPackageFace「零硬编码」同拍；
+ * 官方拍板换默认应用时 release 冒烟零人工同步）。无 default 键返回 undefined
+ * （installSmoke 按缺席红——期望值本身缺席即断言不能成立）。
+ * @param {string} workDir 仓库根（apps/ 清单所在）
+ */
+export function readDefaultAppId(workDir = REPO_ROOT) {
+  const appsDir = join(workDir, 'apps');
+  if (!existsSync(appsDir)) return undefined;
+  for (const name of readdirSync(appsDir)) {
+    if (!name.endsWith('.app.yaml')) continue;
+    const manifest = parseYaml(readFileSync(join(appsDir, name), 'utf8'));
+    if (manifest && manifest.default === true) return String(manifest.id);
+  }
+  return undefined;
 }
 
 // ───────────────────────── 纯决策函数（测试面直测） ─────────────────────────
@@ -188,7 +207,12 @@ export function inspectPackEntries(files) {
       p.startsWith('src/') ||
       p.startsWith('tools/') ||
       p.startsWith('tsconfig') ||
-      p.startsWith('设计文档'),
+      p.startsWith('设计文档') ||
+      // dist 内非 SKILL.md 的 .md 违禁（基建大扫 #35）：copy-app-assets 拷贝面
+      // 是 src 内全部 .md、检视面此前只锚 SKILL.md——两侧对齐靠巧合不靠机制，
+      // 未来在 src 放任何非 SKILL 的 .md 会静默进发布物；防线压在检视单点
+      // （技能正文文档形态留弹性，拷贝侧不收窄）
+      (p.startsWith('dist/') && p.endsWith('.md') && !/(^|\/)SKILL\.md$/.test(p)),
   );
   return { ok: missing.length === 0 && violations.length === 0, missing, violations };
 }
@@ -373,6 +397,16 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
   const activeIo = injectName
     ? applyScenario(io, INJECT_SCENARIOS[injectName] ?? throwUnknownScenario(injectName))
     : io;
+  // 子进程锚定发布根（基建大扫 #21 统一模型）：包装层缺省注入 cwd: workDir——
+  // 「子进程锚定发布根」成为缺省语义，显式传 opts.cwd 才偏离。此前 git 净空核验
+  // /pack 检视/git tag 十五调用点全落 process.cwd()（仅 pack:real 自带 cwd——
+  // 同契约内不对称）：从非包根目录以绝对路径调用时净空核验会在恰好的另一净空
+  // git 仓意外绿。注入谱不受影响（canned 按 label 应答，不看 opts）
+  const anchoredIo = {
+    exec(label, command, args, opts = {}) {
+      return activeIo.exec(label, command, args, { cwd: workDir, ...opts });
+    },
+  };
   // 注入谱组合闸（遗漏大扫 20260901-c #7）：canned 步骤位于 publish 之后的谱项必须
   // 配 --dry-run——闸在契约 1 之前，任何步骤（连门禁都不）触达；此处守编程调用路
   // （CLI 路由 parseReleaseCli 同判，输出为用法错退出 2）
@@ -383,10 +417,10 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
   // ── 契约 1：门禁前置不可绕 + 工作树净空 ──
   for (const gate of GATES) {
     console.log(`── 契约 1/6 门禁：${gate}`);
-    const r = await activeIo.exec(`gate:${gate}`, 'npm', ['run', gate], { inherit: true });
+    const r = await anchoredIo.exec(`gate:${gate}`, 'npm', ['run', gate], { inherit: true });
     if (r.code !== 0) throw new Error(`门禁红拒：${gate} 退出码 ${r.code}——发布路径无 skip 出口`);
   }
-  const clean = await activeIo.exec('git-clean', 'git', ['status', '--porcelain']);
+  const clean = await anchoredIo.exec('git-clean', 'git', ['status', '--porcelain']);
   if (clean.code !== 0) throw new Error('git status 失败——工作树净空无法核验，拒发');
   if (clean.stdout.trim() !== '') {
     throw new Error(`工作树非净空（${clean.stdout.trim().split('\n').length} 处未提交改动）——禁发未提交态`);
@@ -394,16 +428,21 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
 
   // ── 契约 2：registry 探测（只读三态） ──
   console.log(`── 契约 2/6 registry 探测：${pkg.name}@${pkg.version}`);
-  const probeRaw = await activeIo.exec('probe', 'npm', ['view', `${pkg.name}@${pkg.version}`, 'dist.shasum', '--json']);
+  const probeRaw = await anchoredIo.exec('probe', 'npm', [
+    'view',
+    `${pkg.name}@${pkg.version}`,
+    'dist.shasum',
+    '--json',
+  ]);
   const probe = classifyProbe(probeRaw);
   console.log(`  探测终态：${probe.state}`);
 
   // ── 契约 3：构建即打包与发布物验收 ──
   console.log('── 契约 3/6 构建 + 打包 + 检视 + 安装冒烟');
   rmSync(join(workDir, 'dist'), { recursive: true, force: true }); // 全新 build：先清 dist
-  const build = await activeIo.exec('build', 'npm', ['run', 'build'], { inherit: true });
+  const build = await anchoredIo.exec('build', 'npm', ['run', 'build'], { inherit: true });
   if (build.code !== 0) throw new Error(`构建失败（退出码 ${build.code}）`);
-  const inspect = await activeIo.exec('pack:inspect', 'npm', ['pack', '--dry-run', '--json']);
+  const inspect = await anchoredIo.exec('pack:inspect', 'npm', ['pack', '--dry-run', '--json']);
   if (inspect.code !== 0) throw new Error('npm pack --dry-run 失败');
   const inspectResult = JSON.parse(inspect.stdout)[0];
   const verdict = inspectPackEntries(inspectResult.files ?? []);
@@ -411,7 +450,8 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
     throw new Error(`pack 检视不过：缺失 [${verdict.missing.join('; ')}] 违禁 [${verdict.violations.join('; ')}]`);
   }
   console.log(`  检视绿：${(inspectResult.files ?? []).length} 个文件全过白名单`);
-  const packReal = await activeIo.exec('pack:real', 'npm', ['pack', '--json'], { cwd: workDir });
+  // pack:real 的 cwd 走包装层缺省（基建大扫 #21 统一后与全体调用点同源——不再单点显式传）
+  const packReal = await anchoredIo.exec('pack:real', 'npm', ['pack', '--json']);
   if (packReal.code !== 0) throw new Error('npm pack 失败');
   const tarballName = JSON.parse(packReal.stdout)[0].filename;
   const tarballPath = join(workDir, tarballName);
@@ -423,7 +463,12 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
   // 仓库根会成为未跟踪残留，污染下一轮契约 1 工作树净空核验（机器自锁死）；
   // 重跑自同一 commit 确定性重建，清理无损失
   try {
-    await installSmoke(activeIo, { tarballPath, binName: pkg.binName, version: pkg.version });
+    await installSmoke(anchoredIo, {
+      tarballPath,
+      binName: pkg.binName,
+      version: pkg.version,
+      defaultAppId: readDefaultAppId(workDir),
+    });
 
     // ── 契约 4：幂等收口与 publish 单点 ──
     const plan = planTagOperations(pkg.version);
@@ -433,7 +478,7 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
     // 快照必须先于任何写操作：本脚本的正式期发布不触 next，比对即「我们没动它」
     let nextBefore;
     if (!plan.isPrerelease) {
-      const pre = await activeIo.exec('view-tags:pre', 'npm', ['view', pkg.name, 'dist-tags', '--json']);
+      const pre = await anchoredIo.exec('view-tags:pre', 'npm', ['view', pkg.name, 'dist-tags', '--json']);
       if (pre.code !== 0) throw new Error('npm view dist-tags（pre 快照）失败——「next 不动」断言失去基准，拒发');
       nextBefore = JSON.parse(pre.stdout).next;
     }
@@ -447,7 +492,7 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
       console.log(
         `── 契约 4/6 publish${dryRun ? '（dry-run 干跑）' : ''}：--tag ${plan.publishTag}${provenance ? ' --provenance' : ''}`,
       );
-      const pub = await activeIo.exec(
+      const pub = await anchoredIo.exec(
         'publish',
         'npm',
         publishArgs(tarballPath, { publishTag: plan.publishTag, dryRun, githubActions: provenance }),
@@ -466,7 +511,7 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
     if (!dryRun || scenarioInjectsPost) {
       if (!dryRun) {
         for (const tag of plan.postAdds) {
-          const add = await activeIo.exec('dist-tag-add', 'npm', [
+          const add = await anchoredIo.exec('dist-tag-add', 'npm', [
             'dist-tag',
             'add',
             `${pkg.name}@${pkg.version}`,
@@ -475,7 +520,7 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
           if (add.code !== 0) throw new Error(`dist-tag add ${tag} 失败（退出码 ${add.code}）`);
         }
       }
-      const post = await activeIo.exec('view-tags:post', 'npm', ['view', pkg.name, 'dist-tags', '--json']);
+      const post = await anchoredIo.exec('view-tags:post', 'npm', ['view', pkg.name, 'dist-tags', '--json']);
       if (post.code !== 0) throw new Error('npm view dist-tags 失败——终态无法断言');
       assertDistTagTerminal(JSON.parse(post.stdout), {
         isPrerelease: plan.isPrerelease,
@@ -498,27 +543,27 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
     // ── 契约 6：尾件 git tag（幂等打挂） ──
     console.log('── 契约 6/6 git tag');
     const tag = `v${pkg.version}`;
-    const listRaw = await activeIo.exec('git-tag:list', 'git', ['tag', '-l', tag]);
+    const listRaw = await anchoredIo.exec('git-tag:list', 'git', ['tag', '-l', tag]);
     if (listRaw.code !== 0) throw new Error('git tag -l 失败');
     let tagSha;
     const tagExists = listRaw.stdout.trim() !== '';
     if (tagExists) {
-      const rev = await activeIo.exec('git-rev:tag', 'git', ['rev-parse', `${tag}^{commit}`]);
+      const rev = await anchoredIo.exec('git-rev:tag', 'git', ['rev-parse', `${tag}^{commit}`]);
       if (rev.code !== 0) throw new Error(`git rev-parse ${tag} 失败`);
       tagSha = rev.stdout.trim();
     }
-    const head = await activeIo.exec('git-rev:head', 'git', ['rev-parse', 'HEAD']);
+    const head = await anchoredIo.exec('git-rev:head', 'git', ['rev-parse', 'HEAD']);
     if (head.code !== 0) throw new Error('git rev-parse HEAD 失败');
     const gitAction = classifyGitTag(tagExists, tagSha, head.stdout.trim());
     if (gitAction.action === 'reject') {
       throw new Error(`git tag ${tag} 已在但指向异 commit（${tagSha} ≠ ${head.stdout.trim()}）——响亮拒`);
     }
     if (gitAction.action === 'create' && !dryRun) {
-      const mk = await activeIo.exec('git-tag:create', 'git', ['tag', tag]);
+      const mk = await anchoredIo.exec('git-tag:create', 'git', ['tag', tag]);
       if (mk.code !== 0) throw new Error(`git tag ${tag} 创建失败`);
       // push 恒带 HTTP/1.1（遗漏大扫 20260901-c #17）：与仓库管理推送纪律/归档机器
       // 同律——本机到 GitHub 的 HTTP/2 推流不稳，release 机器不得是全仓唯一裸 push 例外
-      const push = await activeIo.exec('git-tag:push', 'git', ['-c', 'http.version=HTTP/1.1', 'push', 'origin', tag]);
+      const push = await anchoredIo.exec('git-tag:push', 'git', ['-c', 'http.version=HTTP/1.1', 'push', 'origin', tag]);
       if (push.code !== 0) throw new Error(`git push origin ${tag} 失败（本地已打——人工补推）`);
       console.log(`  git tag ${tag} 已打挂`);
     } else {
@@ -557,7 +602,7 @@ function throwUnknownScenario(name) {
  * 装机产物「能起但首启无默认应用」的静默残缺在此截获（APP_DATA_DIR 钉入
  * 冒烟临时目录防污染真实数据域）。
  */
-async function installSmoke(io, { tarballPath, binName, version }) {
+async function installSmoke(io, { tarballPath, binName, version, defaultAppId }) {
   const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-'));
   try {
     const install = await io.exec('smoke:install', 'npm', [
@@ -584,19 +629,22 @@ async function installSmoke(io, { tarballPath, binName, version }) {
       );
     }
     // 真握手（复盘 G-1）：dump-config 全装配零落盘（:memory:），断言官方应用清单
-    // 非空且默认应用解析为 coder——apps/ 目录缺席即此处红，静默降级面收进发布闸
+    // 非空且默认应用解析为装机产物内清单的 default 键（基建大扫 #36：期望值由
+    // readDefaultAppId 从仓内清单动态读——官方拍板换默认应用时零人工同步，与
+    // readPackageFace「零硬编码字面量」纪律同拍）——apps/ 目录缺席即此处红，
+    // 静默降级面收进发布闸
     const probe = await io.exec('smoke:apps', join(prefix, 'node_modules', '.bin', binName), ['dump-config'], {
       env: { APP_DATA_DIR: join(prefix, 'smoke-data'), APP_LOG_LEVEL: 'error' },
     });
     if (probe.code !== 0) {
       throw new Error(`安装冒烟失败：${binName} dump-config 退出码 ${probe.code}（发布物装机后不可装配）`);
     }
-    if (!probe.stdout.includes('默认应用：coder')) {
+    if (defaultAppId === undefined || !probe.stdout.includes(`默认应用：${defaultAppId}`)) {
       throw new Error(
-        `安装冒烟失败：dump-config 未见「默认应用：coder」——官方应用清单（apps/）疑似缺席，首启默认应用承诺将静默破裂`,
+        `安装冒烟失败：dump-config 未见「默认应用：${defaultAppId ?? '(仓内清单无 default 键)'}」——官方应用清单（apps/）疑似缺席，首启默认应用承诺将静默破裂`,
       );
     }
-    console.log(`  安装冒烟绿：${binName} --version = ${smokeOut}；dump-config 默认应用 = coder`);
+    console.log(`  安装冒烟绿：${binName} --version = ${smokeOut}；dump-config 默认应用 = ${defaultAppId}`);
   } finally {
     rmSync(prefix, { recursive: true, force: true }); // 冒烟现场即用即清
   }

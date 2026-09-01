@@ -35,24 +35,14 @@ import { join } from 'node:path';
 import { createRuntime } from '../src/app/assembly.js';
 import { Persistence } from '../src/persist/index.js';
 import { collectBuiltinMigrations } from '../src/app/builtins.js';
-import { createProvider } from '@earendil-works/pi-ai';
-import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
+import { PROXY_PROVIDER_ID, buildProxyProvider, requireProxyEnv } from './smoke-provider.mjs';
 
 /* ---------------- 环境与参数 ---------------- */
 
-/** 代理端点（Claude Code 约定；缺省即退出——本脚本只为代理场景存在） */
-const baseUrl = process.env['ANTHROPIC_BASE_URL'];
-/** Bearer 凭证（Claude Code 约定；只读不回显） */
-const token = process.env['ANTHROPIC_AUTH_TOKEN'];
+/** 代理环境约定（缺参即用法退出——共享层单点，基建大扫 #34） */
+const { baseUrl, token } = requireProxyEnv('tools/smoke-carrier.mjs [模型id]');
 /** 模型 id（argv[2]，缺省 glm-5.3——本环境代理的缺省服务模型） */
 const modelId = process.argv[2] ?? 'glm-5.3';
-/** 自定义 provider id（模型标识 = `${providerId}/${modelId}`） */
-const providerId = 'anthropic-proxy';
-
-if (!baseUrl || !token) {
-  console.error('用法: ANTHROPIC_BASE_URL=… ANTHROPIC_AUTH_TOKEN=… npx tsx tools/smoke-carrier.mjs [模型id]');
-  process.exit(2);
-}
 
 /* ---------------- 临时目录（realpath 归一——macOS /var 前缀差异教训） ---------------- */
 
@@ -100,40 +90,9 @@ mkdirSync(appDirWk, { recursive: true });
 writeFileSync(join(appDirExt, 'index.ts'), fixtureSource('fx-ext', 'fx/ext_echo', 'EXT-ECHO'));
 writeFileSync(join(appDirWk, 'index.ts'), fixtureSource('fx-wk', 'fx/wk_echo', 'WK-ECHO'));
 
-/* ---------------- provider 构造（与 smoke-real.mjs 同形——代理场景必经注册面） ---------------- */
+/* ---------------- provider 构造（共享层单点——基建大扫 #34，与 smoke-real 同源；代理场景必经注册面） ---------------- */
 
-const provider = createProvider({
-  id: providerId,
-  name: 'Anthropic 兼容代理（Claude Code 环境约定）',
-  baseUrl,
-  auth: {
-    apiKey: {
-      name: 'ANTHROPIC_AUTH_TOKEN (Bearer)',
-      login: async () => {
-        throw new Error('冒烟 provider 不支持交互登录');
-      },
-      resolve: async () => ({
-        auth: { headers: { Authorization: `Bearer ${token}` } },
-        source: 'ANTHROPIC_AUTH_TOKEN',
-      }),
-    },
-  },
-  models: [
-    {
-      id: modelId,
-      name: modelId,
-      api: 'anthropic-messages',
-      provider: providerId,
-      baseUrl,
-      reasoning: false,
-      input: ['text'],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 200_000,
-      maxTokens: 8_192,
-    },
-  ],
-  api: anthropicMessagesApi(),
-});
+const provider = buildProxyProvider({ baseUrl, token, modelId });
 
 /* ---------------- 五环主体 ---------------- */
 
@@ -143,7 +102,7 @@ const rings = { installMount: false, reload: false, materialize: false, bridge: 
 try {
   /* ---- 装配（隔离面与 smoke-real 同款：dataDir/workspace/homeDir/compositionDir 全 mktemp） ---- */
   const runtime = await createRuntime({
-    model: `${providerId}/${modelId}`,
+    model: `${PROXY_PROVIDER_ID}/${modelId}`,
     dbPath: join(smokeData, 'sessions.db'),
     workspace: smokeWorkspace,
     homeDir: smokeHome,

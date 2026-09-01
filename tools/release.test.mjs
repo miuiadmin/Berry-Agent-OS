@@ -183,6 +183,18 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     const v = inspectPackEntries(CLEAN);
     expect(v.violations.filter((p) => p.startsWith('examples/'))).toHaveLength(0);
   });
+  it('dist/ 内非 SKILL.md 的 .md 违禁 / dist/ 内 SKILL.md 放行（基建大扫 #35：检视面贴齐拷贝面口径）', () => {
+    // 拷贝面只豁免 SKILL.md（技能资产刚需）；检视面此前对 dist/**/*.md 全放行
+    // ——多拷一个 README.md 进 dist 不会被拦。锁：dist 内其余 .md 逐个点名违禁。
+    const bad = inspectPackEntries([...CLEAN, 'dist/README.md', 'dist/webui/GUIDE.md']);
+    expect(bad.ok).toBe(false);
+    expect(bad.violations).toContain('dist/README.md');
+    expect(bad.violations).toContain('dist/webui/GUIDE.md');
+    // 对照：CLEAN 已含 dist/admin/skills/admin/SKILL.md——零违禁（SKILL.md 例外面在位）
+    expect(inspectPackEntries(CLEAN).violations.filter((p) => p.endsWith('.md') && p.startsWith('dist/'))).toHaveLength(
+      0,
+    );
+  });
 });
 
 describe('契约 6 classifyGitTag：git tag 幂等判定', () => {
@@ -267,6 +279,11 @@ describe('assertNoInstallPlaceholders：发布物占位锚（真发路径 fail-l
 let workDir;
 beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), 'release-test-'));
+  // 仓内官方应用清单最小真形（基建大扫 #36）：installSmoke 的「默认应用：…」
+  // 断言串自 readDefaultAppId(workDir) 动态拼出——夹具须与真实仓 apps/ 形态
+  // 对齐（default 键真源），否则 green 路径误报「清单缺席」
+  mkdirSync(join(workDir, 'apps'), { recursive: true });
+  writeFileSync(join(workDir, 'apps', 'coder.app.yaml'), 'id: coder\nlabel: 代码\ndefault: true\n');
 });
 afterEach(() => {
   rmSync(workDir, { recursive: true, force: true });
@@ -294,15 +311,16 @@ function writeRealTarball(tgzPath, files = { 'README.md': '# berry-agent-os\n\nn
 /**
  * 全脚本化 io：canned 表按步骤标签喂应答（缺标签即抛——每测的 canned 面必须
  * 恰好覆盖其路径真实触达的每个步骤，静默缺口 = 测试脚本自身的 bug）。
- * 返回 { io, calls }——calls 记录每次调用（label/args），供步骤序与参数断言。
+ * 返回 { io, calls }——calls 记录每次调用（label/args/opts），供步骤序、参数
+ * 与 opts.cwd 锚定断言（基建大扫 #21）。
  */
 function scriptedIo(canned) {
   const calls = [];
   return {
     calls,
     io: {
-      exec(label, command, args) {
-        calls.push({ label, command, args });
+      exec(label, command, args, opts) {
+        calls.push({ label, command, args, opts });
         const handler = canned[label];
         if (!handler) throw new Error(`测试脚本缺口：步骤 ${label} 未编入 canned 表`);
         return handler();
@@ -401,6 +419,11 @@ describe('runRelease 编排骨舞：preview 期 prerelease 全绿路径', () => 
       'berry-agent-os@1.0.0-alpha.3',
       'latest',
     ]);
+    // 基建大扫 #21 锁：子进程锚定发布根——注入缝收到的每次 exec 均带
+    // cwd: workDir（包装层缺省注入；从任意 cwd 发起 release 不再落错根）
+    for (const c of calls) {
+      expect(c.opts?.cwd, `步骤 ${c.label} 缺 cwd 锚定`).toBe(workDir);
+    }
     // 步骤序：探测先于 pack（契约 2 先行），publish 先于终态断言
     expect(labels(calls).indexOf('probe')).toBeLessThan(labels(calls).indexOf('pack:real'));
     expect(labels(calls).indexOf('publish')).toBeLessThan(labels(calls).indexOf('view-tags:post'));
