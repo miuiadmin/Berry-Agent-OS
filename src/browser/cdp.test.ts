@@ -45,6 +45,9 @@ import { saveScreenshot, SCREENSHOTS_KEEP } from './screenshots.js';
 import { registerBrowserTools } from './tools.js';
 import { createBrowserApp } from './app.js';
 
+/** 测试面 no-op 限流桩（无限流语义——组合根单例共享行为由 builtin-deps 面断言） */
+const NOOP_GATES = { acquire: () => Promise.resolve(), release: () => undefined };
+
 /* ---------------- 手写 WS 帧编解码（服务器侧最小面） ---------------- */
 
 /** WS GUID（RFC 6455 握手常量） */
@@ -1084,6 +1087,7 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
         dispose: () => engine.dispose(),
       },
       dataDir,
+      gates: NOOP_GATES,
       register: (def) => {
         defs.set(def.name, def);
         return () => defs.delete(def.name);
@@ -1365,6 +1369,7 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
         dispose: async () => undefined,
       },
       dataDir,
+      gates: NOOP_GATES,
       register: (def) => {
         noteDefs.set(def.name, def);
         return () => noteDefs.delete(def.name);
@@ -1422,11 +1427,21 @@ describe('browser 行 apply 接线（孤儿清扫——刀一治理面的接线�
     const registered: string[] = [];
     const disposers: Array<() => void> = [];
     // 最小 ctx stub（apply 消费面四键：get ui/tools、provide、effect、logger）
+    /** /browser install 命令收容（channels 假面——apply 期注册，本测不触发 handler） */
+    const commands: Array<{ name: string; handler: (args: string) => Promise<void> }> = [];
     const ctx = {
       get: (key: string) =>
         key === 'ui'
           ? { notify: uiNotify }
-          : { register: (def: ToolDefinition) => (registered.push(def.name), () => undefined) },
+          : key === 'channels'
+            ? {
+                registerCommand: (cmd: { name: string; handler: (args: string) => Promise<void> }) => (
+                  commands.push(cmd),
+                  () => undefined
+                ),
+              }
+            : { register: (def: ToolDefinition) => (registered.push(def.name), () => undefined) },
+      tryGet: (_key: string) => undefined, // web 件软依赖缺席（本测不走装机路径）
       provide: vi.fn(),
       effect: (fn: () => () => void) => {
         disposers.push(fn());
@@ -1442,6 +1457,7 @@ describe('browser 行 apply 接线（孤儿清扫——刀一治理面的接线�
       killTree,
       registry,
       newConnection: (o) => new JsonRpcConnection(o),
+      gates: NOOP_GATES,
     }).apply(ctx);
 
     // 接线三断言（修复前红形态：sweep 被摘或 kill 探针接错——崩溃残留进程永久泄漏且无测试红）
@@ -1455,6 +1471,162 @@ describe('browser 行 apply 接线（孤儿清扫——刀一治理面的接线�
     expect(ctx.provide).toHaveBeenCalledWith('browser', expect.anything());
     expect(registered).toHaveLength(10);
     expect(registered).toContain('browser_navigate');
+    // /browser install 命令注册（刀三余量——channels 面 apply 期接线）
+    expect(commands.map((c) => c.name)).toContain('browser');
     rmSync(dataDir, { recursive: true, force: true });
+  });
+});
+
+/* ---------------- 刀三余量：命令面 + provider 占位（apply 面行为锁） ---------------- */
+
+/**
+ * apply 面测试基建（providers/命令 handler 共用）：最小 ctx stub + 件 apply。
+ * commands 收容 /browser 命令；fetchFace 可注入（tryGet 软依赖的在场形态）。
+ */
+function applyFace(config: unknown, fetchFace: unknown, uiNotify: ReturnType<typeof vi.fn>) {
+  /** 工具注册面假收容（effect 即跑） */
+  const registered: string[] = [];
+  const commands: Array<{ name: string; description: string; handler: (args: string) => Promise<void> }> = [];
+  const ctx = {
+    get: (key: string) =>
+      key === 'ui'
+        ? { notify: uiNotify }
+        : key === 'channels'
+          ? {
+              registerCommand: (cmd: {
+                name: string;
+                description: string;
+                handler: (args: string) => Promise<void>;
+              }) => (commands.push(cmd), () => undefined),
+            }
+          : { register: (def: ToolDefinition) => (registered.push(def.name), () => undefined) },
+    tryGet: (key: string) => (key === 'fetch' ? fetchFace : undefined),
+    provide: vi.fn(),
+    effect: (fn: () => () => void) => {
+      fn(); // effect 即跑（收容命令）——返回值弃（测试不回卷）
+      return () => undefined;
+    },
+    logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+  } as unknown as AppContext;
+  const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-cmd-'));
+  createBrowserApp({
+    dataDir,
+    spawnEngine: () => {
+      throw new Error('apply 期零 spawn');
+    },
+    killTree: vi.fn(),
+    registry: { add: vi.fn(), remove: vi.fn(), sweep: vi.fn(async () => ({ killed: [] })) },
+    newConnection: (o) => new JsonRpcConnection(o),
+    gates: NOOP_GATES,
+  }).apply(ctx, config as never);
+  return {
+    commands: commands.filter((c) => c.name === 'browser'),
+    dataDir,
+    uiNotify,
+    rm: () => rmSync(dataDir, { recursive: true, force: true }),
+  };
+}
+
+describe('browser /browser install 命令面 + 云端 provider 占位', () => {
+  it('provider 凭证在场 → info 通知一条（占位披露 + 优先级链数据面）+ debug 记链', () => {
+    const uiNotify = vi.fn();
+    const face = applyFace(
+      { providers: { browseruse: { apiKey: 'k1' }, browserbase: { apiKey: 'k2' } } },
+      undefined,
+      uiNotify,
+    );
+    face.rm();
+    const call = uiNotify.mock.calls.find((c) => String(c[0]).includes('云端 provider 已配置'));
+    expect(call).toBeDefined(); // 有凭证才通知（执行面零接——披露不路由）
+    expect(call![0]).toContain('browseruse, browserbase');
+    expect(call![0]).toContain('BrowserUse > Browserbase > 本地引擎'); // 优先级链数据面
+    expect(call![1]).toEqual({ level: 'info' });
+  });
+
+  it('无凭证零面（常态——不通知不占线）', () => {
+    const uiNotify = vi.fn();
+    const face = applyFace(undefined, undefined, uiNotify);
+    face.rm();
+    expect(uiNotify.mock.calls.some((c) => String(c[0]).includes('云端 provider'))).toBe(false);
+  });
+
+  it('非 install 参数 → 用法提示；web 件缺席 → warn 附替代指引（诚实缺席不级联）', async () => {
+    const uiNotify = vi.fn();
+    const face = applyFace(undefined, undefined, uiNotify);
+    const handler = face.commands[0]!.handler;
+    await handler('status'); // 参数腿
+    expect(String(uiNotify.mock.calls[0]![0])).toContain('用法：/browser install');
+    await handler('install'); // web 缺席腿（tryGet → undefined）
+    const warnCall = uiNotify.mock.calls[1]!;
+    expect(warnCall[0]).toContain('web 件（ctx.fetch 服务）未装载');
+    expect(warnCall[1]).toEqual({ level: 'warn' });
+    face.rm();
+  });
+
+  it('装机成功腿：fetch 双面注假 → installEngine 回执组装 notify（路径+SHA 记档）', async () => {
+    const uiNotify = vi.fn();
+    // 假 fetch 服务面：manifestFetch 回最小清单、downloadToFile 回假回执（installEngine 本体在 install.test.ts 全锁——此处只锁命令面接线）
+    const fetchFace = {
+      fetch: async () => ({
+        status: 200,
+        truncated: false,
+        text: JSON.stringify({
+          channels: {
+            Stable: {
+              version: '999.0.0.0',
+              downloads: {
+                // 四平台键全给（命令面用 process 实测位——测试跑在哪台都命中）
+                chrome: ['mac-arm64', 'mac-x64', 'linux64', 'win64'].map((platform) => ({
+                  platform,
+                  url: 'https://storage.googleapis.com/x.zip',
+                })),
+              },
+            },
+          },
+        }),
+      }),
+      // 下载腿写真 zip 档（单 store 条目——extractZip 真跑通；布局细节 install.test.ts 已锁）
+      downloadToFile: vi.fn(async (_url: string, opts: { destPath: string }) => {
+        const name = 'chrome-mac-arm64/README';
+        const nameBuf = Buffer.from(name, 'utf8');
+        const data = Buffer.from('x');
+        const checksum = createHash('sha1').update(data).digest().readUInt32BE(0); // 任意 crc 值即可（store 无校验执法面）
+        const lh = Buffer.alloc(30);
+        lh.writeUInt32LE(0x04034b50, 0);
+        lh.writeUInt32LE(checksum, 14);
+        lh.writeUInt32LE(data.length, 18);
+        lh.writeUInt32LE(data.length, 22);
+        lh.writeUInt16LE(nameBuf.length, 26);
+        const ch = Buffer.alloc(46);
+        ch.writeUInt32LE(0x02014b50, 0);
+        ch.writeUInt32LE(checksum, 16);
+        ch.writeUInt32LE(data.length, 20);
+        ch.writeUInt32LE(data.length, 24);
+        ch.writeUInt16LE(nameBuf.length, 28);
+        const eocd = Buffer.alloc(22);
+        eocd.writeUInt32LE(0x06054b50, 0);
+        eocd.writeUInt16LE(1, 8);
+        eocd.writeUInt16LE(1, 10);
+        eocd.writeUInt32LE(46 + nameBuf.length, 12);
+        eocd.writeUInt32LE(30 + nameBuf.length + data.length, 16);
+        const { writeFile } = await import('node:fs/promises');
+        await writeFile(opts.destPath, Buffer.concat([lh, nameBuf, data, ch, nameBuf, eocd]));
+        return { finalUrl: 'https://storage.googleapis.com/x.zip', bytes: 10, sha256: 'aabbcc'.repeat(11) };
+      }),
+    };
+    const face = applyFace(undefined, fetchFace, uiNotify);
+    await face.commands[0]!.handler('install');
+    // downloadToFile 接线参数：白名单 = CfT 两域 + caller 归因
+    expect(fetchFace.downloadToFile).toHaveBeenCalledWith(
+      'https://storage.googleapis.com/x.zip',
+      expect.objectContaining({
+        allowedHosts: ['googlechromelabs.github.io', 'storage.googleapis.com'],
+        caller: 'browser-install',
+      }),
+    );
+    const ok = uiNotify.mock.calls.find((c) => String(c[0]).includes('装机完成'));
+    expect(ok).toBeDefined();
+    expect(ok![0]).toContain('999.0.0.0');
+    face.rm();
   });
 });

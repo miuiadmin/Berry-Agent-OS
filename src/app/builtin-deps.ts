@@ -29,6 +29,7 @@ import { deriveMessages } from '../session/index.js';
 import type { GoalChannel } from '../goal/index.js';
 import type { TickRunResult } from '../scheduler/index.js';
 import type { WebAppOverrides } from '../web/index.js';
+import { InflightGates } from '../web/index.js';
 import type { WebuiApprovalMount, WebuiEphemeralAuthFace, WebuiSessionSummary } from '../webui/index.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import { defaultAgentLocations } from './agents-md.js';
@@ -170,13 +171,14 @@ export function createLspAssemblyDeps(dataDirPath: string, sandbox: SandboxServi
  * <dataDir>/browser/children.json + 桥核工厂注入（browser 结构上不见
  * mcp/exec——帧无关桥组合根装配，lsp 同款纪律）。
  */
-export function createBrowserAssemblyDeps(dataDirPath: string): BrowserAppDeps {
+export function createBrowserAssemblyDeps(dataDirPath: string, gates: BrowserAppDeps['gates']): BrowserAppDeps {
   return {
     dataDir: dataDirPath,
     spawnEngine: spawnEngineProcess,
     killTree,
     registry: new ChildRegistry(join(dataDirPath, 'browser', 'children.json')),
     newConnection: (opts) => new JsonRpcConnection(opts),
+    gates,
   };
 }
 
@@ -187,6 +189,13 @@ export function createBrowserAssemblyDeps(dataDirPath: string): BrowserAppDeps {
 export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistryOptions {
   /** goal 工具三件//goal 命令的会话归属（同 routed 路由：run 期链内 = 归属会话） */
   const getSession = () => host.registry.routed()?.session;
+  /**
+   * 导航限流单例（契约篇 §6.10「第三消费位」——web 件 fetch 与 browser 件
+   * browser_navigate 共享同一 InflightGates）：host.webOverrides.gates 在场则
+   * 复用（注入缝生产消费合法——fetchImpl/lookup 先例同位），缺席新建；
+   * 同一实例注 webOverrides.gates 与 browserDeps.gates 两处
+   */
+  const webGates = host.webOverrides?.gates ?? new InflightGates();
   // symbolsFace 持有器（刀三行面晚绑桥第二用例——lsp 行挂真身、行回卷摘除；
   // webui 侧 symbolsFor 经 holder 晚绑，缺席 = 补全 404）
   const persistence = host.persistence;
@@ -247,7 +256,7 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
     // 裸 spawn + 树杀 + 登记簿 <dataDir>/browser/children.json + 桥核工厂——
     // browser 结构上不见 mcp/exec（OS 沙箱不 confine：本机引擎非第三方服务器
     // 代码，M2 裁决——与 mcp/lsp spawner 判据差异显式记此）
-    browserDeps: createBrowserAssemblyDeps(host.dataDir()),
+    browserDeps: createBrowserAssemblyDeps(host.dataDir(), webGates),
     // tools 件闭包（S2 fs 迁域后收窄）：gate/decision durable 落点绑转发壳
     //（件绑定后落账生效）+ 检索族路径锚。可写根推导器已随 fs 族迁 chat 件
     // deps（rootsProvider）。rowApp 探针 = D1 注册面隐式路由（挂应用的行注册
@@ -259,7 +268,10 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
     },
     // web 件测试注入缝（生产零参——真 fetch/真 DNS；组合根全栈测试注入
     // fetchImpl/lookup，mock 停在外部边界非中间层）
-    webOverrides: host.webOverrides,
+    // web 件注入缝（原纯测试缝——gates 键升「生产接线位 + 测试缝」双语义：
+    // 生产路径由 webGates 单例填充〔web/browser 两件共享，契约篇 §6.10〕，
+    // fetchImpl/lookup 仍测试专用。host 在场时其 gates 已被 webGates 复用采纳）
+    webOverrides: { ...host.webOverrides, gates: webGates },
     // 可写根活取值（memory 件文件命令面落盘判定；chatBundle 的 fs 可写根同源：
     // 同一 rootsProvider，文件命令与 fs 工具族同一物理边界）
     writableRoots: host.rootsProvider,

@@ -16,6 +16,7 @@
 import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import { createLspAssemblyDeps, createBrowserAssemblyDeps } from './builtin-deps.js';
+import { InflightGates } from '../web/index.js'; // 诊断形态限流占位（构造零副作用——apply 永不跑）
 import { loadComposition, OVERLAY_FILENAME, safeModeComposition, type CompositionReport } from './composition.js';
 import { loadOfficialApps, assertAppComponents, resolveDefaultApp } from './app-registry.js';
 import { createBuiltinRegistry } from './builtins.js';
@@ -262,7 +263,7 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
             //（构造零副作用——TMPDIR 建目录已惰性到首 spawn，诊断面不触盘）
             lspDeps: createLspAssemblyDeps(dataDir(), createSandboxService(), process.cwd()),
             // browser 件闭包（诊断装配同构——引擎惰性零 spawn，诊断面构造 deps 不触盘）
-            browserDeps: createBrowserAssemblyDeps(dataDir()),
+            browserDeps: createBrowserAssemblyDeps(dataDir(), new InflightGates()), // 占位单例（诊断面不共享生产 webGates——apply 永不跑零行为差）
             // tools 件闭包占位（Ring 1 行树化批——诊断面 apply 永不跑，占位
             // 闭包零副作用；检索族 workspace 锚在，注册表键在即树形不失真）
             toolsDeps: {

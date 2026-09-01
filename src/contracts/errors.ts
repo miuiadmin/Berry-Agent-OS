@@ -182,6 +182,10 @@ export const WEB_PRIVATE_TARGET = registerErrorCode('WEB_PRIVATE_TARGET');
 export const WEB_REDIRECT_LIMIT = registerErrorCode('WEB_REDIRECT_LIMIT');
 /** web：网络层失败（DNS 解析失败/连接拒绝/超时/TLS 错误等——message 载底层原因） */
 export const WEB_FETCH_FAILED = registerErrorCode('WEB_FETCH_FAILED');
+/** web：装机下载失败族（超独立字节预算 / 非 2xx / 域白名单外——契约篇 §6.10 downloadToFile；与抓取「非 2xx isError 结果面」有意分歧：装机物截断即废无截断交付语义） */
+export const WEB_DOWNLOAD_FAILED = registerErrorCode('WEB_DOWNLOAD_FAILED');
+/** browser：装机面失败（CfT 清单解析失败/平台无发行/zip 解包拒载——契约篇 §6.10 /browser install，第五十四批刀三余量） */
+export const BROWSER_INSTALL_FAILED = registerErrorCode('BROWSER_INSTALL_FAILED');
 
 /** session：会话格式/版本不支持（升级后的旧库拒绝打开，不迁移，会话篇拍板；未知事件类型非 ignorable 同用此码） */
 export const SESSION_FORMAT_UNSUPPORTED = registerErrorCode('SESSION_FORMAT_UNSUPPORTED');

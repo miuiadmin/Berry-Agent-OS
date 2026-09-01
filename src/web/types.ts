@@ -27,6 +27,13 @@ export const WEB_MAX_GLOBAL_INFLIGHT = 8;
 export const WEB_MAX_PER_HOST_INFLIGHT = 2;
 /** 工具/服务单次抓取执行预算（管道 timeoutMs 执法面——DNS+5 跳+抓取总量） */
 export const WEB_FETCH_TIMEOUT_MS = 60_000;
+/**
+ * 装机下载独立字节预算 512 MiB（契约篇 §6.10 downloadToFile——与抓取 2 MiB 内存
+ * 预算分账：CfT chrome zip 150-250MB 量级留裕量；超即断流删档抛错不截断交付）
+ */
+export const WEB_DOWNLOAD_BUDGET_BYTES = 512 * 1024 * 1024;
+/** 装机下载执行帽 600s（150MB 慢网 60s 必不够——抓取帽与下载帽数值面分离） */
+export const WEB_DOWNLOAD_TIMEOUT_MS = 600_000;
 
 /** ctx.fetch 调用选项（骨架篇 §9.3 WebFetchOptions） */
 export interface WebFetchOptions {
@@ -66,6 +73,42 @@ export interface WebFetchResult {
  */
 export interface WebService {
   fetch(url: string, opts?: WebFetchOptions): Promise<WebFetchResult>;
+  /**
+   * 装机下载原语（契约篇 §6.10——流式落盘不整读内存，独立预算/白名单；
+   * 不走三段管道 durable 落账〔装机命令面非模型面〕，模型工具面不暴露）。
+   */
+  downloadToFile(url: string, opts: WebDownloadOptions): Promise<WebDownloadResult>;
+}
+
+/** downloadToFile 调用选项（契约篇 §6.10——白名单参数钉死非全局） */
+export interface WebDownloadOptions {
+  /** 落盘目标绝对路径（调用方给——zip 临时档/install 直装均由调用方编排） */
+  readonly destPath: string;
+  /**
+   * 域白名单（hostname 精确匹配——每跳重定向都重过；装机调用方钉官方发行域，
+   * 白名单外首跳/重定向跳一律 WEB_DOWNLOAD_FAILED）
+   */
+  readonly allowedHosts: readonly string[];
+  /** 取消信号（排队/传输中 abort = 删档取消） */
+  readonly signal?: AbortSignal;
+  /** 归因标注（无 durable 管道——走 logger 记账面） */
+  readonly caller?: string;
+}
+
+/** downloadToFile 产物（六字段——SHA256 记档供人工核，v1 不对照远端 checksum） */
+export interface WebDownloadResult {
+  /** 原始请求 URL */
+  readonly url: string;
+  /** 最终 URL（重定向走完后的落点） */
+  readonly finalUrl: string;
+  /** 落盘路径（与 opts.destPath 同值——回执自述） */
+  readonly filePath: string;
+  /** 落盘字节数 */
+  readonly bytes: number;
+  /** 全文 SHA256（流式随下载计算——hex 小写） */
+  readonly sha256: string;
+  /** 总耗时毫秒（含排队/重定向全程） */
+  readonly durationMs: number;
 }
 
 /**

@@ -12,14 +12,50 @@
 
 import type { AppContext, BuiltinAppModule } from '../contracts/app.js';
 import type { ToolsService } from '../contracts/tools.js';
+import { describeError } from '../contracts/errors.js';
 import type { CdpConnectionFactory } from './cdp.js';
 import { BrowserEngine, type EngineChild, type EngineRegistryLike, type SessionHandle } from './engine.js';
+import { installEngine } from './install.js';
 import { registerBrowserTools } from './tools.js';
 import { BROWSER_APP_CONFIG_SCHEMA, type BrowserAppConfig, type EngineStatus } from './types.js';
 
 /** ui 通知面（引擎生命周期人读出口——channels 服务结构子集，lsp 同款） */
 interface UiNotifyFace {
   notify(message: string, opts?: { level?: 'info' | 'warn' | 'error' }): void;
+}
+
+/**
+ * 导航限流面（web 件 InflightGates 的结构子集——「两消费面同一 execute 同一
+ * 限流」第三消费位。组合根持单例注入 web/browser 两件，契约篇 §6.10）。
+ */
+export interface BrowserGatesFace {
+  /** 取主机在飞槽（排队等待不拒绝——排队中 abort 立即出队） */
+  acquire(host: string, signal?: AbortSignal): Promise<void>;
+  /** 释槽（统一出口必还——漏放即泄漏槽位） */
+  release(host: string): void;
+}
+
+/** 命令注册面（channels 服务最小面——memory 件 ChannelsCommandFace 同构先例） */
+interface ChannelsCommandFace {
+  registerCommand(cmd: {
+    readonly name: string;
+    readonly description: string;
+    readonly source?: string;
+    handler(args: string): void | Promise<void>;
+  }): () => void;
+}
+
+/** 装机消费的 ctx.fetch 服务面（窄面——fetch 清单腿 + downloadToFile 下载腿） */
+interface FetchServiceFace {
+  fetch(url: string, opts?: { caller?: string }): Promise<{ status: number; text: string; truncated: boolean }>;
+  downloadToFile(
+    url: string,
+    opts: {
+      destPath: string;
+      allowedHosts: readonly string[];
+      caller?: string;
+    },
+  ): Promise<{ finalUrl: string; bytes: number; sha256: string }>;
 }
 
 /**
@@ -47,6 +83,11 @@ export interface BrowserAppDeps {
   readonly registry: EngineRegistryLike;
   /** JSON-RPC 桥核工厂（mcp JsonRpcConnection 经组合根注入——帧无关复用） */
   readonly newConnection: CdpConnectionFactory;
+  /**
+   * 导航限流面（组合根单例——与 web 件 fetch 共享同一 InflightGates 实例，
+   * 契约篇 §6.10「第三消费位」；builtin-deps 装配注入）
+   */
+  readonly gates: BrowserGatesFace;
   /** 闲置回收时长（缺省 300s——测试注入小值；组合根诊断形态不传） */
   readonly idleMs?: number;
   /** 引擎启动等待帽（缺省 20s） */
@@ -58,11 +99,19 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
   return {
     name: 'browser',
     config: BROWSER_APP_CONFIG_SCHEMA,
-    inject: ['ui', 'tools'], // ui = 引擎生命周期通知；tools = 刀二工具面注册（行序 browser 最末亦稳）
+    // ui = 引擎生命周期通知；tools = 刀二工具面注册；channels = /browser install
+    // 命令注册（Ring 1 必备行恒在——memory 件同律硬依赖）。
+    // fetch = **软依赖**：web 行是 Ring 2 真可卸——禁 web 行时 /browser install
+    // 诚实缺席附指引（tryGet 降级），不级联拒启整机（契约篇 §6.10 冷读裁决）
+    inject: ['ui', 'tools', 'channels'],
+    optionalInject: ['fetch'],
     apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) => {
       const ui = ctx.get<UiNotifyFace>('ui');
       // 行 config（装载面已按 schema 校验——此处窄读消费键）
       const cfg = (config ?? {}) as BrowserAppConfig;
+
+      /* ---- 云端 provider 占位（凭证检测 + 优先级链数据面——执行面零接） ---- */
+      detectProviders(cfg, ui, ctx);
 
       // 孤儿清扫（先于自家 spawn——上次宿主非正常退出残留的引擎进程树）
       void deps.registry.sweep({ kill: (pid) => deps.killTree(pid, () => true) }).then((report) => {
@@ -99,12 +148,62 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
         const disposers = registerBrowserTools({
           service,
           dataDir: deps.dataDir,
+          gates: deps.gates,
           register: (def) => tools.register(def),
         });
         return () => {
           for (const dispose of disposers) dispose();
         };
       });
+
+      /* ---- /browser install 命令（装机运维动词——不进模型工具面） ----
+       * 显式命令不自动下载（150MB 级惊喜下载不可接受——发现序④指引文本即
+       * 指向本命令）。web 件缺席（Ring 2 真可卸）= 诚实缺席附指引非级联失败。 */
+      const channels = ctx.get<ChannelsCommandFace>('channels');
+      ctx.effect(() =>
+        channels.registerCommand({
+          name: 'browser',
+          description:
+            '浏览器引擎装机：/browser install（下载 Chrome for Testing 稳定版至数据目录 engine/——150MB 级下载，幂等可重跑）',
+          source: 'app',
+          handler: async (args: string) => {
+            if (args.trim() !== 'install') {
+              ui.notify('用法：/browser install（下载 Chrome for Testing 稳定版引擎）');
+              return;
+            }
+            const fetchSvc = ctx.tryGet<FetchServiceFace>('fetch');
+            if (fetchSvc === undefined || typeof fetchSvc.downloadToFile !== 'function') {
+              ui.notify(
+                '/browser install 不可用：web 件（ctx.fetch 服务）未装载——装机下载原语缺席。\n' +
+                  '替代：装系统 Chrome（macOS /Applications 或 Linux 包管理器），或在 browser 行 config 配 executablePath。',
+                { level: 'warn' },
+              );
+              return;
+            }
+            ui.notify('引擎装机开始：解析 Chrome for Testing 稳定版清单…');
+            try {
+              const report = await installEngine({
+                manifestFetch: (url, opts) => fetchSvc.fetch(url, opts),
+                download: (url, opts) => fetchSvc.downloadToFile(url, opts),
+                dataDir: deps.dataDir,
+              });
+              if (report.alreadyInstalled) {
+                ui.notify(
+                  `引擎已装（Chrome for Testing ${report.version}）——无需重装。\n路径：${report.enginePath ?? '(布局表未命中——请检查 engine/ 目录)'}`,
+                );
+                return;
+              }
+              ui.notify(
+                `装机完成：Chrome for Testing ${report.version}（${report.slot.key}）\n` +
+                  `路径：${report.enginePath ?? '(布局表未命中——请检查 engine/ 目录)'}\n` +
+                  `校验：SHA256 ${report.sha256.slice(0, 12)}…（${report.bytes} 字节，记档 install.json 供人工核）`,
+              );
+            } catch (err) {
+              ui.notify(`装机失败：${describeError(err)}`, { level: 'error' });
+            }
+          },
+        }),
+      );
 
       // 行回卷：引擎永久关停（Browser.close 优雅 → 树杀兜底 → 登记簿净退）
       ctx.effect(() => {
@@ -114,4 +213,30 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
       });
     },
   };
+}
+
+/**
+ * 云端 provider 占位检测（契约篇 §6.10「云端 provider 占位」段）：
+ * 凭证在场 → ui.notify 一条（level info——「云端已配置、v1 未接执行面，引擎
+ * 恒本地」）+ logger.debug 记优先级链解析结果（BrowserUse > Browserbase >
+ * local——数据面自我披露，不落 durable）。执行面零接（真云接入挂账）。
+ */
+function detectProviders(cfg: BrowserAppConfig, ui: UiNotifyFace, ctx: AppContext): void {
+  const browseruse = cfg.providers?.browseruse?.apiKey;
+  const browserbase = cfg.providers?.browserbase?.apiKey;
+  const hasBrowseruse = browseruse !== undefined && browseruse !== '';
+  const hasBrowserbase = browserbase !== undefined && browserbase !== '';
+  if (!hasBrowseruse && !hasBrowserbase) return; // 无凭证零面（常态）
+  const configured = [hasBrowseruse ? 'browseruse' : '', hasBrowserbase ? 'browserbase' : ''].filter((s) => s !== '');
+  // 优先级链数据面（BrowserUse > Browserbase > local——v1 只解析不路由）
+  const chain = [hasBrowseruse ? 'BrowserUse' : '', hasBrowserbase ? 'Browserbase' : '', '本地引擎'].filter(
+    (s) => s !== '',
+  );
+  ui.notify(
+    `云端 provider 已配置（${configured.join(', ')}）——v1 未接云端执行面，引擎恒本地。` +
+      '优先级链数据面：' +
+      chain.join(' > '),
+    { level: 'info' },
+  );
+  ctx.logger.debug(`browser provider 占位链解析：${chain.join(' > ')}（执行面零接——真云接入挂账）`);
 }

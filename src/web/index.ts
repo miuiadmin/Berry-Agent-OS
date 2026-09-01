@@ -13,8 +13,8 @@
  */
 
 export { createWebApp, type WebAppOverrides } from './app.js';
-export type { WebFetchOptions, WebFetchResult, WebService } from './types.js';
-export { WEB_APP_CONFIG_SCHEMA } from './types.js';
+export type { WebDownloadOptions, WebDownloadResult, WebFetchOptions, WebFetchResult, WebService } from './types.js';
+export { WEB_APP_CONFIG_SCHEMA, WEB_DOWNLOAD_BUDGET_BYTES, WEB_DOWNLOAD_TIMEOUT_MS } from './types.js';
 // 卫生三件单源再导出（browser 件第三消费面——契约篇 §6.10）
-export { assertPublicHost, isReservedAddress, type HostLookup } from './hygiene.js';
+export { assertPublicHost, InflightGates, isReservedAddress, type HostLookup } from './hygiene.js';
 export { requireHttpUrl } from './fetch-core.js';

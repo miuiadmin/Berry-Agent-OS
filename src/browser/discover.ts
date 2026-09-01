@@ -59,6 +59,20 @@ function findOnPath(name: string, pathEnv: string): string | undefined {
 }
 
 /**
+ * CfT zip 解包知名布局（③ 下载引擎位探测 + install 侧 chmod 面单源——契约篇
+ * §6.10「布局表单源」钉死两消费面共享，禁两真相）。
+ * 平台键与 CfT with-downloads 清单实测对齐（chrome-mac/chrome-linux 为旧
+ * 命名幽灵条目，2026-09-01 冷读实测清出——现行清单 mac 侧只有 arm64/x64、
+ * linux 侧只有 linux64）。
+ */
+export const ENGINE_LAYOUTS: readonly string[] = [
+  'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+  'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+  'chrome-linux64/chrome',
+  'chrome-win64/chrome.exe',
+];
+
+/**
  * ③ 下载引擎位探测（/browser install 产物——CfT zip 解包后的已知相对布局）。
  * engineDir 缺席/空 = undefined（未装过——常态）。逐版本子目录扫第一命中。
  */
@@ -69,16 +83,8 @@ function findDownloadedEngine(engineDir: string): string | undefined {
   } catch {
     return undefined; // 目录缺席 = 未装（常态）
   }
-  // CfT zip 解包知名布局（mac/linux/win 三平台各一位——install 侧同表钉死）
-  const layouts: readonly string[] = [
-    'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
-    'chrome-mac/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
-    'chrome-linux64/chrome',
-    'chrome-linux/chrome',
-    'chrome-win64/chrome.exe',
-  ];
   for (const version of entries) {
-    for (const layout of layouts) {
+    for (const layout of ENGINE_LAYOUTS) {
       const candidate = join(engineDir, version, layout);
       if (isExecutable(candidate)) return candidate;
     }

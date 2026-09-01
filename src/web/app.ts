@@ -16,10 +16,13 @@ import { AppError, CONTEXT_SERVICE_NOT_FOUND } from '../contracts/errors.js';
 import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import { performFetch, runWebFetch, type WebFetchDeps } from './fetch-core.js';
+import { performDownload } from './download.js';
 import { InflightGates } from './hygiene.js';
 import {
   WEB_FETCH_TIMEOUT_MS,
   WEB_APP_CONFIG_SCHEMA,
+  type WebDownloadOptions,
+  type WebDownloadResult,
   type WebFetchOptions,
   type WebFetchResult,
   type WebService,
@@ -107,6 +110,14 @@ function applyWebApp(
         'service',
       );
       return captured!; // execute 已跑即必写（异常路径走 throw 不会到这）
+    },
+    /**
+     * 装机下载原语（契约篇 §6.10——不走三段管道〔装机命令面非模型面〕；
+     * 同一卫生前置（requireHttpUrl/assertPublicHost/gates 单例）+ 独立预算/
+     * 白名单/执行帽。实现住 download.ts——performDownload 单源）
+     */
+    async downloadToFile(url: string, opts: WebDownloadOptions): Promise<WebDownloadResult> {
+      return performDownload(url, opts, deps, ctx.logger);
     },
   };
   ctx.provide('fetch', service);

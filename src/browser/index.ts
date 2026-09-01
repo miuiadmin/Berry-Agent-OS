@@ -23,7 +23,18 @@ export {
   type CdpRpc,
   type CdpVersionInfo,
 } from './cdp.js';
-export { discoverEngine } from './discover.js';
+export { discoverEngine, ENGINE_LAYOUTS } from './discover.js';
+// 刀三余量新增面：装机编排（/browser install）+ 手写 zip 读取器（契约篇 §6.10）
+export {
+  installEngine,
+  platformSlotOf,
+  CFT_MANIFEST_URL,
+  CFT_ALLOWED_HOSTS,
+  type InstallDeps,
+  type InstallReport,
+  type PlatformSlot,
+} from './install.js';
+export { extractZip, type ExtractResult } from './zip.js';
 // 刀二新增面：a11y 渲染 / 捕获态 / 截图落盘 / 工具面注册
 export {
   renderAccessibilitySnapshot,

@@ -34,6 +34,11 @@ export interface BrowserToolsDeps {
   readonly service: BrowserService;
   /** 数据目录（截图落盘锚） */
   readonly dataDir: string;
+  /**
+   * 导航限流面（组合根单例——与 web 件 fetch 共享同一 InflightGates；
+   * browser_navigate acquire/release 编舞同 fetch-core，契约篇 §6.10 第三消费位）
+   */
+  readonly gates: { acquire(host: string, signal?: AbortSignal): Promise<void>; release(host: string): void };
   /** 注册面（返回注销器——app.ts effect 回卷统一收） */
   readonly register: (def: ToolDefinition) => () => void;
   /** DNS lookup 注入缝（缺省真解析——测试注入假实现；web 件同缝惯例） */
@@ -245,16 +250,25 @@ export function registerBrowserTools(deps: BrowserToolsDeps): Array<() => void> 
         // SSRF 前置（web 件卫生三件同源复用——私网拒绝同码 WEB_PRIVATE_TARGET）
         const url = requireHttpUrl(String(args.url));
         await assertPublicHost(url.hostname, deps.dnsLookup);
-        const { rpc, session } = await acquire(tctx.sessionId);
-        const nav = (await rpc.request('Page.navigate', { url: url.href }, { sessionId: session.sessionId })) as {
-          frameId?: string;
-          errorText?: string;
-        };
-        if (nav.errorText !== undefined) {
-          // 导航被引擎拒绝（net::ERR_* 族）——数据面（模型可换 URL 自纠）
-          return { content: [{ type: 'text', text: `导航失败：${nav.errorText}` }], isError: true };
+        // 导航限流（组合根单例——与 fetch 同一 InflightGates 第三消费位；
+        // acquire→Page.navigate→release 编舞同 fetch-core：统一出口必还槽）
+        await deps.gates.acquire(url.host, tctx.signal);
+        let nav: { frameId?: string; errorText?: string };
+        let state: { title: string; url: string; readyState: string };
+        try {
+          const { rpc, session } = await acquire(tctx.sessionId);
+          nav = (await rpc.request('Page.navigate', { url: url.href }, { sessionId: session.sessionId })) as {
+            frameId?: string;
+            errorText?: string;
+          };
+          if (nav.errorText !== undefined) {
+            // 导航被引擎拒绝（net::ERR_* 族）——数据面（模型可换 URL 自纠）
+            return { content: [{ type: 'text', text: `导航失败：${nav.errorText}` }], isError: true };
+          }
+          state = await pageState(rpc, session.sessionId);
+        } finally {
+          deps.gates.release(url.host); // 双槽必还（导航/页态全程占槽——失败路径同律）
         }
-        const state = await pageState(rpc, session.sessionId);
         return {
           content: [
             { type: 'text', text: `已导航：${state.url}\n标题：${state.title || '(无)'}\n就绪：${state.readyState}` },
