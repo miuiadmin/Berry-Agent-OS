@@ -1,11 +1,12 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig, configDefaults } from 'vitest/config';
 
 /**
  * 1.0 测试配置（技术栈篇 §2.3：CI 门禁四件之一）——projects 双轨
  * （2026-09-02 成熟度扫描 20260901 P1-3，契约篇 §6.8 CR-7 落轨）：
  * - node 轨（常规）：测试文件与被测模块同目录（src/<模块>/*.test.ts），只覆盖
  *   本模块与跨 contract 的公开面；client 子树本轨排除（node environment 对
- *   DOM 测试必炸——排除理由自 CR-7 起不变，只是排除形态收窄为「本轨排除」）。
+ *   DOM 测试必炸——排除理由自 CR-7 起不变，只是排除形态从 include 否定条目
+ *   收敛为 exclude 显式条目，见下方「coverage 相容性」注记）。
  * - webui-client 轨：SPA 组件测试（.test.tsx，environment jsdom +
  *   @testing-library/react）——投影→组件数据流回归锁；include 只收 client
  *   子树，与 node 轨互不收对方文件；不挂 setupFiles（零宿主运行时依赖）。
@@ -29,10 +30,8 @@ export default defineConfig({
           // fetch-depth 0 锚 / pre-commit 钩子四门 + 可执行位 / install-hooks 真跑
           // 双场景——基建面的形态锁（缺席即红，同 release.test.mjs 锁 package.json
           // 字段先例）。
-          // client 子树本轨排除（CR-7 落轨——jsdom 轨收编后排除仍在：域不同不混跑）
           include: [
             'src/**/*.test.ts',
-            '!src/webui/client/**',
             'tools/golden/*.test.mjs',
             'tools/release.test.mjs',
             'tools/check-events.test.mjs',
@@ -46,6 +45,13 @@ export default defineConfig({
             // 构造面形态锁——真模型炮 CI 无 key 跑不了，漂移先在此红
             'tools/smoke-provider.test.mjs',
           ],
+          // client 子树本轨排除（CR-7 落轨——jsdom 轨收编后排除仍在：域不同不混跑）。
+          // coverage 相容性（基建大扫 #18）：排除形态必须走 exclude 显式条目，
+          // 禁 include 内否定条目（'!src/webui/client/**'）——该形态与 v8 coverage
+          // 收集判定相互作用把全部文件的应收集位翻掉（vitest 4 实证：include 带
+          // 否定条目时 --coverage 全仓 0/0，exclude 写法收集正常）。二分定位
+          // 2026-09-02，字面 include 对照 100% 复现。
+          exclude: [...configDefaults.exclude, 'src/webui/client/**'],
           environment: 'node',
           // 每测试文件数据目录钉扎（20260901-d #2 同类；基建大扫 #16 勘正：setupFiles
           // 每测试文件执行一次——isolate 缺省真，非每 worker）：setupFiles 强制
@@ -60,6 +66,19 @@ export default defineConfig({
           // 时延，不动任何行为断言。内层等待（waitFor/spin）各自的窄帽先红，外层
           // 15s 是兜底不是常态路径。
           testTimeout: 15_000,
+          // 覆盖率测量面（基建大扫 #18，非门禁诊断）：npm run test:coverage——
+          // 给扫雷指路（按未覆盖分支切入）不执法（不设阈值红线）。vitest projects
+          // 模式 coverage 配置入 project 才生效（顶层配置不向 projects 传导——
+          // 实证顶层配 0/0）；include 显式钉 src 产码面（.ts/.tsx），测试文件由
+          // provider 默认排除面覆盖（*.test.* 自带排除）。jsdom 轨不配——本轨
+          // include 已含 client 子树产物，两轨各自 --coverage 时同源合并单报告。
+          coverage: {
+            provider: 'v8',
+            include: ['src/**/*.ts', 'src/webui/client/**/*.tsx'],
+            // 诊断报告本地产物——禁入库（.gitignore 已收 coverage/）
+            reportsDirectory: 'coverage',
+            reporter: ['text', 'text-summary'],
+          },
         },
       },
       {
