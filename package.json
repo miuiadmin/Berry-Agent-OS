@@ -27,7 +27,8 @@
     "examples",
     "apps",
     "skills",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public"

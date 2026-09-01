@@ -29,7 +29,7 @@ This is not science fiction. This is Berry's design goal: **an operating system 
 
 Berry's minimal kernel does exactly **install, run, guard, store**; everything else — conversation, coding agent, memory, long goals, scheduled tasks, MCP, LSP, observability, web UI — loads as an **application** on the composition tree. **Installable, unloadable, replaceable** — while your Agent's five lifelines (credentials, memory, trust history, budgets, ledgers) accumulate only once. Every app grows on the same state — **new brain, same body**.
 
-**27** modules (all implemented) · **27** lifecycle hooks · **25** durable event types · **15** official bundle pieces (14 Ring 2 + default coder app, each unloadable) · **2,400+** tests · **0** telemetry.
+**27** modules (all implemented) · **27** lifecycle hooks · **25** durable event types · **15** official bundle pieces (14 Ring 2 + default coder app, each unloadable) · **2,700+** tests · **0** telemetry.
 
 **Floor goal: the factory default layer ships at the daily-usable level of Codex / Claude Code.**
 

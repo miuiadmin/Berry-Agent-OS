@@ -29,7 +29,7 @@ Esto no es ciencia ficción. Es el objetivo de diseño de Berry: **un sistema op
 
 El kernel mínimo de Berry hace exactamente **instalar, ejecutar, proteger, almacenar**; todo lo demás — conversación, agente de código, memoria, objetivos largos, tareas programadas, MCP, LSP, observabilidad, interfaz web — se carga como **aplicación** sobre el árbol de composición. **Instalable, desinstalable, reemplazable** — mientras las cinco líneas de vida de tu Agent (credenciales, memoria, historial de confianza, presupuestos, libros de cuenta) se acumulan una sola vez. **Cerebro nuevo, mismo cuerpo.**
 
-**27** módulos (todos con código) · **27** ganchos de ciclo de vida · **25** tipos de eventos durables · **15** piezas oficiales (14 de Ring 2 + la aplicación por defecto coder, todas desinstalables) · **2.400+** pruebas · **0** telemetría.
+**27** módulos (todos con código) · **27** ganchos de ciclo de vida · **25** tipos de eventos durables · **15** piezas oficiales (14 de Ring 2 + la aplicación por defecto coder, todas desinstalables) · **2.700+** pruebas · **0** telemetría.
 
 **Objetivo mínimo: la capa por defecto de fábrica alcanza el nivel de uso diario de Codex / Claude Code.**
 
