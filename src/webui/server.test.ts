@@ -151,10 +151,15 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
     rmSync(filesRoot, { recursive: true, force: true });
   });
 
-  it('/api/health → 200 {ok, version}', async () => {
+  it('/api/health → 200 {ok, version, memory}', async () => {
     const r = await send(port, { method: 'GET', path: '/api/health' });
     expect(r.status).toBe(200);
-    expect(JSON.parse(r.text)).toEqual({ ok: true, version: 'test-1.0.0' });
+    // memory 恒在场（基建大扫 #49——进程零依赖自报；活值只断形状禁精确数）
+    expect(JSON.parse(r.text)).toEqual({
+      ok: true,
+      version: 'test-1.0.0',
+      memory: { rss: expect.any(Number), heapUsed: expect.any(Number), uptimeMs: expect.any(Number) },
+    });
   });
 
   it('health writeBehind 运行态键（基建大扫 #27）：注入三值活取 → 应答携带；未注入 → 键缺席', async () => {
@@ -184,6 +189,7 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
       expect(JSON.parse(hit.text)).toEqual({
         ok: true,
         version: 'test-1.0.0',
+        memory: { rss: expect.any(Number), heapUsed: expect.any(Number), uptimeMs: expect.any(Number) },
         writeBehind: { paused: true, sessions: 2, events: 5 },
       });
       expect(statsCalls).toBe(1); // 应答时点活取一次
@@ -864,10 +870,15 @@ describe('webui 服务面：daemon 形态鉴权与协议正确性层', () => {
       expect(submit.status).toBe(503);
       // 读面（清单）不拒——operator 收场面保全
       expect((await send(port, { method: 'GET', path: '/api/sessions', headers: AUTH })).status).toBe(200);
-      // health：ok 仍 true（进程活）+ degraded 披露降级因
+      // health：ok 仍 true（进程活）+ degraded 披露降级因（memory 恒在场形状断）
       const health = await send(port, { method: 'GET', path: '/api/health' });
       expect(health.status).toBe(200);
-      expect(JSON.parse(health.text)).toEqual({ ok: true, version: 'test-1.0.0', degraded: 'persistence' });
+      expect(JSON.parse(health.text)).toEqual({
+        ok: true,
+        version: 'test-1.0.0',
+        degraded: 'persistence',
+        memory: { rss: expect.any(Number), heapUsed: expect.any(Number), uptimeMs: expect.any(Number) },
+      });
     } finally {
       cordoned = false;
     }

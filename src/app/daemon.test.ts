@@ -719,10 +719,10 @@ describe('httpProbe：三腿探活（daemon.ts 实码——start/stop/doctor 三
 });
 
 /* ------------------------------------------------------------------ */
-/* doctor 九项体检（刀二——依赖注入假面；盘上事实真造真断）              */
+/* doctor 十项体检（刀二——依赖注入假面；盘上事实真造真断）              */
 /* ------------------------------------------------------------------ */
 
-describe('daemon doctor：九项体检', () => {
+describe('daemon doctor：十项体检', () => {
   /** 体检前置盘面：活态 daemon.json + 0600 token + 真库文件（user_version 7） */
   function healthyRoot(): {
     root: string;
@@ -774,13 +774,15 @@ describe('daemon doctor：九项体检', () => {
     });
     const text = out.join('');
     expect(code).toBe(0);
-    expect(text).toContain('九项全绿');
+    expect(text).toContain('十项全绿');
     expect(text).toContain('pid 777 存活');
     expect(text).toContain('真握手 200');
     expect(text).toContain('user_version 7'); // ④ 披露迁移位
     expect(text).toContain(`对齐（运行 ${VERSION} = 磁上 ${VERSION}`); // ⑥ 对齐
     // ⑧ 键缺席形态（httpFaces 缺省不带 writeBehind）：如实注记不转红
     expect(text).toContain('⑧ 落盘闩态：health 未携带 writeBehind');
+    // ⑩ 同款键缺席形态（缺省不带 memory）：旧版 daemon 注记不转红（基建大扫 #49）
+    expect(text).toContain('⑩ 内存：health 未携带 memory');
     expect(portProbed).toBe(0); // 判活路不探端口（⑦ 仅判死路）
     expect(existsSync(daemonTokenPath(root))).toBe(true); // 零 ensure 重写
     rmSync(root, { recursive: true, force: true });
@@ -872,7 +874,7 @@ describe('daemon doctor：九项体检', () => {
     expect(code).toBe(1); // 修前红：旧形 events 不参与 ok 判定 → code 0 假绿
     const text = out.join('');
     expect(text).toContain('16 连接帽满');
-    expect(text).not.toContain('九项全绿'); // 总结行与注记不再自相矛盾
+    expect(text).not.toContain('十项全绿'); // 总结行与注记不再自相矛盾
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -889,6 +891,27 @@ describe('daemon doctor：九项体检', () => {
     const text = out.join('');
     expect(text).toContain('persistence'); // 降级原因披露
     expect(text).toContain('cordon'); // 处置指引（stop 后 start / 查 daemon.log）
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('⑩ 内存披露（基建大扫 #49）：health 携带 memory 键 → MB 取整披露 + 不转红', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    const out = captureStdout();
+    // rss 150 MiB / 堆 40 MiB / 存活 2 时 5 分——取整与时长人读化的断言锚
+    const healthBody = JSON.stringify({
+      version: VERSION,
+      memory: { rss: 157_286_400, heapUsed: 41_943_040, uptimeMs: 7_500_000 },
+    });
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      ...httpFaces({ healthBody }),
+    });
+    expect(code).toBe(0); // 信息项恒 ok（与 ⑤log 大小同款非执法）
+    const text = out.join('');
+    expect(text).toContain('⑩ 内存：RSS 150 MB / 堆 40 MB（存活 2 时 5 分）');
+    expect(text).toContain('十项全绿');
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -911,7 +934,7 @@ describe('daemon doctor：九项体检', () => {
     const code = await daemonDoctorMain({ dataRoot: rootA, probe, ...httpFaces() });
     expect(code).toBe(0); // 修前红：旧形按 env 面体检 → ③ token 缺失 + ④ 库开不出 = 1
     const text = out.join('');
-    expect(text).toContain('九项全绿');
+    expect(text).toContain('十项全绿');
     expect(text).toContain('按 daemon.json 记录值'); // 对账披露行（env 分叉如实报出）
     expect(text).toContain(rootB); // 记录值路径进披露
     rmSync(rootA, { recursive: true, force: true });

@@ -196,7 +196,12 @@ describe('webui 官方件 apply', () => {
       req.end();
     });
     expect(health.status).toBe(200);
-    expect(JSON.parse(health.text)).toEqual({ ok: true, version: 'test' });
+    // memory 恒在场（基建大扫 #49）——活值只断形状
+    expect(JSON.parse(health.text)).toEqual({
+      ok: true,
+      version: 'test',
+      memory: { rss: expect.any(Number), heapUsed: expect.any(Number), uptimeMs: expect.any(Number) },
+    });
     // 回卷编舞（LIFO 首位摘 claim 桥 → settleAll → detach → channel.dispose →
     // server.close）：端口随即不可达
     runDisposers();

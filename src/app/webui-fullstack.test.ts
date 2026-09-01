@@ -347,7 +347,8 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
     try {
       // ① health：版本串由组合根注入（webui 边不含 app 模块的接线证据）。
       // writeBehind 键（基建大扫 #27）组合根形态恒在场——但两计数是活取值
-      // （write-behind 窗口时序敏感），只断形状与闩态，不断精确数字
+      // （write-behind 窗口时序敏感），只断形状与闩态，不断精确数字；
+      // memory 键（基建大扫 #49）恒在场——同属活取值只断形状
       const health = await getJson(`${base}/api/health`);
       expect(health.status).toBe(200);
       // getJson 应答体是 unknown——窄化后断（谓词内窄化同款形态）
@@ -355,12 +356,18 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
         ok: boolean;
         version: string;
         writeBehind: { paused: boolean; sessions: number; events: number };
+        memory: { rss: number; heapUsed: number; uptimeMs: number };
       };
       expect(body.ok).toBe(true);
       expect(body.version).toBe(VERSION);
       expect(body.writeBehind).toMatchObject({ paused: false });
       expect(body.writeBehind.sessions).toEqual(expect.any(Number));
       expect(body.writeBehind.events).toEqual(expect.any(Number));
+      expect(body.memory).toEqual({
+        rss: expect.any(Number),
+        heapUsed: expect.any(Number),
+        uptimeMs: expect.any(Number),
+      });
 
       // ② 连接欢迎帧（status 族：connected——payload 是 unknown，谓词内窄化）
       await waitForFrame(

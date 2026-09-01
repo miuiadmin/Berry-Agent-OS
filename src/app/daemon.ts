@@ -14,14 +14,15 @@
  * - `stop`：SIGTERM → 轮询确认消失（缺省 30s 预算）→ SIGKILL 兜底 → 清
  *   daemon.json（API shutdown 端点明确否决——stop 权 > submit 权）。
  * - `status`：读 daemon.json + 真握手披露（pid/port/持有会话/清单条数）。
- * - `doctor`（刀二）：九项体检——①pid 判活 ②health+真握手（顺手连一次
+ * - `doctor`（刀二）：十项体检——①pid 判活 ②health+真握手（顺手连一次
  *   /api/events 即关——503 = 连接帽满）③token 在场且 0600（**判活时只读
  *   禁 ensure 写**——防诊断面自造不符态）④库 readonly 可开 ⑤log 大小
  *   （50 MiB 体检帽）
  *   ⑥运行 vs 磁上版本 ⑦判死时端口占用探测 ⑧write-behind 落盘闩态（基建
  *   大扫 #27——health writeBehind.paused 即红；与 ② degraded 两独立信号
- *   组合判读）⑨积压两数绿披露（阈值随保留策略判据制挂账）；僵尸态（pid
- *   活+HTTP 面无响应）入查。全绿 0 / 任一项红 1。
+ *   组合判读）⑨积压两数绿披露（阈值随保留策略判据制挂账）⑩进程内存披露
+ *   （基建大扫 #49——RSS/堆/存活时长绿披露，两级拓扑 RSS > 1GB 挂账触发
+ *   器的观测锚点）；僵尸态（pid 活+HTTP 面无响应）入查。全绿 0 / 任一项红 1。
  * - `--foreground`：前台常驻（launchd/systemd 监视直接子进程的唯一正确
  *   形态——自 fork 会双实例循环）。
  */
@@ -564,7 +565,7 @@ export async function daemonForegroundMain(port: number, deps: DaemonForegroundD
 }
 
 /* ------------------------------------------------------------------ */
-/* doctor 九项体检（刀二——`berry daemon doctor`，契约篇 §6.8）           */
+/* doctor 十项体检（刀二——`berry daemon doctor`，契约篇 §6.8）           */
 /* ------------------------------------------------------------------ */
 
 /** doctor 依赖注入（测试假面——探针/库文件/端口探测全可换） */
@@ -601,7 +602,7 @@ const defaultPortProbe = (port: number): Promise<boolean> =>
   });
 
 /**
- * daemon 九项体检主流程。序与语义（规范 :1020）：
+ * daemon 十项体检主流程。序与语义（规范 :1020）：
  * ① daemon.json 在场 + pid 判活（processStartId 匹配——防 pid 复用假阳）
  * ② 服务面：health 公开探活 + 活证真握手（**须 token 端点** 200；401 =
  *    盘上 token 与运行 daemon 持有不符——处置 = stop 后 start 重签发）
@@ -621,6 +622,9 @@ const defaultPortProbe = (port: number): Promise<boolean> =>
  *    / !degraded+paused = 瞬态自愈中）；键缺席（旧版 daemon/无持久层）不红
  * ⑨ 积压两数（writeBehind.sessions/events）：绿披露不转红——阈值与裁剪
  *    策略随保留策略判据制挂账
+ * ⑩ 进程内存披露（基建大扫 #49）：health 应答 memory 键（rss/heapUsed/
+ *    uptimeMs）MB 取整绿披露——两级拓扑 RSS > 1GB 挂账触发器的观测锚点
+ *    （趋势面进 obs 留挂账按需拉动）；键缺席（旧版 daemon）不红
  * @returns 进程退出码（全绿 0 / 任一项红 1 / 无 daemon.json 1）
  */
 export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
@@ -670,10 +674,15 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
   );
   // events 即连即关：200 = 流面正常；503 = 16 连接帽满（SPA/attach/监控尾堆积）
   const eventsStatus = await statusProbe(`http://127.0.0.1:${state.port}/api/events`, bearer, HANDSHAKE_TIMEOUT_MS);
-  let health: { version?: unknown; degraded?: unknown; writeBehind?: unknown } | undefined;
+  let health: { version?: unknown; degraded?: unknown; writeBehind?: unknown; memory?: unknown } | undefined;
   if (healthRes !== undefined && healthRes.status === 200) {
     try {
-      health = JSON.parse(healthRes.body) as { version?: unknown; degraded?: unknown; writeBehind?: unknown };
+      health = JSON.parse(healthRes.body) as {
+        version?: unknown;
+        degraded?: unknown;
+        writeBehind?: unknown;
+        memory?: unknown;
+      };
     } catch {
       health = undefined;
     }
@@ -841,11 +850,39 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
     });
   }
 
+  /* ---- ⑩ 进程内存披露（基建大扫 #49——信息项恒 ok，与 ⑤log 大小同款非执法） ---- */
+  // 数据源 = /api/health 的 memory 键（本批新增）：rss/heapUsed/uptimeMs——
+  // node 进程零依赖自报（服务端面恒在场，与 deps 无关故不缺席）。键缺席 =
+  // 旧版 daemon——如实注记不红（版本差异非故障，与 ⑧⑨ 同款）。两级拓扑
+  // RSS > 1GB 挂账触发器的观测锚点由此落位（趋势面进 obs 留挂账按需拉动）。
+  const memRaw = health?.memory;
+  if (memRaw === undefined || typeof memRaw !== 'object' || memRaw === null) {
+    findings.push({
+      ok: true,
+      text: '⑩ 内存：health 未携带 memory（旧版 daemon——升级重启后可见）',
+    });
+  } else {
+    const mem = memRaw as { rss?: unknown; heapUsed?: unknown; uptimeMs?: unknown };
+    // MB 取整披露——判读面（常驻内存是否随时长增长）用 MiB 粒度足够
+    const rss = typeof mem.rss === 'number' ? mem.rss : 0;
+    const heapUsed = typeof mem.heapUsed === 'number' ? mem.heapUsed : 0;
+    const uptimeMs = typeof mem.uptimeMs === 'number' ? mem.uptimeMs : 0;
+    // 存活时长人读化：小时+分（分以下舍去——内存判读不需要秒级精度）
+    const uptimeText =
+      uptimeMs >= 3_600_000
+        ? `${Math.floor(uptimeMs / 3_600_000)} 时 ${Math.floor((uptimeMs % 3_600_000) / 60_000)} 分`
+        : `${Math.floor(uptimeMs / 60_000)} 分`;
+    findings.push({
+      ok: true,
+      text: `⑩ 内存：RSS ${Math.round(rss / 1024 / 1024)} MB / 堆 ${Math.round(heapUsed / 1024 / 1024)} MB（存活 ${uptimeText}）`,
+    });
+  }
+
   /* ---- 汇总披露 ---- */
   for (const finding of findings) {
     process.stdout.write(`${finding.ok ? '✓' : '✗'} ${finding.text}\n`);
   }
   const failed = findings.filter((finding) => !finding.ok).length;
-  process.stdout.write(failed === 0 ? 'doctor：九项全绿。\n' : `doctor：${failed} 项红（见 ✗ 行）。\n`);
+  process.stdout.write(failed === 0 ? 'doctor：十项全绿。\n' : `doctor：${failed} 项红（见 ✗ 行）。\n`);
   return failed === 0 ? 0 : 1;
 }

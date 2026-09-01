@@ -265,10 +265,19 @@ async function route(
     // 分立）；cordon 降级披露（D6：ok 仍 true〔进程活〕+ degraded 字段——
     // durable 落盘失败降级态对 operator 可见）；write-behind 运行态披露
     // （基建大扫 #27：闩态 + 积压两数——闩红积绿两独立判读，消费方 doctor
-    // ⑧⑨；deps 未传 = 无持久层诊断形态，键缺席）
+    // ⑧⑨；deps 未传 = 无持久层诊断形态，键缺席）；进程内存披露（基建大扫
+    // #49：rss/heapUsed/uptimeMs 恒在场——node 进程零依赖自报，与 deps 无关
+    // 故不缺席；消费方 doctor ⑩——两级拓扑 RSS > 1GB 挂账触发器的观测锚点）
+    const mem = process.memoryUsage();
     sendJson(res, 200, {
       ok: true,
       version: opts.version,
+      memory: {
+        rss: mem.rss,
+        heapUsed: mem.heapUsed,
+        // 进程存活时长（毫秒）——常驻内存增长的时长分母
+        uptimeMs: Math.round(process.uptime() * 1000),
+      },
       ...(opts.deps.cordoned?.() === true ? { degraded: 'persistence' } : {}),
       ...(opts.deps.writeBehindStats ? { writeBehind: opts.deps.writeBehindStats() } : {}),
     });
