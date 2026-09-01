@@ -1503,25 +1503,76 @@ const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
 /** 单流输出滚动尾窗上限（字符计）——P32：装机输出无界积累的帽，保尾部为诊断 */
 const INSTALL_OUTPUT_CAP = 1024 * 1024;
 
+/** npm spawn 计划：归一后的命令 / 前置参数 / 是否需 shell */
+export interface NpmSpawnPlan {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly shell: boolean;
+}
+
+/**
+ * npm 命令的平台归一计划（遗漏大扫 20260901 O-7，纯函数可参测）：win32 上
+ * 裸 spawn('npm') ENOENT/EINVAL（CVE-2024-27980 后 .cmd 无 shell 直接拒，
+ * win32 的 npm 本体是 npm.cmd）——npm 动作（install/update）此前文档化支持
+ * 平台上首用即败。归一序：① 优先 `process.execPath` + Node 自带 npm-cli.js
+ * （零 shell、零 PATH 依赖、win32 亦免 .cmd 解析；两候选布局 = unix
+ * `../lib/node_modules/…`〔官方/Homebrew/nvm〕、win 同目录 `node_modules/…`
+ * 〔官方安装器〕，首个在者胜）；② cli 缺席回退：win32 `npm.cmd`+shell
+ * （upgrade.ts 自升级同款语义）、unix 裸 `npm`（PATH 解析——既有可跑面不动）。
+ * @param platform 平台（测试注入 win32 分支）
+ * @param execPath node 解释器路径（缺省真身 process.execPath 的参数位）
+ * @param exists cli 候选在判（注入 existsSync——测试可控布局）
+ */
+export function npmSpawnPlan(
+  platform: NodeJS.Platform,
+  execPath: string,
+  exists: (path: string) => boolean,
+): NpmSpawnPlan {
+  // 两候选布局（顺序即优先级）：unix lib 布局 → win 同目录布局
+  const candidates = [
+    join(dirname(execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(dirname(execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ];
+  for (const cli of candidates) {
+    if (exists(cli)) return { command: execPath, args: [cli], shell: false };
+  }
+  if (platform === 'win32') return { command: 'npm.cmd', args: [], shell: true };
+  return { command: 'npm', args: [], shell: false };
+}
+
 /**
  * 真装机执行器：spawn 子进程，非零退出抛错（含输出尾行——诊断直达）。
  * P32 两道护栏（隔离案一第一刀 #16）：① 超时硬顶——到点 SIGKILL 强杀
  * （'close' 随后到达统一收尾，不再永挂）；② stdout/stderr 各 1MiB 滚动
  * 尾窗——超帽从头部丢弃（失败尾行是诊断要点），截断发生即在错误消息标注。
+ * npm 命令过 npmSpawnPlan 平台归一（遗漏大扫 20260901 O-7——单点归一，
+ * install/update 两调用面零改动）；非 npm 命令原样透传。
  * @param opts.timeoutMs 超时覆盖（测试注入用；缺省 5 分钟）
+ * @param opts.spawnFn spawn 注入面（缺省 node:child_process.spawn——接线测试用）
  */
 export function spawnRunner(
   command: string,
   args: readonly string[],
-  opts: { cwd: string; timeoutMs?: number },
+  opts: { cwd: string; timeoutMs?: number; spawnFn?: typeof spawn },
 ): Promise<void> {
   return new Promise((resolvePromise, reject) => {
+    // npm 平台归一（O-7）：win32 裸 spawn npm 必败——plan 单点判型
+    let runCommand = command;
+    let runArgs = args;
+    let shell: boolean | undefined;
+    if (command === 'npm') {
+      const plan = npmSpawnPlan(process.platform, process.execPath, existsSync);
+      runCommand = plan.command;
+      runArgs = [...plan.args, ...args];
+      shell = plan.shell;
+    }
     // windowsHide 统一纪律（骨架篇 §7.6，P1-3——win32 CREATE_NO_WINDOW）；
     // npm/git/子 berry 输出恒 UTF-8 属编码豁免面，chunk.toString() 缺省不涉决策树
-    const child = spawn(command, args, {
+    const child = (opts.spawnFn ?? spawn)(runCommand, runArgs, {
       cwd: opts.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      ...(shell === undefined ? {} : { shell }),
     });
     // 滚动尾窗累加器（truncated 标记截断是否发生过——消息头标注用）
     const stdout = { text: '', truncated: false };

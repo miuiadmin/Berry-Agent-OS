@@ -25,6 +25,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { type AppError, COMPOSITION_ROW_INVALID, APP_CONFIG_INVALID, APP_INSTALL_FAILED } from '../contracts/errors.js';
 import type { AppLoadResult } from '../contracts/app.js';
@@ -33,6 +35,7 @@ import {
   createAppsService,
   spawnRunner,
   sweepAppTmpDirs,
+  npmSpawnPlan,
   type ConfigureReport,
   type EntryLoader,
   type InstallRunner,
@@ -801,6 +804,75 @@ describe('装机面安全（隔离案一第一刀 #15/#16）', () => {
     expect(err!.message).toContain('已截断'); // 截断标注如实呈现
     expect(err!.message).toContain('TAILMARK'); // 尾部保诊断
     expect(err!.message.length).toBeLessThan(2 * 1024 * 1024); // 无界积累已封顶
+  });
+});
+
+/* ---------------- npm 装机平台归一（遗漏大扫 20260901 O-7） ---------------- */
+
+describe('npm 装机平台归一（遗漏大扫 20260901 O-7）：win32 裸 spawn npm 必败修死', () => {
+  it('plan 四象限：win32 cli 在场 → execPath 直跑（零 shell）；win32 缺席 → npm.cmd+shell；unix 在场 → execPath 直跑；unix 缺席 → 裸 npm 照旧', () => {
+    // win32 官方布局：node_modules 与 node.exe 同目录（第二候选命中）。
+    // 路径用正斜杠书写——join/dirname 的分隔符处理是宿主平台语义，纯函数
+    // 测的是候选序与 shell 判型，不锁 win32 分隔符形
+    const winNode = 'C:/Program Files/nodejs/node.exe';
+    const winCli = 'C:/Program Files/nodejs/node_modules/npm/bin/npm-cli.js';
+    expect(npmSpawnPlan('win32', winNode, (p) => p === winCli)).toEqual({
+      command: winNode,
+      args: [winCli],
+      shell: false,
+    });
+    // win32 cli 全缺席（拆包布局）→ 回退 npm.cmd + shell（CVE-2024-27980 后
+    // .cmd 无 shell 直接 EINVAL——upgrade.ts 自升级同款）
+    expect(npmSpawnPlan('win32', winNode, () => false)).toEqual({
+      command: 'npm.cmd',
+      args: [],
+      shell: true,
+    });
+    // unix 官方/Homebrew/nvm 布局：../lib/node_modules（第一候选命中）
+    const macNode = '/opt/homebrew/bin/node';
+    const macCli = '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js';
+    expect(npmSpawnPlan('darwin', macNode, (p) => p === macCli)).toEqual({
+      command: macNode,
+      args: [macCli],
+      shell: false,
+    });
+    // unix 拆包（Debian nodejs/npm 分包等）→ 裸 npm 照旧（PATH 解析——既有可跑面不动）
+    expect(npmSpawnPlan('linux', '/usr/bin/node', () => false)).toEqual({
+      command: 'npm',
+      args: [],
+      shell: false,
+    });
+  });
+
+  it('spawnRunner 接线：npm 命令过 plan 归一（同步可断言），非 npm 命令原样透传', async () => {
+    // 录制型 spawn：立即 0 退出收场（不出真子进程——接线面断言）
+    const seen: Array<{ command: string; args: string[]; shell: boolean | undefined }> = [];
+    const rec = ((command: string, args: readonly string[], opts: { shell?: boolean }) => {
+      seen.push({ command, args: [...args], shell: opts.shell });
+      // 结构面替身：EventEmitter 骨架 + stdout/stderr 挂点 + 微任务 0 退出
+      const fake = new EventEmitter() as unknown as Record<string, unknown>;
+      fake['stdout'] = new EventEmitter();
+      fake['stderr'] = new EventEmitter();
+      queueMicrotask(() => (fake as unknown as EventEmitter).emit('close', 0));
+      return fake as unknown as ChildProcess;
+    }) as unknown as typeof spawn;
+    // npm 腿：命令面 = 本机 plan（execPath 形或裸 npm——与本机真实布局一致即接线成立）
+    const npmRun = spawnRunner('npm', ['install', '--legacy-peer-deps'], {
+      cwd: process.cwd(),
+      spawnFn: rec,
+    });
+    void npmRun.catch(() => undefined); // 红期护栏：旧码无注入面时真 spawn 的 reject 不成孤儿
+    expect(seen).toHaveLength(1);
+    const plan = npmSpawnPlan(process.platform, process.execPath, (p) => existsSync(p));
+    expect(seen[0]!.command).toBe(plan.command);
+    expect(seen[0]!.args).toEqual([...plan.args, 'install', '--legacy-peer-deps']);
+    expect(seen[0]!.shell).toBe(plan.shell);
+    await npmRun;
+    // 非 npm 腿：原样透传（git/local 等既有调用面零变化）
+    seen.length = 0;
+    const gitRun = spawnRunner('git', ['clone', 'x'], { cwd: process.cwd(), spawnFn: rec });
+    await gitRun;
+    expect(seen).toEqual([{ command: 'git', args: ['clone', 'x'], shell: undefined }]);
   });
 });
 
