@@ -25,6 +25,7 @@ import {
   MEMORY_UTILITY_MIGRATION,
   MEMORY_HOLDING_MIGRATION,
   SESSION_FTS_MIGRATION,
+  SESSION_FTS_VERIFY_MIGRATION,
   MemoryStore,
   SessionFtsIndex,
   createMemoryApp,
@@ -114,13 +115,20 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
   });
   const store: Store = openStore({
     path: ':memory:',
-    migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION],
+    migrations: [
+      MEMORY_MIGRATION,
+      SESSION_FTS_MIGRATION,
+      MEMORY_UTILITY_MIGRATION,
+      MEMORY_HOLDING_MIGRATION,
+      SESSION_FTS_VERIFY_MIGRATION,
+    ],
   });
   const source: MemoryAppStoreFace = {
     connection: store.connection,
     listSessionIds: () => Object.keys(logs),
     // 活跃会话读活日志（write-behind 已 flush 的测试等价），其余读预置卷
     loadEvents: (id) => (live?.header.sessionId === id ? [...live.events] : (logs[id] ?? [])),
+    countEvents: (id) => (live?.header.sessionId === id ? live.events.length : (logs[id] ?? []).length),
   };
   return {
     ctx,

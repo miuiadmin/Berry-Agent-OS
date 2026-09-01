@@ -6,10 +6,17 @@
  * 背这张表。表可丢弃可重建（FTS 投影纪律）：应用卸载即停维护，重激活对账自愈。
  *
  * 维护三点（会话篇 §9 定稿注记）：
- * 1. 激活期对账 synchronize()：空索引全量重建 / 有水位先会话级核验（实有行数 ≠
- *    折算期望 → 清行整卷重放并校直水位——fork 种子段被活体水位越过〔种子不上
- *    活体总线〕与崩溃半态残留两形状同判据，复盘 20260901 D-1/D-2）/ 核验通过按水位补差；
+ * 1. 激活期对账 synchronize()——对账成本三档（遗漏大扫 20260901 O-8）：读侧预检
+ *    （deferred 读事务零写锁）按 session_fts_state.verified_count 通过标记豁免未变
+ *    会话（零 loadEvents 全量读）；有变化会话分会话小事务（BEGIN IMMEDIATE 只持
+ *    该会话——boot 不持全库写锁做全量读核验；原子性会话级，中途崩溃下次自愈）；
+ *    空索引全量重建同改分会话事务。核验语义不变：空索引重建 / 有水位先会话级核验
+ *    （实有行数 ≠ 折算期望 → 清行整卷重放并校直水位——fork 种子段被活体水位越过
+ *    〔种子不上活体总线〕与崩溃半态残留两形状同判据，复盘 20260901 D-1/D-2）/
+ *    核验通过按水位补差；
  * 2. 运行期增量：session/event 活体镜像逐事件 indexEvent()——单事件三语句单事务原子；
+ *    零语句事件（无遮蔽且无可索引文本）免事务免 fsync（遗漏大扫 20260901 L-8——
+ *    水位在此类事件上滞后无害：MAX 语义追平 + 对账补差幂等重放）；
  * 3. 卸载即停：宿主只在该应用作用域存活期间订阅。
  *
  * 索引文本面 v1 = user/message + assistant/message（tool 载荷不进——价值密度低体积大）；
@@ -46,6 +53,19 @@ CREATE TABLE session_fts_state (
 `,
 };
 
+/**
+ * 对账通过标记列（user_version=15，遗漏大扫 20260901 O-8）：verified_count =
+ * 该会话核验+补差收敛时的存量事件总数——下次对账预检未变即整会话豁免（免
+ * loadEvents 全量读 + 行集折算）。NULL = 从未通过核验（首验/半态自愈后落值）。
+ */
+export const SESSION_FTS_VERIFY_MIGRATION: MigrationSpec = {
+  version: 15,
+  name: 'session-fts-verify-count',
+  sql: `
+ALTER TABLE session_fts_state ADD COLUMN verified_count INTEGER;
+`,
+};
+
 /** 检索命中行（记忆篇 §10：带来源定位——sessionId + seq 可跳转回放） */
 export interface SessionFtsHit {
   readonly sessionId: string;
@@ -63,6 +83,11 @@ export interface SessionFtsSource {
   listSessionIds(): string[];
   /** 整卷重放某会话事件日志（append-only 原始序——遮蔽事件含在其内） */
   loadEvents(sessionId: string): SessionEvent[];
+  /**
+   * 某会话已存事件数（廉价 COUNT 读——对账预检通过标记的比对值；Store.countEvents
+   * 同源既有方法，fork 种子物理复制判据同款，零新增语句）。
+   */
+  countEvents(sessionId: string): number;
 }
 
 /** 进索引的事件类型（索引文本面 v1：user/message + assistant/message only） */
@@ -156,25 +181,33 @@ export class SessionFtsIndex {
   /**
    * 运行期增量索引单事件（session/event 活体镜像逐事件调用）——单事件单事务原子
    * （语义细节见 applyEvent）。
+   * 零语句事件免事务（遗漏大扫 20260901 L-8）：无遮蔽且无可索引文本 → 三语句退化
+   * 为零语句（原本只有水位记账会写）——直接返回免事务免 fsync（主库
+   * synchronous=FULL 下每活体事件省一次）。水位在此类事件上滞后无害：MAX 语义
+   * （后继文本事件追平）+ 对账补差幂等重放同判据；行集核验判据不受滞后影响
+   * （期望折算只数文本行，文本行的 seq 恒 ≤ 水位——其自身的 applyEvent 已推进）。
    */
   indexEvent(sessionId: string, event: SessionEvent): void {
+    if (event.surfaceOp === undefined && eventText(event).length === 0) return;
     this.atomicIndex(sessionId, event);
   }
 
   /**
-   * 激活期对账（应用装载时调用一次，尽力而为——失败由调用方记日志不杀启动）：
-   * - 索引为空 → 全量重建（清残留水位防半态，逐会话整卷重放）；
-   * - 有水位 → 先**会话级核验**（复盘 20260901 D-1/D-2）：实有行数 ≠ 按 applyEvent
-   *   语义折算的期望行数 → 该会话清行整卷重放并校直水位——fork/委派子会话种子段
-   *   （种子物理复制但不上活体总线，首条活体事件直接把水位推过未索引区段）与
-   *   三语句崩溃半态残留两形状同判据；核验通过才走常规补差（只重放 seq > 水位）；
-   * - 水位缺失 = 该会话从未进索引（如应用禁用期间新建）→ 同路整卷重放（清行先行
-   *   保幂等——半态残留行不双计）。
-   * 全程单事务：对账中途崩溃不留半态（下次重来）。
+   * 激活期对账（应用装载时调用一次，尽力而为——失败由调用方记日志不杀启动）。
+   * 对账成本三档（遗漏大扫 20260901 O-8——boot//reload 成本不随库内总事件数线性涨、
+   * 不持全库写锁做全量读核验）：
+   * - 读侧预检（deferred 读事务零写锁）：session_fts_state.verified_count 通过标记
+   *   （v15 列）与该会话存量事件总数（countEvents 廉价 COUNT）比对——未变即整会话
+   *   豁免（loadEvents 全量读 + 行集折算双免）；标记缺失 = 从未通过核验，进工作集；
+   * - 有变化会话分会话小事务（BEGIN IMMEDIATE 只持该会话核验+补差；原子性会话级，
+   *   中途崩溃半态自愈——未收敛会话无标记，下次对账重入）；
+   * - 空索引全量重建同改分会话事务（清残留水位先行独立小事务防半态）。
+   * 单会话语义不变：水位缺失/核验失配（fork 种子段被越过 / 三语句崩溃半态残留——
+   * 复盘 20260901 D-1/D-2）→ 清行整卷重放并校直水位；核验通过 → 按 seq > 水位补差。
    */
   synchronize(source: SessionFtsSource): void {
-    const run = this.db.transaction(() => {
-      // 每会话实有行数（一次扫描取全——核验判据的对照左值）
+    // 读侧预检：deferred 读事务（纯读零写锁——稳态 boot 不再申请写锁）
+    const precheck = this.db.transaction(() => {
       const counts = new Map<string, number>(
         (
           this.db.prepare(`SELECT session_id AS sid, COUNT(*) AS n FROM session_fts GROUP BY session_id`).all() as {
@@ -183,44 +216,86 @@ export class SessionFtsIndex {
           }[]
         ).map((row) => [row.sid, row.n]),
       );
-      const isEmpty = counts.size === 0;
-      if (isEmpty) {
-        this.db.prepare(`DELETE FROM session_fts_state`).run();
-      }
+      const work: string[] = [];
       for (const sessionId of source.listSessionIds()) {
-        const events = source.loadEvents(sessionId);
-        // 水位缺失 = 从未进索引（或索引为空的整库重建）→ -1 起整卷重放
-        const watermark = isEmpty
-          ? -1
-          : ((
-              this.db.prepare(`SELECT seq FROM session_fts_state WHERE session_id = ?`).get(sessionId) as
-                { seq: number } | undefined
-            )?.seq ?? -1);
-        // 核验：水位在场但行集对不上（种子段被越过 / 崩溃半态残留）→ 整卷重建
-        if (watermark === -1 || counts.get(sessionId) !== expectedRowCount(events, watermark)) {
-          this.db.prepare(`DELETE FROM session_fts WHERE session_id = ?`).run(sessionId);
-          for (const event of events) {
-            this.applyEvent(sessionId, event);
-          }
-          // 校直水位：直写重放尾值（不走 applyEvent 的 MAX——半态水位虚高于日志尾
-          // 〔撕裂尾修复等〕时 MAX 会永久滞留错值，让核验每次对账都误判重建）
-          const lastSeq = events.length > 0 ? events[events.length - 1]!.seq : -1;
-          this.db
-            .prepare(
-              `INSERT INTO session_fts_state (session_id, seq) VALUES (?, ?)
-                 ON CONFLICT(session_id) DO UPDATE SET seq = excluded.seq`,
-            )
-            .run(sessionId, lastSeq);
-          continue;
-        }
-        // 常规补差：只重放 seq > 水位的事件（append-only 日志的增量读——增量不重复）
-        for (const event of events) {
-          if (event.seq <= watermark) continue;
-          this.applyEvent(sessionId, event);
+        const row = counts.size > 0 ? this.stateRow(sessionId) : undefined;
+        if (row === undefined || row.verifiedCount === null || row.verifiedCount !== source.countEvents(sessionId)) {
+          work.push(sessionId);
         }
       }
+      return { isEmpty: counts.size === 0, work };
     });
-    run.immediate();
+    const { isEmpty, work } = precheck();
+    if (isEmpty) {
+      // 空索引 = 全量重建路径：清残留水位独立小事务（半态水位不拦重建）
+      this.db
+        .transaction(() => {
+          this.db.prepare(`DELETE FROM session_fts_state`).run();
+        })
+        .immediate();
+    }
+    const runOne = this.db.transaction((sessionId: string) => this.reconcileSession(source, sessionId));
+    for (const sessionId of work) {
+      runOne.immediate(sessionId); // 分会话小事务——写锁只握单个会话的核验+补差时长
+    }
+  }
+
+  /** 读会话状态行（水位 + 核验通过标记两列一次取） */
+  private stateRow(sessionId: string): { seq: number; verifiedCount: number | null } | undefined {
+    return this.db
+      .prepare(`SELECT seq, verified_count AS verifiedCount FROM session_fts_state WHERE session_id = ?`)
+      .get(sessionId) as { seq: number; verifiedCount: number | null } | undefined;
+  }
+
+  /**
+   * 单会话对账体（BEGIN IMMEDIATE 小事务内执行）：
+   * - 事务内重读标记防预检后并发收敛（他路已同步 → 幂等退出）；
+   * - 核验：水位在场但行集对不上（种子段被越过 / 崩溃半态残留）→ 整卷重建 + 校直
+   *   水位（直写重放尾值——不走 MAX，半态水位虚高不滞留）；通过 → 常规补差；
+   * - 通过标记在 loadEvents **之后**重读事件总数入账（撕裂尾修复可能删行——预检值
+   *   不信任）；重建腿校直语句同笔写标记，补差腿只补标记不动水位（水位由 applyEvent
+   *   MAX 独占管理——两腿都不越权）。
+   */
+  private reconcileSession(source: SessionFtsSource, sessionId: string): void {
+    const row = this.stateRow(sessionId);
+    const count = source.countEvents(sessionId);
+    if (row !== undefined && row.verifiedCount === count) return; // 预检后已被并发对账收敛
+    const events = source.loadEvents(sessionId);
+    const watermark = row?.seq ?? -1;
+    // 实有行数（核验判据左值——事务内现读，不用预检快照）
+    const actual = (
+      this.db.prepare(`SELECT COUNT(*) AS n FROM session_fts WHERE session_id = ?`).get(sessionId) as { n: number }
+    ).n;
+    if (watermark === -1 || actual !== expectedRowCount(events, watermark)) {
+      this.db.prepare(`DELETE FROM session_fts WHERE session_id = ?`).run(sessionId);
+      for (const event of events) {
+        this.applyEvent(sessionId, event);
+      }
+      // 校直水位：直写重放尾值（不走 applyEvent 的 MAX——半态水位虚高于日志尾
+      // 〔撕裂尾修复等〕时 MAX 会永久滞留错值，让核验每次对账都误判重建）
+      const lastSeq = events.length > 0 ? events[events.length - 1]!.seq : -1;
+      const finalCount = source.countEvents(sessionId); // loadEvents 撕裂尾修复可能删行——重读
+      this.db
+        .prepare(
+          `INSERT INTO session_fts_state (session_id, seq, verified_count) VALUES (?, ?, ?)
+             ON CONFLICT(session_id) DO UPDATE SET seq = excluded.seq, verified_count = excluded.verified_count`,
+        )
+        .run(sessionId, lastSeq, finalCount);
+      return;
+    }
+    // 常规补差：只重放 seq > 水位的事件（append-only 日志的增量读——增量不重复）
+    for (const event of events) {
+      if (event.seq <= watermark) continue;
+      this.applyEvent(sessionId, event);
+    }
+    // 通过标记（只补标记不动水位——水位由 applyEvent 的 MAX 独占管理）
+    const finalCount = source.countEvents(sessionId);
+    this.db
+      .prepare(
+        `INSERT INTO session_fts_state (session_id, seq, verified_count) VALUES (?, ?, ?)
+           ON CONFLICT(session_id) DO UPDATE SET verified_count = excluded.verified_count`,
+      )
+      .run(sessionId, watermark, finalCount);
   }
 
   /**

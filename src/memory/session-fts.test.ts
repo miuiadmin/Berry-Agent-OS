@@ -6,7 +6,12 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openStore, type Store } from '../persist/index.js';
-import { SESSION_FTS_MIGRATION, SessionFtsIndex, type SessionFtsSource } from './index.js';
+import {
+  SESSION_FTS_MIGRATION,
+  SESSION_FTS_VERIFY_MIGRATION,
+  SessionFtsIndex,
+  type SessionFtsSource,
+} from './index.js';
 import type { SessionEvent } from '../contracts/events.js';
 
 /** 当前测试库（每用例新建 :memory:——迁移框架一次到位后交 DAO） */
@@ -14,7 +19,7 @@ let store: Store;
 let fts: SessionFtsIndex;
 
 beforeEach(() => {
-  store = openStore({ path: ':memory:', migrations: [SESSION_FTS_MIGRATION] });
+  store = openStore({ path: ':memory:', migrations: [SESSION_FTS_MIGRATION, SESSION_FTS_VERIFY_MIGRATION] });
   fts = new SessionFtsIndex(store.connection);
 });
 
@@ -52,6 +57,7 @@ function sourceOf(logs: Record<string, SessionEvent[]>): SessionFtsSource {
   return {
     listSessionIds: () => Object.keys(logs),
     loadEvents: (id) => logs[id] ?? [],
+    countEvents: (id) => (logs[id] ?? []).length,
   };
 }
 
@@ -242,5 +248,66 @@ describe('复盘 20260901 D-1/D-2 回归锁（种子段核验修复 + 单事件�
     expect(fts.search('bravo2')).toHaveLength(0);
     expect(fts.search('charlie2')).toHaveLength(1);
     expect(fts.search('delta2')).toHaveLength(1);
+  });
+});
+
+describe('遗漏大扫 20260901 O-8/L-8（对账成本三档 + 零语句事件免事务）', () => {
+  /** 计数读源：loadEvents 次数 = 预检豁免判据的可观察面（豁免 = 零全量读） */
+  function countedSource(logs: Record<string, SessionEvent[]>, counter: { loads: number }): SessionFtsSource {
+    return {
+      listSessionIds: () => Object.keys(logs),
+      loadEvents: (id) => {
+        counter.loads++;
+        return logs[id] ?? [];
+      },
+      countEvents: (id) => (logs[id] ?? []).length,
+    };
+  }
+
+  it('O-8 通过标记：事件总数未变的对账整会话豁免（零 loadEvents 读）——修复前必红（旧码每次装载全量读）', () => {
+    const logs = { s1: [userEv(0, '首段 lima'), userEv(1, '次段 mike')] };
+    fts.synchronize(countedSource(logs, { loads: 0 })); // 首次对账（空索引重建 + 落标记）
+    const counter = { loads: 0 };
+    fts.synchronize(countedSource(logs, counter)); // 稳态：boot//reload 重装载
+    expect(counter.loads).toBe(0); // 稳态对账零全量读——成本不随库内总事件数线性涨
+    expect(fts.search('lima')).toHaveLength(1); // 索引原样在场
+    expect(fts.search('mike')).toHaveLength(1);
+  });
+
+  it('O-8 豁免只认未变：事件增长会话重入对账（核验 + 补差照常）', () => {
+    const logs = { s1: [userEv(0, '首段 november')] };
+    fts.synchronize(countedSource(logs, { loads: 0 }));
+    const grown = { s1: [...logs.s1!, userEv(1, '新段 oscar')] };
+    const counter = { loads: 0 };
+    fts.synchronize(countedSource(grown, counter));
+    expect(counter.loads).toBe(1); // 有变化 → 全量读重入
+    expect(fts.search('oscar')).toHaveLength(1); // 补差到位
+    expect(fts.search('november')).toHaveLength(1); // 不双计
+  });
+
+  it('L-8 零语句事件免事务：无遮蔽无文本事件不落任何写（水位零残留）——修复前必红（旧码每事件一事务一 fsync）', () => {
+    fts.indexEvent('s1', ev(0, 'sandbox/mode', { mode: 'workspace-write' }));
+    fts.indexEvent('s1', ev(1, 'tool/call', { toolCallId: 't', name: 'x', arguments: '{}' }));
+    const row = store.connection.prepare(`SELECT seq FROM session_fts_state WHERE session_id = 's1'`).get();
+    expect(row).toBeUndefined(); // 零语句 = 零落库（免事务免 fsync）
+    // 后继文本事件 MAX 语义追平——水位滞后不累积
+    fts.indexEvent('s1', userEv(2, '追平 papa'));
+    const after = store.connection.prepare(`SELECT seq FROM session_fts_state WHERE session_id = 's1'`).get() as {
+      seq: number;
+    };
+    expect(after.seq).toBe(2);
+  });
+
+  it('零语句段水位滞后不误判：行集核验判据与滞后正交（green 锁）', () => {
+    const log = [
+      ev(0, 'turn/start', {}), // 零语句——水位不前进
+      userEv(1, '内容 quebec'), // 文本——水位 1
+      ev(2, 'turn/end', { reason: 'completed' }), // 零语句——水位停 1
+    ];
+    fts.indexEvent('s1', log[0]!);
+    fts.indexEvent('s1', log[1]!);
+    fts.indexEvent('s1', log[2]!);
+    fts.synchronize(countedSource({ s1: log }, { loads: 0 })); // 核验须通过——零重建
+    expect(fts.search('quebec')).toHaveLength(1);
   });
 });

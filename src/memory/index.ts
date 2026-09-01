@@ -10,14 +10,15 @@
 
 import type { MigrationSpec } from '../persist/index.js';
 import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION } from './schema.js';
-import { SESSION_FTS_MIGRATION } from './session-fts.js';
+import { SESSION_FTS_MIGRATION, SESSION_FTS_VERIFY_MIGRATION } from './session-fts.js';
 
-/** 件自带迁移链（v2 表族 + v3 session_fts + v4 效用列 + v11 持有面三件——组合根机械聚合的标准名，tick 第一刀同批改造） */
+/** 件自带迁移链（v2 表族 + v3 session_fts + v4 效用列 + v11 持有面三件 + v15 对账通过标记——组合根机械聚合的标准名，tick 第一刀同批改造） */
 export const migrations: MigrationSpec[] = [
   MEMORY_MIGRATION,
   SESSION_FTS_MIGRATION,
   MEMORY_UTILITY_MIGRATION,
   MEMORY_HOLDING_MIGRATION,
+  SESSION_FTS_VERIFY_MIGRATION,
 ];
 
 export { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION } from './schema.js';
@@ -96,7 +97,13 @@ export {
   type ConsolidationReport,
   type ReviewHandle,
 } from './review.js';
-export { SESSION_FTS_MIGRATION, SessionFtsIndex, type SessionFtsHit, type SessionFtsSource } from './session-fts.js';
+export {
+  SESSION_FTS_MIGRATION,
+  SESSION_FTS_VERIFY_MIGRATION,
+  SessionFtsIndex,
+  type SessionFtsHit,
+  type SessionFtsSource,
+} from './session-fts.js';
 export {
   MEMORY_DIFF_TYPE,
   briefingFace,

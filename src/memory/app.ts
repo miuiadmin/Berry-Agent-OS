@@ -79,6 +79,8 @@ export interface MemoryAppStoreFace {
   listSessionIds(): string[];
   /** 整卷重放某会话事件日志 */
   loadEvents(sessionId: string): SessionEvent[];
+  /** 某会话已存事件数（对账预检通过标记比对值——O-8 廉价 COUNT） */
+  countEvents(sessionId: string): number;
 }
 
 /** 官方件构造参数（组合根装配期注入） */
