@@ -154,6 +154,18 @@ test('package-lock 与 package.json 名字同步（成熟度扫描 20260901 P0-1
   assert.equal(lock.packages?.['']?.name, pkg.name, 'lockfile packages[""].name 与 package.json 漂移');
 });
 
+test('build 链 bin 执行位：copy-app-assets 尾步对 bin 入口 chmod 0755（成熟度扫描 20260901 快赢#4）', () => {
+  // npm 安装期自动修 bin 权限，但手动解包 tarball 形态无人修——build 时打进
+  // 产物使 tarball 自含执行位。形态锁（先例同本文件其余）：chmod 步或 bin 路径
+  // 构造被误删即红。
+  const script = readFileSync(join(repoRoot, 'tools', 'copy-app-assets.mjs'), 'utf8');
+  assert.ok(/chmodSync\(\s*\w+,\s*0o755\s*\)/.test(script), 'copy-app-assets 须含 chmodSync(<bin>, 0o755)');
+  assert.ok(
+    /join\(distRoot,\s*'app',\s*'main\.js'\)/.test(script),
+    'bin 入口路径须锚 dist/app/main.js（package.json bin 同源）',
+  );
+});
+
 test('AGENTS.md 行数预算棘轮：≤175 行（工程纪律「并发协作与本文档治理」——先例 dsh verify-doc-budgets）', () => {
   // 预算棘轮只减不增（基线 175，含治理节本身）；事故追加新规则须同次修订合并
   // 或删减等量旧内容——本闸防无声超支。口径与 wc -l 一致（换行计数，尾部空行不计）。
