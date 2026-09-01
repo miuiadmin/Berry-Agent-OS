@@ -114,6 +114,15 @@ export interface DaemonState {
   readonly port: number;
   /** 本 daemon 持有的会话 id 清单（租约登记面——registry.open() 执法数据源） */
   readonly heldSessions: readonly string[];
+  /**
+   * boot 时数据目录绝对路径（体检对象记录键——基建大扫 20260901 #6）：doctor
+   * 优先按此值体检 token/log 面，env 当场解析仅兜底——env 分叉（doctor 进程
+   * 与 daemon boot 时 APP_DATA_DIR 不同）下体检对象与实际持有物不脱钩。
+   * 可选 = 旧版 daemon.json 兼容（缺席时 doctor 兜底 env 值并披露来源）。
+   */
+  readonly dataRoot?: string;
+  /** boot 时会话库文件绝对路径（同上——④ 库体检的记录键；缺席兜底 env 解析） */
+  readonly dbPath?: string;
 }
 
 /** 读 daemon.json（缺失/损坏/形状不符 = undefined——损坏态视同陈旧可清扫） */
@@ -132,6 +141,9 @@ export function readDaemonState(dataRoot: string = dataDir()): DaemonState | und
       bootId: s['bootId'],
       port: s['port'],
       heldSessions: (s['heldSessions'] as unknown[]).filter((id): id is string => typeof id === 'string'),
+      // 体检对象记录键（#6）：string 校验过滤非串脏值——缺席 = 旧版文件（合法态）
+      ...(typeof s['dataRoot'] === 'string' ? { dataRoot: s['dataRoot'] } : {}),
+      ...(typeof s['dbPath'] === 'string' ? { dbPath: s['dbPath'] } : {}),
     };
   } catch {
     return undefined;

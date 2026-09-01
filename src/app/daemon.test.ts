@@ -800,6 +800,64 @@ describe('daemon doctor：七项体检', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('② events 503 计红（基建大扫 #9）：帽满 = 服务面真实降级，不再「注记而全绿」', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      ...httpFaces({ events: 503 }), // health/handshake 全 200、唯事件流帽满
+    });
+    expect(code).toBe(1); // 修前红：旧形 events 不参与 ok 判定 → code 0 假绿
+    const text = out.join('');
+    expect(text).toContain('16 连接帽满');
+    expect(text).not.toContain('七项全绿'); // 总结行与注记不再自相矛盾
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('② health.degraded 在场 = 红项（基建大扫 #25 cordon）：降级如实报出带处置指引', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      ...httpFaces({ healthBody: JSON.stringify({ version: VERSION, degraded: 'persistence' }) }),
+    });
+    expect(code).toBe(1); // 修前红：旧形 parse degraded 却零消费 → 全绿 0
+    const text = out.join('');
+    expect(text).toContain('persistence'); // 降级原因披露
+    expect(text).toContain('cordon'); // 处置指引（stop 后 start / 查 daemon.log）
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('体检对象优先 daemon.json 记录值（基建大扫 #6）：dataRoot/dbPath 落账 → env 分叉不脱钩 + 对账披露', async () => {
+    // 发现面 rootA：只有 daemon.json（带记录键）；记录面 rootB：真 token + 真库
+    const rootA = mkdtempSync(join(tmpdir(), 'daemon-doc-'));
+    const rootB = mkdtempSync(join(tmpdir(), 'daemon-doc-'));
+    const dbFileB = join(rootB, 'sessions.db');
+    const db = new Database(dbFileB);
+    db.pragma('user_version = 7');
+    db.close();
+    ensureDaemonToken(rootB); // 0600 token 落在**记录面**——env 面 rootA 无 token
+    acquireDaemonState(
+      rootA,
+      { ...makeState(777, 'rec-alive'), dataRoot: rootB, dbPath: dbFileB },
+      { startId: () => undefined },
+    );
+    const probe: ProcessProbe = { startId: (pid) => (pid === 777 ? 'rec-alive' : undefined) };
+    const out = captureStdout();
+    const code = await daemonDoctorMain({ dataRoot: rootA, probe, ...httpFaces() });
+    expect(code).toBe(0); // 修前红：旧形按 env 面体检 → ③ token 缺失 + ④ 库开不出 = 1
+    const text = out.join('');
+    expect(text).toContain('七项全绿');
+    expect(text).toContain('按 daemon.json 记录值'); // 对账披露行（env 分叉如实报出）
+    expect(text).toContain(rootB); // 记录值路径进披露
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(rootB, { recursive: true, force: true });
+  });
+
   it('②′ 僵尸态：pid 活但 HTTP 面全无响应 → 专项红行', async () => {
     const { root, dbFile, probe } = healthyRoot();
     const out = captureStdout();

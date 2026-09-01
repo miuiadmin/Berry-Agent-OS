@@ -2182,6 +2182,52 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
     }
   });
 
+  it('全绿 boot 清账（基建大扫 #24）：degraded 为空时删除旧 boot-failures.json——零失败不冒陈年记录', async () => {
+    // 钉独立数据目录 + 预写一份「陈年失败」文件（模拟上次 boot 的第三方失败残留）
+    const dataRoot = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-data-')));
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    writeFileSync(
+      join(dataRoot, 'boot-failures.json'),
+      JSON.stringify({ bootTime: '2020-01-01T00:00:00Z', failures: [{ id: 'stale', code: 'X', message: '旧失败' }] }),
+    );
+    const prev = process.env['APP_DATA_DIR'];
+    process.env['APP_DATA_DIR'] = dataRoot;
+    try {
+      const { streamFn } = scriptedStream([textMessage('好')]);
+      await assemble({ streamFn, compositionDir }); // 全绿 boot（空 overlay 零第三方行）
+      // 修前红：旧文件原样留盘（只在下次 degraded 时才被覆盖）→ exists true
+      expect(existsSync(join(dataRoot, 'boot-failures.json'))).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env['APP_DATA_DIR'];
+      else process.env['APP_DATA_DIR'] = prev;
+    }
+  });
+
+  it('降级横幅双通道（基建大扫 #45）：degraded 投影进 runtime.bootDegraded——TUI 腿补发的数据源', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const appDir = writeAppDir(
+      compositionDir,
+      'export const name = "bad";\nexport default async function apply() {\n  throw new Error("横幅面探针");\n}\n',
+    );
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n  - id: bad\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
+    );
+    const dataRoot = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-data-')));
+    const prev = process.env['APP_DATA_DIR'];
+    process.env['APP_DATA_DIR'] = dataRoot;
+    try {
+      const { streamFn } = scriptedStream([textMessage('好')]);
+      const runtime = await assemble({ streamFn, compositionDir });
+      // 修前红：AppRuntime 无此键 → undefined 上 toHaveLength 必炸
+      expect(runtime.bootDegraded).toHaveLength(1);
+      expect(runtime.bootDegraded[0]).toMatchObject({ id: 'bad', code: APP_APPLY_FAILED });
+    } finally {
+      if (prev === undefined) delete process.env['APP_DATA_DIR'];
+      else process.env['APP_DATA_DIR'] = prev;
+    }
+  });
+
   it('G1 官方行拒启维持：builtin: 引用形失败（typo 官方件）→ 工厂抛 APP_LOAD_FAILED 聚合清单（不带病运行）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: memory\n    pkg: builtin:nonexistent\n`);

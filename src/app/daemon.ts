@@ -481,6 +481,10 @@ export async function daemonForegroundMain(port: number, deps: DaemonForegroundD
     bootId: randomUUID(),
     port,
     heldSessions: [],
+    // 体检对象记录键（基建大扫 #6）：boot 时 env 解析终值落盘——doctor 进程的
+    // env 可与 boot 时分叉，体检对象以记录值为准（heldSessions 同族先例）
+    dataRoot,
+    dbPath: dbPath(),
   };
   acquireDaemonState(dataRoot, state, probe); // 已有活 daemon = 响亮抛 DAEMON_ALREADY_RUNNING
   const token = ensureDaemonToken(dataRoot);
@@ -626,12 +630,26 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
     return 1;
   }
   const pidAlive = isDaemonAlive(state, probe);
+  // 体检对象记录值优先（基建大扫 #6）：③⑤ 按 examRoot、④ 按 examDb——env 分叉
+  //（doctor 进程与 daemon boot 时 APP_DATA_DIR/APP_DB_PATH 不同）下体检的是
+  // daemon 实际持有物而非 doctor 当场解析物；记录键缺席（旧版 daemon.json）=
+  // 兜底 env 值。发现面（daemon.json 本身在哪）仍按 doctor 进程 env 解析——
+  // 不然连 daemon.json 都找不到，这是唯一不可替代的 env 面。
+  const examRoot = state.dataRoot ?? dataRoot;
+  const examDb = state.dbPath ?? deps.dbFile ?? dbPath();
   findings.push({
     ok: pidAlive,
     text: pidAlive
       ? `① 进程：daemon.json 在场、pid ${state.pid} 存活（processStartId 匹配）`
       : `① 进程：daemon.json 残留但 pid ${state.pid} 已死（processStartId 不匹配或进程消失）——start 将先行清扫`,
   });
+  // 对账披露（#6）：体检对象来源如实报出——记录值与当场 env 解析分叉时更显式
+  // 指出两值（分叉不转红：是事实不是故障，但 operator 必须看见）
+  if (state.dataRoot !== undefined && state.dataRoot !== dataRoot) {
+    process.stdout.write(
+      `· 对账：体检对象按 daemon.json 记录值 ${state.dataRoot}（与当场 env 解析 ${dataRoot} 分叉）。\n`,
+    );
+  }
 
   /* ---- ② 服务面三探（health 公开 / 真握手 / events 即连即关） ---- */
   const token = readAttachToken(dataRoot); // 只读——诊断面禁 ensure 写（规范钉死）
@@ -652,8 +670,19 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
       health = undefined;
     }
   }
+  // cordon 降级旗（基建大扫 #25）：health 携带 degraded 在场 = write-behind 落盘
+  // 失败闩（闩死不自愈）——daemon 拒新写意图的降级态，② 红项如实报出（旧形
+  // parse 后只消费 version 的半截消费修正）
+  const degradedFlag = typeof health?.degraded === 'string' && health.degraded !== '' ? health.degraded : undefined;
   findings.push({
-    ok: healthRes !== undefined && healthRes.status === 200 && handshakeStatus === 200,
+    // events 503 计红（基建大扫 #9）：帽满时 attach/SPA 建不了流 = 服务面真实
+    // 降级且需人工干预（关客户端），不再是「注记而全绿」的自相矛盾总结
+    ok:
+      healthRes !== undefined &&
+      healthRes.status === 200 &&
+      handshakeStatus === 200 &&
+      eventsStatus === 200 &&
+      degradedFlag === undefined,
     text: (() => {
       const healthText = healthRes === undefined ? 'health 无响应' : `health HTTP ${healthRes.status}`;
       const handshakeText =
@@ -670,7 +699,11 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
           : eventsStatus === 503
             ? '事件流 503——16 连接帽满（SPA/attach/监控尾堆积，关几个再试）'
             : '事件流未达（服务面不健康）';
-      return `② 服务面：${healthText}、${handshakeText}、${eventsText}`;
+      const degradedText =
+        degradedFlag === undefined
+          ? ''
+          : `、cordon 降级（${degradedFlag}——持久层闩死拒新写，处置：\`berry daemon stop\` 后 start；原因查 daemon.log 的 cordon error 行）`;
+      return `② 服务面：${healthText}、${handshakeText}、${eventsText}${degradedText}`;
     })(),
   });
   // 僵尸态辨识（规范入查项）：pid 活 + HTTP 面无响应
@@ -683,8 +716,8 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
     });
   }
 
-  /* ---- ③ token 文件面（在场 + 0600） ---- */
-  const tokenPath = daemonTokenPath(dataRoot);
+  /* ---- ③ token 文件面（在场 + 0600；按 examRoot——记录值优先） ---- */
+  const tokenPath = daemonTokenPath(examRoot);
   try {
     const mode = statSync(tokenPath).mode & 0o777;
     findings.push({
@@ -701,8 +734,8 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
     });
   }
 
-  /* ---- ④ 会话库（readonly 可开 + user_version） ---- */
-  const dbFile = deps.dbFile ?? dbPath();
+  /* ---- ④ 会话库（readonly 可开 + user_version；按 examDb——记录值优先） ---- */
+  const dbFile = examDb;
   try {
     const db = new Database(dbFile, { readonly: true });
     const userVersion = (db.pragma('user_version', { simple: true }) as number) ?? 0;
@@ -718,19 +751,19 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
     });
   }
 
-  /* ---- ⑤ daemon.log 大小（体检帽 50 MiB——超帽转红带轮转指引） ---- */
+  /* ---- ⑤ daemon.log 大小（体检帽 50 MiB——超帽转红带轮转指引；按 examRoot） ---- */
   try {
-    const size = statSync(daemonLogPath(dataRoot)).size;
+    const size = statSync(daemonLogPath(examRoot)).size;
     const human = size >= 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MiB` : `${Math.round(size / 1024)} KiB`;
     findings.push(
       size > DAEMON_LOG_ALERT_BYTES
         ? {
             ok: false,
             text:
-              `⑤ 日志：daemon.log ${human} 超 50 MiB 体检帽（${daemonLogPath(dataRoot)}——` +
+              `⑤ 日志：daemon.log ${human} 超 50 MiB 体检帽（${daemonLogPath(examRoot)}——` +
               '`berry daemon stop` 后 start 触发轮转：start 时 >10 MiB 即归档为 daemon.log.1）',
           }
-        : { ok: true, text: `⑤ 日志：daemon.log ${human}（${daemonLogPath(dataRoot)}）` },
+        : { ok: true, text: `⑤ 日志：daemon.log ${human}（${daemonLogPath(examRoot)}）` },
     );
   } catch {
     findings.push({ ok: true, text: '⑤ 日志：daemon.log 缺席（未 boot 过——信息项不计红）' });

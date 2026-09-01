@@ -162,7 +162,7 @@ import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
 import { AllowlistStore } from './allowlist-store.js';
 import { formatUsagePanel } from './usage.js';
-import { readFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 // ChildRegistry = mcp 子进程登记簿机制（契约篇 §6.6 子进程治理条 exec 腿复用，
 // 2026-08-29 critic #1：exec 结构上不见 mcp——组合根注入，killTree 闭包同款先例）
@@ -484,6 +484,13 @@ export interface AppRuntime {
    * undefined。入口披露（TUI notify / run stderr）与测试断言两消费面。
    */
   webuiEphemeralAuth(): { readonly token: string; readonly port: number; readonly host: string } | undefined;
+  /**
+   * boot 期第三方行隔离降级投影（基建大扫 #45）：id/code/message 三元组——
+   * boot 序内的 ui.notify 广播达 daemon 形态 webui 腿；TUI 形态 backend 在
+   * createRuntime 返回后才 attach，由入口读此面补发横幅（warn 级）。
+   * /reload 失败行不进此面（走 reload 报告面——两时点对称的既有分账）。
+   */
+  readonly bootDegraded: readonly { readonly id: string; readonly code: string; readonly message: string }[];
   /**
    * 组合树重载（/reload，契约篇 §1.3 落码形态）：run 进行中**排队不拒绝**
    *（2026-08-27 刀 2 改排队——分槽 coalesce：置 pending 返 {queued:true}，
@@ -2163,11 +2170,22 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     );
   }
   const degraded = allFailed.filter((row) => !officialRef(row.id));
-  if (degraded.length > 0) {
+  // 诊断文件路径（#24/#45 共用）：degraded 空时也计算——清账半边要看它
+  const bootFailurePath = join(dataDir(), 'boot-failures.json');
+  if (degraded.length === 0) {
+    // 全绿 boot 清账（基建大扫 #24）：「每次 boot 只对本批失败负责」语义补全——
+    // 零失败 = 删除旧文件（旧形只在下次再失败时才覆盖，修好第三方应用后陈年
+    // 失败记录永留盘上，运维手册引导看此文件诊断现状即成「平台仍在隔离降级」
+    // 的过期误导）；幂等 try-catch 与写路径同段
+    try {
+      unlinkSync(bootFailurePath);
+    } catch {
+      /* 缺席/删失败 = 无账可清——不阻 boot */
+    }
+  } else {
     // 诊断文件（隔离 ≠ 静默的落盘半边）：<数据目录>/boot-failures.json boot 批
-    // 整替写——每次 boot 只对本批失败负责，历史失败随旧文件消亡（/reload 失败
-    // 走 reload 报告面不落此文件）；栈/pkg/apps 影响面归因取自合成行与载荷
-    const bootFailurePath = join(dataDir(), 'boot-failures.json');
+    // 整替写——每次 boot 只对本批失败负责（/reload 失败走 reload 报告面不落
+    // 此文件）；栈/pkg/apps 影响面归因取自合成行与载荷
     mkdirSync(dataDir(), { recursive: true });
     writeAtomicFile(
       bootFailurePath,
@@ -2190,10 +2208,19 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         2,
       )}\n`,
     );
-    // 启动横幅（v1 = 宿主日志 banner——TUI 呈现形态随 daemon 刀一 boot 序定形）
+    // 启动横幅（基建大扫 #45 双通道）：①宿主日志 banner（stderr——daemon.log 收）；
+    // ②ui.notify 广播（level:'warn'）——「进程级一次性事实」的既有广播面（token
+    // 披露/held 会话横幅先例）：daemon 形态 webui 件 apply 期已 attach backend，
+    // SSE notify 帧即时可达；TUI 形态 backend 在 createRuntime 返回后才 attach，
+    // 由 tui-main 读 runtime.bootDegraded 补发（下方投影即其数据源）。
+    // SSE 后连者看不到属「无回放」既定 parity——doctor 与文件面兜底。
     const lines = degraded.map((row) => `  - [${row.code}] ${row.id}：${row.message}`);
     ctx.logger.warn(
       `启动横幅：${degraded.length} 行第三方应用失败已隔离跳过（平台照常启动，app/failed 已逐行广播）：\n${lines.join('\n')}\n  诊断文件：${bootFailurePath}`,
+    );
+    ui.notify(
+      `启动横幅：${degraded.length} 行第三方应用失败已隔离跳过（平台照常启动）。\n${lines.join('\n')}\n  诊断文件：${bootFailurePath}`,
+      { level: 'warn' },
     );
   }
   // ④d onSettle 晚绑定收口（§6.4）：通知器按注册表解析归属条目——S1 键控
@@ -2855,6 +2882,8 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 复盘 S-1：一次性鉴权面活取值（读 holder——daemon/零监听形态恒 undefined；
     // 入口披露与测试断言的消费点）
     webuiEphemeralAuth: () => ephemeralAuthFace,
+    // #45：boot 降级投影（TUI 入口 attach 后补发横幅的数据源——见接口注释）
+    bootDegraded: degraded.map((row) => ({ id: row.id, code: row.code, message: row.message })),
     reload,
     /** 优雅关停：abort-all → 等全部驱动结算（quiesce 断言）→ flush 屏障 → 全部条目 session_shutdown → 关库 → ctx 回卷（§1.3 多驱动版编排 + S6 形态⑤，S1 全条目化） */
     async shutdown() {

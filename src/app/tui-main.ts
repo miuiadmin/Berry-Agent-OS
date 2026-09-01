@@ -132,6 +132,17 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
     },
   });
   runtime.ui.attach(tui.ui());
+  // boot 降级横幅补发（基建大扫 #45）：boot 序内的 ui.notify 广播发生在 backend
+  // attach 之前（TUI 后端在本行才挂入）——daemon 形态 webui 腿即时可达，TUI 腿
+  // 在此读 runtime.bootDegraded 投影补发。warn 级 + 指向 boot-failures.json。
+  if (runtime.bootDegraded.length > 0) {
+    runtime.ui.notify(
+      `启动横幅：${runtime.bootDegraded.length} 行第三方应用失败已隔离跳过（平台照常启动）。\n` +
+        runtime.bootDegraded.map((row) => `  - [${row.code}] ${row.id}：${row.message}`).join('\n') +
+        `\n  诊断文件见 boot-failures.json（数据目录内）`,
+      { level: 'warn' },
+    );
+  }
   // 首启欢迎（§8.5 第 4 件；内容骨架与 commands.ts GUIDE_TEXT 同源——改词两处
   // 同步，抽共享常量挂 m4）：活体层 notify 不落库——只在第一次出现，非首启
   // 零噪音；内容骨架与 /guide 同源（命令/文档/配置指路三件）
