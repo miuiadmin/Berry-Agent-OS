@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureSnapshot, executePrune, prunePlan, type PruneOptions } from './snapshot.js';
+import { DEFAULT_EXCLUDE } from './app.js';
 import {
   hashContent,
   listAllManifests,
@@ -124,6 +125,62 @@ describe('captureSnapshot：首拍与指纹', () => {
     expect(rels).not.toContain('dist/out.js'); // exclude 配置规则
     expect(rels).not.toContain('ignored.log'); // 祖先链 .gitignore（根目录规则）
     expect(rels).toContain('.gitignore'); // .gitignore 本身是普通文件（照拍）
+  });
+});
+
+describe('captureSnapshot：秘密文件缺省排除（基建大扫 #39）', () => {
+  // 独立工作区/数据根：本段断言要 manifest 文件集恰好等于当场放置集，
+  // 不与首 describe 共享 workspace（那里残留 a.txt/sub 等历史文件会污染全集断言）
+  let ws: string;
+  let store: string;
+  beforeAll(() => {
+    ws = join(root, 'ws-secret');
+    store = join(root, 'store-secret');
+    mkdirSync(ws, { recursive: true });
+  });
+  afterAll(() => {
+    rmSync(ws, { recursive: true, force: true });
+    rmSync(store, { recursive: true, force: true });
+  });
+
+  /** 独立工作区写文件捷径（本段用例全在根层，无子目录） */
+  const putSecret = (rel: string, content: string): void => writeFileSync(join(ws, rel), content, 'utf8');
+
+  /** 独立捕获捷径（exclude 显式给——缺省面由件本体 DEFAULT_EXCLUDE 持有，此处消费它） */
+  const snapSecret = (exclude: readonly string[], sessionId: string) =>
+    captureSnapshot(
+      { dataRoot: store, workspaceRoot: ws, exclude },
+      { sessionId, triggerTool: 'write', guard: false, forkSeq: null, triggerText: null },
+    );
+
+  it('DEFAULT_EXCLUDE 常量在件本体：目录剪枝 + 秘密清单（修前模块缺席即红）', () => {
+    expect(DEFAULT_EXCLUDE).toContain('node_modules/'); // 目录剪枝（原硬编码缺省保留）
+    expect(DEFAULT_EXCLUDE).toContain('.env'); // 环境变量文件
+    expect(DEFAULT_EXCLUDE).toContain('.env.*'); // .env.local 等变体
+    expect(DEFAULT_EXCLUDE).toContain('*.pem'); // 证书/私钥
+    expect(DEFAULT_EXCLUDE).toContain('*.key'); // 密钥
+    expect(DEFAULT_EXCLUDE).toContain('id_rsa*'); // SSH 私钥族
+  });
+
+  it('秘密文件不入快照、普通文件照入：工作区秘密永不进 blob 仓与 manifest', async () => {
+    putSecret('.env', 'API_TOKEN=sk-live-9f2c');
+    putSecret('.env.local', 'API_TOKEN=sk-live-9f2c');
+    putSecret('id_rsa', '-----BEGIN OPENSSH PRIVATE KEY-----');
+    putSecret('cert.pem', '-----BEGIN CERTIFICATE-----');
+    putSecret('a.txt', '正常文件');
+    const m = await snapSecret(DEFAULT_EXCLUDE, 'sess-secret');
+    expect(m.files.map((f) => f.rel)).toEqual(['a.txt']); // 恰好只剩普通文件（独立工作区无残留）
+  });
+
+  it('否定 glob 显式放开：exclude 追加 !.env 后 .env 入快照（operator 主动声明面）', async () => {
+    // ignore 库 gitignore 语义：后规则覆盖前规则——!.env 只重开字面 .env，
+    // 未点名的秘密与变体仍排除（精确放开，非全量放开）
+    const m = await snapSecret([...DEFAULT_EXCLUDE, '!.env'], 'sess-secret-allow');
+    const rels = m.files.map((f) => f.rel);
+    expect(rels).toContain('.env'); // 显式放开生效
+    expect(rels).toContain('a.txt'); // 普通文件不受影响
+    expect(rels).not.toContain('id_rsa'); // 未放开的秘密仍排除
+    expect(rels).not.toContain('.env.local'); // 变体不随字面放开联动
   });
 });
 

@@ -87,9 +87,30 @@ export const checkpointConfig = Type.Object({
   maxSnapshots: Type.Optional(Type.Number({ minimum: 1, maximum: 10_000 })),
   /** 全局 blob 软帽（字节——跨会话 oldest-first；下界 = 在册会话最新一条） */
   maxTotalBytes: Type.Optional(Type.Number({ minimum: 1024 * 1024 })),
-  /** 排除 glob（工作区遍历——PRUNE 硬表 node_modules/.git 之上叠加） */
+  /** 排除 glob（工作区遍历——PRUNE 硬表 node_modules/.git 之上叠加；缺省 = DEFAULT_EXCLUDE） */
   exclude: Type.Optional(Type.Array(Type.String())),
 });
+
+/**
+ * exclude 缺省清单（基建大扫 #39 拍板，会话篇 §5.3）：目录剪枝 + 秘密文件族。
+ * 工作区里的环境变量文件 / SSH 私钥 / 证书密钥永不进 blob 仓与 manifest——
+ * 快照面是「代码态」安全网，不是秘密备份位；operator 要显式放开某秘密，
+ * 在行 config exclude 追加否定 glob（如 `!.env`）——gitignore 语义后规则覆盖
+ * 前规则，字面放开不联动变体（.env 放开 ≠ .env.local 放开）。
+ */
+export const DEFAULT_EXCLUDE: readonly string[] = [
+  'node_modules/', // 目录剪枝（原缺省保留——装机物体量毁快照面）
+  '.git/', // 目录剪枝（同上——git 对象）
+  '.env', // 环境变量文件（dotenv 缺省名——凭证最常见宿主）
+  '.env.*', // 变体族（.env.local / .env.production 等）
+  '*.pem', // 证书 / 私钥（PEM 面）
+  '*.key', // 密钥文件
+  'id_rsa*', // SSH 私钥族（id_rsa / id_rsa-cert 等）
+  'id_ed25519*', // SSH ed25519 私钥族
+  'id_ecdsa*', // SSH ecdsa 私钥族
+  '*.p12', // PKCS#12 证书包
+  '*.pfx', // PKCS#12 变体名
+];
 
 /** 已解析配置（缺省值填充后的形状——件内统一经此读） */
 interface ResolvedConfig {
@@ -160,7 +181,7 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
       const cfg: ResolvedConfig = {
         maxSnapshots: (cfgRaw.maxSnapshots as number) ?? 50,
         maxTotalBytes: (cfgRaw.maxTotalBytes as number) ?? 512 * 1024 * 1024,
-        exclude: (cfgRaw.exclude as string[] | undefined) ?? ['node_modules/', '.git/'],
+        exclude: (cfgRaw.exclude as string[] | undefined) ?? DEFAULT_EXCLUDE,
       };
 
       /**

@@ -20,6 +20,7 @@ import { loadApps } from '../context/loader.js';
 import type { WorkerRowLoader } from '../context/loader.js';
 import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
 import { spawnExternalDomain, externalEntryUrl, type ExternalDomain } from './external-domain.js';
+import { buildChildEnv } from '../exec/env.js';
 
 /* ---------------- 测试基建（同 bootstrap.test.ts 形态——parity 的基建也对齐） ---------------- */
 
@@ -197,6 +198,9 @@ function spawnTestDomain(
     root,
     tools: tools as unknown as ToolsService,
     workerId: opts.workerId ?? `e-test-${Math.random().toString(36).slice(2, 8)}`,
+    // #40 env 必填：与真实装配层同款白名单产物（fixture 全零 env 依赖——孙进程
+    // spawn 走 execPath 绝对路径，白名单只作「装配层显式持入」的形态保真）
+    env: opts.env ?? buildChildEnv(process.env),
     ...opts,
   });
 }
@@ -227,6 +231,8 @@ beforeAll(async () => {
     tools: tools as unknown as ToolsService,
     externalUrl: externalEntryUrl(import.meta.url),
     workerId: 'e2e-external',
+    // #40 env 必填：真实装配层同款白名单产物（测试豁免 DAG——跨模块引 exec/env 合法）
+    env: buildChildEnv(process.env),
     onExit: (info) => unexpectedExits.push(info),
   });
   await untilReady(domain, echoEntry);

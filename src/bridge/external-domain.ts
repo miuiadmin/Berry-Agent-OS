@@ -73,8 +73,12 @@ export interface ExternalDomainOptions {
    * [node, ...旗, 入口, 域id]，返回包装后 argv（runner 前缀已在）。
    */
   readonly argvWrapper?: (argv: string[]) => string[];
-  /** 子进程环境（buildChildEnv 白名单产物——缺省继承宿主 env 全量） */
-  readonly env?: Readonly<Record<string, string>>;
+  /**
+   * 子进程环境（必填——buildChildEnv 白名单产物由装配层显式持入；TS 编译期
+   * 强制。基建大扫 #40：旧「缺省继承宿主 env 全量」腿退役——bridge→exec 无
+   * 拓扑边、spawn 不自持白名单，静默透传宿主全量 env 的通路在类型面上封死）
+   */
+  readonly env: Readonly<Record<string, string>>;
   /** 应用锚作用域（svc-invoke 的服务解析源） */
   readonly root: ContextScope;
   /** 工具服务（缺省懒解析 root 的 'tools'） */
@@ -165,7 +169,7 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
   const child = spawn(argv[0]!, argv.slice(1), {
     detached: true,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: opts.env !== undefined ? { ...opts.env } : process.env,
+    env: { ...opts.env }, // 必填（#40）——白名单产物装配层持入，无宿主全量继承腿
   });
 
   /**

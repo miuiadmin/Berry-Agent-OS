@@ -475,7 +475,18 @@ export function createAppsConfigureTool(apps: AppsManageFace, approval: Approval
       });
       if (denied !== undefined) return denied;
       const report = await apps.configure(req.id, req.config);
-      const lines = [report.message, `合并后完整配置：${JSON.stringify(report.config)}`];
+      // 回执脱敏（基建大扫 #38）：合并配置里 operator 手编的凭证位（mcp env /
+      // browser apiKey 等旁路键）只列键名、值永不回显——秘密不进模型上下文与
+      // durable；patch 键照常回显合并值（模型刚写的，上下文已有，零增量泄露）
+      const patchedKeys = new Set(report.appliedKeys);
+      const shown: Record<string, unknown> = {};
+      const untouched: string[] = [];
+      for (const key of Object.keys(report.config)) {
+        if (patchedKeys.has(key)) shown[key] = report.config[key];
+        else untouched.push(key);
+      }
+      const lines = [report.message, `本次写入键（合并值）：${JSON.stringify(shown)}`];
+      if (untouched.length > 0) lines.push(`未列出键（保持现值，不回显）：${untouched.join('、')}`);
       if (report.ring1RestartRequired) lines.push('注意：Ring 1 必备行不随 /reload 热装载——本次写入须重启进程生效。');
       return textResult(lines.join('\n'));
     },

@@ -85,9 +85,12 @@ function fakeManage(scripted: {
     },
     async configure(id, patch) {
       calls.push({ method: 'configure', args: [id, patch] });
+      // 合并语义同真实服务面：baseline（scripted.config）+ patch 覆盖——
+      // ConfigureReport.config 是合并后全量，渲染脱敏是工具层的事（#38 测试根基）
+      const config = { ...(scripted.configure?.config ?? {}), ...patch };
       return {
         id,
-        config: scripted.configure?.config ?? { ...patch },
+        config,
         appliedKeys: Object.keys(patch),
         ring1RestartRequired: scripted.configure?.ring1RestartRequired ?? false,
         message: '配置已写入 overlay（fake）',
@@ -364,7 +367,7 @@ describe('apps_configure', () => {
     expect(calls).toEqual([]);
   });
 
-  it('allowed-once：configure(id, patch) 透传 + 渲染合并后全量配置；Ring 1 行带重启提示分支', async () => {
+  it('allowed-once：configure(id, patch) 透传 + 回执脱敏（patch 键回显合并值）；Ring 1 行带重启提示分支', async () => {
     const { apps, calls } = fakeManage({
       configure: { config: { keep: 1, changed: 2 }, ring1RestartRequired: true },
     });
@@ -373,8 +376,28 @@ describe('apps_configure', () => {
       await createAppsConfigureTool(apps, approval).execute({ id: 'demo', config: { changed: 2 }, ...PAIR }, CTX),
     );
     expect(calls).toEqual([{ method: 'configure', args: ['demo', { changed: 2 }] }]);
-    expect(text).toContain('{"keep":1,"changed":2}'); // 合并后全量（未列出键保持）
+    expect(text).toContain('{"changed":2}'); // 本次 patch 键的合并值回显（未列出键不回显值——#38）
     expect(text).toContain('重启'); // Ring 1 分支
+  });
+
+  it('回执脱敏（基建大扫 #38）：旁路键只列键名、值永不回显——mcp env / browser apiKey 凭证位不进模型上下文与 durable', async () => {
+    // 合并基线里有秘密值（operator 手编 overlay.yaml 的常见形态）；模型只 patch 无害键
+    const { apps } = fakeManage({
+      configure: {
+        config: { servers: { prod: { env: { API_TOKEN: 'sk-live-9f2c' } } }, downloadDir: '/tmp/dl' },
+        ring1RestartRequired: false,
+      },
+    });
+    const { approval } = fakeApproval('allowed-once');
+    const text = textOf(
+      await createAppsConfigureTool(apps, approval).execute(
+        { id: 'demo', config: { downloadDir: '/tmp/dl2' }, ...PAIR },
+        CTX,
+      ),
+    );
+    expect(text).toContain('"/tmp/dl2"'); // patch 键（模型刚写的）合并值回显
+    expect(text).toContain('servers'); // 旁路键列名（operator 可见全貌）
+    expect(text).not.toContain('sk-live-9f2c'); // 旁路键的值永不回显——修前全量 JSON.stringify 必泄
   });
 });
 
