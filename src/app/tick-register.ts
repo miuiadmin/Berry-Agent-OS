@@ -31,6 +31,8 @@ import { runArgv, buildChildEnv, type CommandProcessLog } from '../exec/index.js
 import type { RunResult } from '../exec/index.js';
 import { parseSchedule, evaluateDue } from '../scheduler/index.js';
 import type { JobRecord } from '../scheduler/index.js';
+// 重放基座公式单源（20260901-d #6 勘正——与 runner 两消费面同源，勿各自内联）
+import { tickRelaunchBaseArgv } from './scheduler-runner.js';
 
 /** 注册/注销结果（人读回执直用——件面不做二次措辞） */
 export interface TickOsResult {
@@ -160,7 +162,9 @@ function tickLogPath(dataDir: string, name: string): string {
 export function createTickOsRegistrar(opts: TickOsOptions): TickOsRegistrar {
   const platform = opts.platform ?? process.platform;
   const launchAgentsDir = opts.launchAgentsDir ?? join(homedir(), 'Library', 'LaunchAgents');
-  const baseArgv = opts.baseArgv ?? [process.execPath, ...process.argv.slice(1)];
+  // 缺省基座 = 重放宿主入口三律公式（20260901-d #6 勘正——写进 plist/crontab 的
+  // 是 OS 到点调起面，宿主形态旗标/execArgv 缺失都会造出加载即死或拒启的坏注册）
+  const baseArgv = opts.baseArgv ?? tickRelaunchBaseArgv();
   const env = buildChildEnv(opts.env ?? process.env);
   const launchctlBin = opts.launchctlBin ?? 'launchctl';
   const crontabBin = opts.crontabBin ?? 'crontab';

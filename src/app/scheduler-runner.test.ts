@@ -26,15 +26,40 @@ vi.mock('../exec/index.js', async (importOriginal) => {
   return { ...actual, runArgv: (...args: unknown[]) => runArgvMock(...(args as [readonly string[], object?])) };
 });
 
-import { createTickRunner, TICK_TIMEOUT_MS } from './scheduler-runner.js';
+import { createTickRunner, TICK_TIMEOUT_MS, tickRelaunchBaseArgv } from './scheduler-runner.js';
 
 beforeEach(() => {
   runArgvMock.mockClear();
 });
 
-describe('createTickRunner：argv 公式（宿主即主入口进程假设）', () => {
-  it('基座 argv + [run, --read-only, --background, prompt] 拼尾——两形态同式', async () => {
-    // 装包（dist）形态：argv = [node, main.js]
+describe('tickRelaunchBaseArgv：重放基座公式（20260901-d #6 勘正——三律单源）', () => {
+  it('tsx dev 宿主形态：execArgv loader 随行（丢了裸 node 跑 .ts 必死 ERR_MODULE_NOT_FOUND）', () => {
+    // 真实 tsx 形状（tsx 4 实测，非旧测试的 tsx-cli 假想）：argv=[node, main.ts]、
+    // loader 两旗标挂 execArgv——原公式 argv.slice(1) 产物不带 loader，加载即死
+    const base = tickRelaunchBaseArgv(
+      ['/usr/bin/node', '/repo/src/app/main.ts'],
+      ['--require', 'tsx/dist/preflight.cjs', '--import', 'tsx/dist/loader.mjs'],
+    );
+    expect(base).toEqual([
+      '/usr/bin/node',
+      '--require',
+      'tsx/dist/preflight.cjs',
+      '--import',
+      'tsx/dist/loader.mjs',
+      '/repo/src/app/main.ts',
+    ]);
+  });
+
+  it('--port TUI 宿主形态：宿主旗标剔净（重放必撞 WEBUI_PORT_INUSE 拒启的修死）', () => {
+    const base = tickRelaunchBaseArgv(['/usr/bin/node', '/opt/berry/dist/app/main.js', '--port', '7860'], []);
+    // argv[2:] 一律不带——tick 子进程是全新单发，不继承宿主监听面/形态旗标
+    expect(base).toEqual(['/usr/bin/node', '/opt/berry/dist/app/main.js']);
+  });
+});
+
+describe('createTickRunner：argv 公式（重放基座三律）', () => {
+  it('基座 argv + [run, --read-only, --background, prompt] 拼尾（注入基座=公式产物形态）', async () => {
+    // 装包（dist）形态基座：宿主 argv=[node, main.js]、无 execArgv
     const distRunner = createTickRunner({
       dataDir: '/data',
       dbPath: '/data/sessions.db',
@@ -48,33 +73,29 @@ describe('createTickRunner：argv 公式（宿主即主入口进程假设）', (
       expect.objectContaining({ timeoutMs: TICK_TIMEOUT_MS }),
     );
 
-    // dev（tsx）形态：argv = [node, tsx-cli, main.ts]——slice(1) 重放同样成立
+    // dev（tsx）形态基座 = 公式产物（loader 随行 + 只取入口脚本）
+    const devBase = tickRelaunchBaseArgv(
+      ['/usr/bin/node', '/repo/src/app/main.ts'],
+      ['--require', 'tsx/dist/preflight.cjs', '--import', 'tsx/dist/loader.mjs'],
+    );
     const devRunner = createTickRunner({
       dataDir: '/data',
       dbPath: '/data/sessions.db',
-      baseArgv: ['/usr/bin/node', '/repo/node_modules/tsx/dist/cli.mjs', '/repo/src/app/main.ts'],
+      baseArgv: devBase,
       env: {},
     });
     await devRunner('hi');
     const argv = runArgvMock.mock.calls.at(-1)![0]!;
-    expect(argv).toEqual([
-      '/usr/bin/node',
-      '/repo/node_modules/tsx/dist/cli.mjs',
-      '/repo/src/app/main.ts',
-      'run',
-      '--read-only',
-      '--background',
-      'hi',
-    ]);
+    expect(argv).toEqual([...devBase, 'run', '--read-only', '--background', 'hi']);
   });
 
-  it('缺省基座 = [process.execPath, ...process.argv.slice(1)]（宿主主入口直读）', async () => {
+  it('缺省基座 = [execPath, ...execArgv, argv[1]]（宿主重放三律直读——旗标不随行）', async () => {
     const runner = createTickRunner({ dataDir: '/d', dbPath: '/d/x.db', env: {} });
     await runner('p');
     const argv = runArgvMock.mock.calls[0]![0]!;
     expect(argv[0]).toBe(process.execPath);
-    // 去掉尾四段（run/--read-only/--background/prompt）后，[1:] 段 = 当下 process.argv.slice(1)
-    expect(argv.slice(1, -4)).toEqual(process.argv.slice(1));
+    // 去掉尾四段（run/--read-only/--background/prompt）后恰 = [...execArgv, argv[1]]
+    expect(argv.slice(1, -4)).toEqual([...process.execArgv, process.argv[1]!]);
   });
 
   it('timeoutMs 显式覆盖（缺省 10 分钟——模型流挂死护栏）', async () => {

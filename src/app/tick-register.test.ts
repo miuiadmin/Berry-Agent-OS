@@ -17,6 +17,7 @@ import { openStore } from '../persist/index.js';
 import { collectBuiltinMigrations } from './builtins.js';
 import { createTickOsRegistrar, scheduleToLaunchd, scheduleToCronFields } from './tick-register.js';
 import type { TickOsOptions } from './tick-register.js';
+import { tickRelaunchBaseArgv } from './scheduler-runner.js';
 
 /* ---------------- 基建 ---------------- */
 
@@ -186,6 +187,37 @@ describe('OS 注册器 darwin：launchd plist 面', () => {
     const calls = readFileSync(setup.launchctl.logFile, 'utf8');
     expect(calls).toContain('load');
     expect(await setup.registrar.isRegistered('morning')).toBe(true);
+  });
+
+  it('缺省基座 = 重放三律公式（20260901-d #6）——plist ProgramArguments 逐词恰合、宿主旗标不落 OS 注册面', async () => {
+    // 不注 baseArgv——走缺省 tickRelaunchBaseArgv()；vitest 宿主 argv[2:] 常带
+    // runner 旗标（真实「带形态旗标的宿主」形态），原公式会全数写进 plist
+    const root = makeTempDir('tick-reg-def-');
+    const dataDir = join(root, 'data');
+    const launchAgentsDir = join(root, 'LaunchAgents');
+    mkdirSync(dataDir, { recursive: true });
+    const launchctl = makeFakeLaunchctl();
+    const registrar = createTickOsRegistrar({
+      dataDir,
+      dbPath: join(dataDir, 'db.sqlite'),
+      platform: 'darwin',
+      launchAgentsDir,
+      launchctlBin: launchctl.bin,
+      crontabBin: makeFakeCrontab().bin,
+    });
+    const result = await registrar.register(makeJob('default-base', 'daily@08:30'));
+    expect(result.ok).toBe(true);
+    const content = readFileSync(join(launchAgentsDir, 'tick.default-base.plist'), 'utf8');
+    // ProgramArguments 段内 <string> 段序 = argv 序（逐词断言——含 execArgv 段、剔净
+    // argv[2:]；截到下一 <key> 止——Label/EnvironmentVariables/日志路径段不混入）
+    const start = content.indexOf('<key>ProgramArguments</key>');
+    const end = content.indexOf('<key>', start + 1);
+    const argsSection = content.slice(start, end);
+    const args = [...argsSection.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]!);
+    expect(args).toEqual([...tickRelaunchBaseArgv(), 'run', '--tick', 'default-base', '--read-only', '--background']);
+    for (const hostFlag of process.argv.slice(2)) {
+      expect(args).not.toContain(hostFlag); // 宿主形态旗标永不落 OS 注册面
+    }
   });
 
   it('every 任务 → StartInterval 秒数', async () => {
