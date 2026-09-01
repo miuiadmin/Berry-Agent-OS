@@ -206,9 +206,9 @@ export function classifyGitTag(tagExists, tagSha, headSha) {
 }
 
 /** 安装占位符形态（成熟度扫描 20260901 P0-6）：README 快速开始里的仓库 URL 占位——
- *  中文三形（<仓库>/<仓库 URL>/<本仓库>）+ 外语 <repo> 形（英/西/法镜像同款）。
- *  仓转公开日回填前这些安装指引对装机用户全数 404，发布物不得带它们出门。 */
-const INSTALL_PLACEHOLDER_PATTERN = /<[^<>\n]{0,20}(仓库|repo)[^<>\n]{0,20}>/i;
+ *  中文三形（<仓库>/<仓库 URL>/<本仓库>）+ 外语 <repo>（英/西）与 <dépôt>/<ce dépôt>
+ *  （法）形。仓转公开日回填前这些安装指引对装机用户全数 404，发布物不得带它们出门。 */
+const INSTALL_PLACEHOLDER_PATTERN = /<[^<>\n]{0,20}(仓库|repo|dépôt)[^<>\n]{0,20}>/i;
 
 /**
  * publish 前置占位锚（成熟度扫描 20260901 P0-6 规范先行；**dry-run 不拦**——

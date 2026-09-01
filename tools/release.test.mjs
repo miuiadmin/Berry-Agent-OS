@@ -240,10 +240,16 @@ describe('assertNoInstallPlaceholders：发布物占位锚（真发路径 fail-l
       expect(() => assertNoInstallPlaceholders(fixtureTgz({ 'README.md': text }))).toThrow(/含安装占位符/);
     }
   });
-  it('外语 <repo> 形同拒（英/西/法镜像安装段形态）', () => {
+  it('外语 <repo>/<dépôt> 形同拒（英西 repo / 法 dépôt 与 <ce dépôt> 镜像安装段形态）', () => {
     expect(() =>
       assertNoInstallPlaceholders(fixtureTgz({ 'README.md': '# t\ncurl <repo>/install.sh | sh\n' })),
     ).toThrow(/含安装占位符/);
+    expect(() =>
+      assertNoInstallPlaceholders(fixtureTgz({ 'README.md': '# t\ncurl -fsSL <dépôt>/scripts/install.sh | sh\n' })),
+    ).toThrow(/含安装占位符/);
+    expect(() => assertNoInstallPlaceholders(fixtureTgz({ 'README.md': '# t\ngit clone <ce dépôt>.\n' }))).toThrow(
+      /含安装占位符/,
+    );
   });
   it('干净 README 放行（真实安装命令零占位）', () => {
     expect(() =>
