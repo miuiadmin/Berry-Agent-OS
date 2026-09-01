@@ -339,7 +339,9 @@ describe('/rewind 命令（两段事务 + guard 防误退）', () => {
     // 启动同会话 run，确认 running 落位后才放 guard 快照继续
     guardProbe.hook = async () => {
       void runtime.conversation!.submitOnce('窗口期新输入').catch(() => undefined);
-      await vi.waitFor(() => expect(busyFace.isBusy(oldId)).toBe(true));
+      // 显式 5s 帽：全量套件并行负载下 run 启动可超缺省 1s——waitFor 超时抛错
+      // 会让 guard 捕获腿误走「拍摄失败」路径，断言错面（钩子全量跑一次红源）
+      await vi.waitFor(() => expect(busyFace.isBusy(oldId)).toBe(true), { timeout: 5000 });
     };
     const { backend: windowBackend, notifies: windowNotifies } = recordingBackend();
     runtime.ui.attach(windowBackend);
