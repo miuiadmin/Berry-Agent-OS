@@ -329,6 +329,55 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
     await execution.dispose();
   });
 
+  it('委派工具面会话绑定（遗漏大扫 20260901-b #5 回归锁）：子内派生工具 ToolCtx.sessionId = 子会话 id', async () => {
+    // 漏传形态：工厂 ⑦ toAgentTool(def) 不带 bindOpts → 管道第 7 参缺席 →
+    // ToolCtx.sessionId = undefined → browser_* 等 per-session 语境工具全数坍缩
+    // 进 '_default' 单上下文（兄弟子代理互踩同一浏览器页签）。修复 = per-entry
+    // 携带子会话 id（与 chat/app.ts 驱动绑定同一先例）。探针经派生腿进子工具面，
+    // 真实执行捕获语境值断言。
+    const { streamFn } = scriptedStream([toolCallMessage('probe_sid', {}), textMessage('子答')]);
+    const rootCtx: ContextScope = createContext({ name: 'subagent-factory-sid' });
+    const parentTools = registerToolsService(rootCtx, {});
+    /** 探针观测面：子内执行时捕获 ToolCtx.sessionId */
+    const seen: Array<string | undefined> = [];
+    parentTools.register({
+      name: 'probe_sid',
+      description: '会话绑定探针（捕获 ToolCtx.sessionId——read 过守门无需审批）',
+      parameters: { type: 'object', properties: {}, required: [] },
+      effect: 'read',
+      execute: async (_args, tctx) => {
+        seen.push(tctx.sessionId);
+        return { content: [{ type: 'text', text: '已记录' }] };
+      },
+    });
+    /** 委派子会话 id 观测（session_start delegation 载荷——工厂 ⑥ 同源单发） */
+    let childSessionId = '';
+    rootCtx.on('session_start', (payload: unknown) => {
+      const p = payload as { sessionId: string; origin: string };
+      if (p.origin === 'delegation') childSessionId = p.sessionId;
+    });
+    const factory = createSubagentChildFactory({
+      getParent: () => undefined,
+      streamFn,
+      model: 'test/model',
+      convertToLlm: defaultConvertToLlm,
+      workspace: makeTempDir('app-subplug-sid-'),
+      sandboxMode: 'workspace-write',
+      rootCtx,
+      gateRowFilter: { anchors: [], mainRows: () => new Set<string>() },
+    });
+    const provider = createInProcessProvider({ factory });
+    const execution = provider.start({ prompt: '带探针的任务' });
+    const result = await execution.result;
+    expect(result.stopReason).toBe('completed');
+    // 探针经派生腿进子工具面并被真实调用（无父诊断面 = list() 全局层同口径）
+    expect(seen).toHaveLength(1);
+    // 绑定成立：捕获值 = 子会话 id（漏传形态此值为 undefined——修复前必红）
+    expect(seen[0]).toBe(childSessionId);
+    expect(childSessionId).not.toBe('');
+    await execution.dispose();
+  });
+
   /* ---------------- 声明式子代理（agents/*.md——尾刀三） ---------------- */
 
   /** 声明式 fixture 目录：一份好文件 + 三份边界文件（坏 YAML/撞内建名/非法工具名） */

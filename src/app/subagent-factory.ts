@@ -253,7 +253,11 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
           {
             systemPrompt: request.persona ?? DEFAULT_CHILD_PROMPT,
             messages: seedMessages,
-            tools: tools.list().map((def) => tools.toAgentTool(def)),
+            // 会话绑定（遗漏大扫 20260901-b #5）：委派工具面 per-entry 携带子会话
+            // id——透传管道第 7 参落 ToolCtx.sessionId（per-session 语境工具如
+            // browser_* 的路由键；漏传则全部坍缩进 '_default' 单上下文，兄弟子代理
+            // 互踩同一浏览器上下文）。绑定面与 chat/app.ts:1210 同一先例。
+            tools: tools.list().map((def) => tools.toAgentTool(def, { sessionId: session.header.sessionId })),
           },
           { streamFn: deps.streamFn, model: request.model ?? deps.model, convertToLlm: deps.convertToLlm },
           {
