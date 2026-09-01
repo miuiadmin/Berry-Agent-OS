@@ -218,7 +218,7 @@ npm run lint:topology     # 模块 DAG + 事件词汇双向门禁
 npm run format:check      # Prettier
 ```
 
-四门禁全绿是提交的前提。贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+四门禁全绿是提交的前提。贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)；安全问题请走私下披露（[SECURITY.md](SECURITY.md)），勿开公开 issue。
 
 ## 许可证
 

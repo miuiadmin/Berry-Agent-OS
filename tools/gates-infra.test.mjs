@@ -133,3 +133,24 @@ test('package-lock 与 package.json 名字同步（成熟度扫描 20260901 P0-1
   assert.equal(lock.name, pkg.name, 'lockfile 顶层 name 与 package.json 漂移');
   assert.equal(lock.packages?.['']?.name, pkg.name, 'lockfile packages[""].name 与 package.json 漂移');
 });
+
+test('公开仓配套面三件在场（成熟度扫描 20260901 P0-2）', () => {
+  // SECURITY.md：披露唯一渠道 = GitHub private vulnerability reporting，不设公开
+  // 邮箱（防捏造/失效——渠道单源 GitHub 后台功能，转公开后在后台开启）
+  const security = readFileSync(join(repoRoot, 'SECURITY.md'), 'utf8');
+  assert.ok(
+    /[Pp]rivate vulnerability reporting/.test(security),
+    'SECURITY.md 须指明 GitHub private vulnerability reporting 披露渠道',
+  );
+  assert.ok(
+    !/[\w.+-]+@[\w-]+\.[\w.]+/.test(security),
+    'SECURITY.md 不设公开邮箱（渠道单源 GitHub，防捏造/失效）',
+  );
+  // CODEOWNERS：单维护者档
+  const owners = readFileSync(join(repoRoot, 'CODEOWNERS'), 'utf8');
+  assert.ok(/^\* @miuiadmin\s*$/m.test(owners), 'CODEOWNERS 须为「* @miuiadmin」单维护者档');
+  // bug report 模板：复现段 + doctor 诊断指引
+  const template = readFileSync(join(repoRoot, '.github/ISSUE_TEMPLATE/bug_report.md'), 'utf8');
+  assert.ok(template.includes('复现'), 'bug_report 模板须含复现步骤段');
+  assert.ok(template.includes('doctor'), 'bug_report 模板须引导附 doctor 诊断输出');
+});
