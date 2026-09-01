@@ -523,6 +523,24 @@ describe('ConversationDriver 溢出兜底（第四十五批 compact-and-retry-on
   /** 溢出错误终态工厂（isOverflowError 判据：文案含 overflow-mark——非 transient 桶互斥） */
   const overflowError = (text = 'context window exceeded') => errorAssistant(`overflow-mark: ${text}`);
 
+  /** length 零输出终态工厂（isContextOverflow Case 3 形态：input 填满窗 ×0.99 以上 + 零产出——静默截断型溢出的失败终态轮） */
+  const lengthOverflow = (): AssistantMessage => ({
+    role: 'assistant',
+    content: [],
+    usage: { input: 99_500, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 99_500 },
+    stopReason: 'length',
+    timestamp: 1,
+  });
+
+  /** 静默溢出成功轮工厂（isContextOverflow Case 2 形态：正常停 + input 严格超窗——成功轮，分诊红线：不进恢复） */
+  const silentOverflow = (text: string): AssistantMessage => ({
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    usage: { input: 120_000, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 120_005 },
+    stopReason: 'stop',
+    timestamp: 1,
+  });
+
   /** 压缩面 stub：按序弹结果 + 调用计数（可选 gate 手动放行——abort 窗制造） */
   function compactionStub(results: Array<'compacted' | 'nothing' | 'failed'>) {
     const calls: Array<'compacted' | 'nothing' | 'failed'> = [];
@@ -651,6 +669,70 @@ describe('ConversationDriver 溢出兜底（第四十五批 compact-and-retry-on
     const facts = session.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
     expect(facts.map((d) => d.phase)).toEqual(['scheduled', 'exhausted']);
     expect(facts[1]!.reason).toBe('overflow');
+  });
+
+  it('length 零输出（触发面分诊 Case 3）：失败终态轮进恢复——五步全走 + 遮蔽零输出 assistant + 续入成功', async () => {
+    const comp = compactionStub(['compacted']);
+    const { driver, session, calls } = makeRetryDriver([lengthOverflow(), okAssistant('恢复')], {
+      // 判定器镜像 deps.isOverflowError 的 Case 3 形（携窗确认 length+零产出）
+      isOverflowError: (m) => m.stopReason === 'length' && m.usage.output === 0,
+      resolveCompaction: comp.resolveCompaction,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    expect(calls).toHaveLength(2); // 首轮零产出 + 压缩后续入一次成功
+    expect(settled).toEqual(['completed']); // 恢复成功即正常结算
+    expect(comp.results).toEqual(['compacted']); // 压缩面恰一次调用
+    const facts = session.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
+    expect(facts[0]).toMatchObject({ phase: 'scheduled', attempt: 1, maxAttempts: 1, delayMs: 0, reason: 'overflow' });
+    // 零输出 assistant 已遮蔽——投影唯一 assistant 是续入成功轮
+    const roles = projectedToAgentMessages(session.deriveMessages())
+      .map((m) => ('role' in m ? (m as { role: string }).role : '?'))
+      .filter((r) => r !== '?');
+    expect(roles).toEqual(['user', 'assistant']);
+  });
+
+  it('静默溢出（触发面分诊 Case 2）：成功轮不进恢复——判定器确认也不遮蔽不压缩（阈值路辖区）', async () => {
+    const comp = compactionStub(['compacted']);
+    const { driver, session, calls } = makeRetryDriver([silentOverflow('满窗回答')], {
+      isOverflowError: () => true, // 判定器三路能力面在场且恒确认——分诊闸仍须拒成功轮
+      resolveCompaction: comp.resolveCompaction,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    expect(calls).toHaveLength(1); // 无续入
+    expect(comp.results).toEqual([]); // 压缩面零调用
+    expect(session.events.filter((e) => e.type === 'llm/retry')).toHaveLength(0); // 零恢复事实落账
+    expect(settled).toEqual(['completed']); // 成功轮原样结算
+    // 成功 assistant 原样保留（分诊红线的对价面：遮蔽成功轮 = 把已交付回答从投影抹掉）
+    const assistants = projectedToAgentMessages(session.deriveMessages()).filter(
+      (m) => 'role' in m && (m as { role: string }).role === 'assistant',
+    );
+    expect(assistants).toHaveLength(1);
+  });
+
+  it('length 恢复失败（nothing）：exhausted 落账 + 终态改写 failed——零产出轮不冒充 completed', async () => {
+    const comp = compactionStub(['nothing']);
+    const { driver, session } = makeRetryDriver([lengthOverflow()], {
+      isOverflowError: (m) => m.stopReason === 'length' && m.usage.output === 0,
+      resolveCompaction: comp.resolveCompaction,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    // loop 状态推导把 length 归 completed——恢复失败收尾由驱动按 #3 拍板改写 failed
+    expect(settled).toEqual(['failed']);
+    const facts = session.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
+    expect(facts.map((d) => d.phase)).toEqual(['scheduled', 'exhausted']);
+    expect(facts[1]).toMatchObject({ attempt: 1, maxAttempts: 1, reason: 'overflow' });
   });
 
   it('双缺省直通：无判定器/无压缩面注入——单次调用直通失败零落账（诊断装配形态）', async () => {

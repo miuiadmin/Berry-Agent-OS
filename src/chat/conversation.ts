@@ -816,6 +816,10 @@ export class ConversationDriver {
         // 保留呈现（未遮蔽）+ exhausted 落账（第四十五批步 5）
         if (overflowRecovered) {
           this.appendRetryFact(1, 0, 'exhausted', errorMessage, 'overflow');
+          // length 零输出形态的恢复失败收尾改写 failed（loop 把 length 归
+          // completed——零产出轮不冒充 completed，20260901-d #3；error 形态
+          // 本就 failed，改写无行为变更）
+          result = { ...result, status: 'failed' };
           break;
         }
         // 名额即取（「压缩→请求→再溢出→再压缩」循环结构性不存在——请求侧防死循环）
@@ -831,8 +835,10 @@ export class ConversationDriver {
         this.reseedTimelineFromProjection();
         if (compacted !== 'compacted') {
           // 'nothing'（planSegment null——压缩救不了）/ 'failed'（摘要抛错已落
-          // compaction/failed reason='overflow'）= 恢复失败诚实 error 收尾（不续入）
+          // compaction/failed reason='overflow'）= 恢复失败诚实 error 收尾（不续入）；
+          // length 形态同笔改写 failed（零产出轮不冒充 completed——#3 拍板）
           this.appendRetryFact(1, 0, 'exhausted', errorMessage, 'overflow');
+          result = { ...result, status: 'failed' };
           break;
         }
         // 续入前查信号：恢复期被取消即 aborted 收场（S6 形态③ 统一终态面）
@@ -862,14 +868,19 @@ export class ConversationDriver {
    * 溢出恢复门判（第四十五批——门三道 + 桶判定；压缩面在场由调用位第四道
    * 惰性解析承担）：策略开（错误恢复总开关——关 = transient 重试与溢出恢复
    * 一起直通）+ session 在场（遮蔽与落账是构成要件，同 transient 腿）+
-   * 判定器在场（缺省恒 false——诊断装配形态直通）+ 末消息 assistant error
+   * 判定器在场（缺省恒 false——诊断装配形态直通）+ 末消息 assistant 终值
    * 归 overflow 桶（携当轮效值模型——窗口活取，桶互斥即腿互斥）。旗标名额
    * （retry-once）不在此判——由调用部位的 runWithRetry 局部旗标承担。
+   *
+   * 触发面分诊（20260901-d #3）：恢复循环只认**失败终态轮**——error 正则路与
+   * length 零输出路两形（零产出即失败，恢复语义同构）；静默溢出（stop 停）是
+   * 成功轮不进恢复——归阈值路先手 + 次轮失败自愈（遮蔽成功 assistant 是破坏
+   * 动作）。isContextOverflow 三路是判定器能力面，不是触发器。
    */
   private shouldOverflowRecover(result: RunResult): boolean {
     if (!this.retryPolicy.enabled || this.session === undefined) return false;
-    if (result.stopReason !== 'error') return false;
-    const last = this.lastAssistantError(result);
+    if (result.stopReason !== 'error' && result.stopReason !== 'length') return false;
+    const last = this.lastAssistantForOverflow(result);
     return last !== undefined && this.isOverflowError(last, this.config.model);
   }
 
@@ -891,6 +902,18 @@ export class ConversationDriver {
     const last = result.messages[result.messages.length - 1];
     if (last === undefined || last.role !== 'assistant' || !('stopReason' in last)) return undefined;
     return last.stopReason === 'error' ? last : undefined;
+  }
+
+  /**
+   * 末消息是否 assistant 溢出终值两形（触发面分诊 20260901-d #3）：error 终态
+   * （正则路）或 length 终态（零输出路——零产出即失败终态）。最终归不归溢出桶
+   * 由 deps 判定器携窗口确认（length 有输出的正常截断会被判定器拒——不进恢复）。
+   * 与 lastAssistantError（transient 腿专用 error 单形）分立：两腿判据面不同款。
+   */
+  private lastAssistantForOverflow(result: RunResult): AssistantMessage | undefined {
+    const last = result.messages[result.messages.length - 1];
+    if (last === undefined || last.role !== 'assistant' || !('stopReason' in last)) return undefined;
+    return last.stopReason === 'error' || last.stopReason === 'length' ? last : undefined;
   }
 
   /** 末条错误说明提取（llm/retry 载荷的 errorMessage 腿） */
