@@ -150,3 +150,50 @@ describe('CLI 分派：--app-file 缺值空串占位（20260901-c #14）', () =>
     expect(vi.mocked(runOnceMain)).not.toHaveBeenCalled();
   });
 });
+
+/* ---------------- #31：未知 APP_ 环境变量提示（基建大扫） ---------------- */
+
+describe('CLI 入口：未知 APP_ 环境变量提示（基建大扫 #31）', () => {
+  /** 纯函数直调断言（词表/告警文案面）——不依赖分派 */
+  it('拼错键点名告警；词表内与宿主注入 APP_SESSION_ID 零告警', async () => {
+    const { warnUnknownAppEnvVars } = await import('./main.js');
+    // 拼错键（APP_DAT_DIR ≠ APP_DATA_DIR）+ 无关键混排 → 一行点名
+    const lines: string[] = [];
+    warnUnknownAppEnvVars(
+      { APP_DAT_DIR: '/x', APP_MODEL: 'm', APP_SESSION_ID: 's1', PATH: '/bin' } as NodeJS.ProcessEnv,
+      (l) => lines.push(l),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('APP_DAT_DIR');
+    expect(lines[0]).not.toContain('APP_MODEL');
+    expect(lines[0]).not.toContain('APP_SESSION_ID');
+    // 词表全键 + 宿主注入位 → 零输出
+    const quiet: string[] = [];
+    warnUnknownAppEnvVars(
+      {
+        APP_MODEL: 'm',
+        APP_DATA_DIR: '/d',
+        APP_DB_PATH: '/d/s.db',
+        APP_LOG_LEVEL: 'info,session:debug',
+        APP_FD_PATH: '/fd',
+        APP_BASH_PATH: '/bash',
+        APP_BROWSER_PATH: '/chrome',
+        APP_SESSION_ID: 's1',
+      } as NodeJS.ProcessEnv,
+      (l) => quiet.push(l),
+    );
+    expect(quiet).toHaveLength(0);
+  });
+
+  it('真分派织入：boot 期告警达 stderr 且不拦启动（退出码不受影响）', async () => {
+    process.env['APP_DAT_DIR'] = '/typo'; // 拼错键——分派前置注入
+    try {
+      const { code, stderr } = await dispatch(['run', 'hi']);
+      expect(code).toBe(0); // 不硬拒：前向兼容，行为照常
+      expect(stderr).toContain('APP_DAT_DIR');
+      expect(stderr).toContain('berry --help');
+    } finally {
+      delete process.env['APP_DAT_DIR'];
+    }
+  });
+});

@@ -249,6 +249,39 @@ function parsePortValue(value: string): number | undefined {
 }
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
+/**
+ * 已知 APP_ 环境变量词表（基建大扫 #31）——与 docs/使用指南.md §5 表同源，
+ * 新增配置变量须两处同步。`APP_SESSION_ID` 在列但属宿主注入位（exec/env.ts
+ * hostInjectRecord 单源——宿主向子进程披露当前会话 id 的运行时数据值，非用户
+ * 配置面），列入为的是注入场景（bash 工具子进程再起 berry）不误报。
+ */
+const KNOWN_APP_ENV_VARS = new Set([
+  'APP_MODEL', // 覆盖缺省模型
+  'APP_DATA_DIR', // 覆盖 ~/.berry 数据目录
+  'APP_DB_PATH', // 覆盖 SQLite 库文件路径
+  'APP_LOG_LEVEL', // 日志级别（支持逗号分模块调级，logger 模块）
+  'APP_FD_PATH', // @ 文件段 fd 补全路径
+  'APP_BASH_PATH', // bash 工具可执行路径
+  'APP_BROWSER_PATH', // 浏览器引擎可执行路径
+  'APP_SESSION_ID', // 宿主注入（非用户配置面）——豁免告警
+]);
+
+/**
+ * 未知 APP_ 环境变量提示（基建大扫 #31）：拼错（如 APP_DAT_DIR）会静默无效——
+ * 比启动失败更糟（配置意图无声丢失）。boot 期 stderr 一行点名全部未知键，
+ * 不硬拒（前向兼容：旧版本遇到新版本新增变量只提示不炸，行为不变）。
+ * 导出为可注入纯函数供测试直调（env/write 双注入面）。
+ */
+export function warnUnknownAppEnvVars(
+  env: NodeJS.ProcessEnv = process.env,
+  write: (line: string) => void = (line) => process.stderr.write(line),
+): void {
+  const unknown = Object.keys(env).filter((key) => key.startsWith('APP_') && !KNOWN_APP_ENV_VARS.has(key));
+  if (unknown.length > 0) {
+    write(`[env] 未识别的 APP_ 环境变量：${unknown.join(', ')}（可能拼错或不被本版本支持；已知变量见 berry --help）\n`);
+  }
+}
+
 function main(argv: string[]): number {
   const {
     command,
@@ -265,6 +298,9 @@ function main(argv: string[]): number {
     appFile,
     unknownFlags,
   } = parseArgs(argv);
+
+  // 未知 APP_ 变量提示（基建大扫 #31）：boot 期一次、全命令族统一
+  warnUnknownAppEnvVars();
 
   const run = async (): Promise<number> => {
     // 未识别 `--` 旗标闸（20260901-c #1，技术栈篇 §5「CLI 解析面执法四律」①）：

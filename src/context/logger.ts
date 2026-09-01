@@ -7,6 +7,12 @@
  *
  * 纪律红线（技术栈篇 §6）：只在 debug 出现的分支，其行为必须同时是 durable 事件
  * 或运行时断言——「看不见的 bug」不允许靠进程日志独扛。
+ *
+ * 阈值盒模型（2026-09-01 基建大扫 #2/#4）：阈值不存 logger 自身闭包，存共享可变盒
+ * { value }——同盒树（默认层全体 / 命中同一 env 条目的模块子树）的 logger 持同一
+ * 盒引用，setLevel 改盒值即全树即时生效。child 不入登记表：旧 children 登记表
+ * 只增不减 = daemon 热路径 scope.fork 派生的 child 永不注销的慢性泄漏；改盒后
+ * child 持父盒引用，弃用后 GC 自然回收（WeakRef 探针回归锁钉扎，#2）。
  */
 
 /** 日志级别（silent 用于整体关闭，如测试与工具进程） */
@@ -18,33 +24,103 @@ const LEVEL_WEIGHT: Record<LogLevel, number> = { silent: -1, error: 0, warn: 1, 
 /** 上下文附加字段（任意 JSON 可序列化键值） */
 export type LogFields = Record<string, unknown>;
 
+/**
+ * 阈值盒：logger 树共享的可变阈值容器。同盒 = 同调级命运——setLevel 改盒值，
+ * 持该盒的全体 logger（自身 + 派生 child + 同 env 条目命中的其他 logger）即时
+ * 生效，无需级联遍历（旧 children 登记表方案废除，基建大扫 #2）。
+ */
+export interface ThresholdBox {
+  /** 当前阈值（同盒全体实时读——write 过滤时取值，非创建时快照） */
+  value: LogLevel;
+}
+
 /** logger 接口（ctx.logger 的类型；应用拿到的是带自身前缀的 child） */
 export interface Logger {
   error(message: string, fields?: LogFields): void;
   warn(message: string, fields?: LogFields): void;
   info(message: string, fields?: LogFields): void;
   debug(message: string, fields?: LogFields): void;
-  /** 派生带前缀的子 logger（前缀以 ':' 级联，如 root → 'session' → 'session:flush'） */
+  /** 派生带前缀的子 logger（前缀以 ':' 级联，如 root → 'session' → 'session:flush'）。
+   *  盒沿树传递：child 的完整模块名命中 env override 条目时持该条目盒，否则持父盒
+   *  ——同盒即同调级命运，父 setLevel 后随之；弃用后 GC 自然回收（不入登记表）。 */
   child(prefix: string): Logger;
-  /** 运行时调整本 logger 阈值（进程日志的调级面；durable/活体两层不受影响） */
+  /** 调整本 logger 所在盒——同盒树全体即时生效（进程日志的调级面；durable/活体两层
+   *  不受影响）。显式传 level 构造的 logger 持独立盒：调级只达自身及其派生。 */
   setLevel(level: LogLevel): void;
 }
 
-/** 默认级别解析：APP_LOG_LEVEL 环境变量 > 缺省 info（技术栈篇 §6，2026-09-01 第五
- * 十七批勘正：生产判定弃 NODE_ENV——全仓无设置路径的死概念；发布物即生产，缺省
- * info，开发经 dev 脚本尾挂 --debug 提级。无效值不静默：bootstrapping 阶段
- * logger 尚未定级（进程日志面自身不可用），警告直写 stderr 后落缺省——拼错/
- * 大小写错误若静默吞，降噪意图会静默失效（设 WARN 反落更吵的档）。 */
-function defaultLevel(): LogLevel {
-  const fromEnv = process.env['APP_LOG_LEVEL'];
-  if (fromEnv !== undefined) {
-    if (fromEnv in LEVEL_WEIGHT) return fromEnv as LogLevel;
-    process.stderr.write(
-      `[logger] APP_LOG_LEVEL="${fromEnv}" 不是有效级别（error/warn/info/debug/silent），已回落缺省 info\n`,
-    );
-    return 'info';
+/** 级别配置解析结果：全局档盒 + per-module 条目盒池 */
+interface LevelConfig {
+  /** 全局档盒：env 无 override 命中的 logger 全体共享（root 树默认层） */
+  globalBox: ThresholdBox;
+  /** per-module 条目盒池（插入序即匹配优先序；同条目命中的 logger 共享同一盒） */
+  boxes: Map<string, ThresholdBox>;
+}
+
+/** 有效级别闭集（警告文案用——与无效值警告 #5 同族同串） */
+const VALID_LEVELS = 'error/warn/info/debug/silent';
+
+/**
+ * 解析 APP_LOG_LEVEL 逗号分模块语法（技术栈篇 §6「按模块调级语法」，2026-09-01
+ * 第五十七批落地形态）：
+ * - 形态一：纯级别串（"debug"）= 全局档——与历史行为一致；
+ * - 形态二：逗号条目，"module:level" 按 lastIndexOf(':') 切分（模块名自身含冒号
+ *   的嵌套前缀如 "context:app:debug" 可表达）；纯级别条目出现在任何位置都刷新
+ *   全局档（后见胜——"info,session:debug,debug" 全局终值 debug）。
+ * 无效条目不静默（与 #5 同原则）：stderr 一行警告后跳过该条目，不连坐其他条目
+ * 与全局档；空条目（尾逗号/连续逗号）无害静默跳过。bootstrapping 阶段 logger
+ * 尚未定级，警告直写 stderr。
+ */
+function parseLevelConfig(raw: string): LevelConfig {
+  const boxes = new Map<string, ThresholdBox>();
+  /** 全局档（无任何有效纯级别条目时保持平台缺省 info） */
+  let globalValue: LogLevel = 'info';
+  for (const tokenRaw of raw.split(',')) {
+    const token = tokenRaw.trim();
+    if (!token) continue;
+    const idx = token.lastIndexOf(':');
+    if (idx === -1) {
+      // 纯级别条目：全局档（任何位置都认，后见胜）
+      if (token in LEVEL_WEIGHT) globalValue = token as LogLevel;
+      else process.stderr.write(`[logger] APP_LOG_LEVEL="${token}" 不是有效级别（${VALID_LEVELS}），已跳过\n`);
+      continue;
+    }
+    const mod = token.slice(0, idx);
+    const lvl = token.slice(idx + 1);
+    if (!mod || !(lvl in LEVEL_WEIGHT)) {
+      // "session:"（级别空）或 ":debug"（模块名空）或级别拼错——条目级警告跳过
+      process.stderr.write(
+        `[logger] APP_LOG_LEVEL 条目 "${token}" 形如 module:level 但模块名为空或级别无效（${VALID_LEVELS}），已跳过\n`,
+      );
+      continue;
+    }
+    boxes.set(mod, { value: lvl as LogLevel });
   }
-  return 'info';
+  return { globalBox: { value: globalValue }, boxes };
+}
+
+/** env 解析缓存（按原串缓存）：env 中途变化的测试形态自动失效重解析；同串期间
+ *  child() 热路径只查 Map 不重复解析切分。进程级单例是盒池语义的前提——每次
+ *  新建盒则「同条目命中者同盒」破裂（setLevel 不互通）。 */
+let levelCache: { raw: string | undefined; config: LevelConfig } | null = null;
+
+/** 取当前 env 的级别配置（无 env 时等价 "info"：全局 info 空条目池） */
+function levelConfig(): LevelConfig {
+  const raw = process.env['APP_LOG_LEVEL'];
+  if (!levelCache || levelCache.raw !== raw) {
+    levelCache = { raw, config: parseLevelConfig(raw ?? 'info') };
+  }
+  return levelCache.config;
+}
+
+/** env override 盒匹配：module === key 或前缀级联命中（'session' 条目命中
+ *  'session' 与 'session:flush'）。多条目命中取先见——条目顺序即优先序
+ *  （精确档写在前可覆盖宽档，如 "session:flush:info,session:debug"）。 */
+function matchModuleBox(module: string): ThresholdBox | undefined {
+  for (const [key, box] of levelConfig().boxes) {
+    if (module === key || module.startsWith(key + ':')) return box;
+  }
+  return undefined;
 }
 
 /** 单行输出目标（默认 stderr；测试注入内存 sink 用） */
@@ -53,18 +129,25 @@ export type LogSink = (line: string) => void;
 /**
  * 创建一个 logger。
  * @param opts.module 模块前缀（如 'session' / 'context:app:memory'）
- * @param opts.level  初始阈值，缺省走 defaultLevel()
+ * @param opts.level  显式初始阈值 = 独立盒（不与树共享，env override 亦不生效——
+ *                    测试注入语义：同文件内多 logger 互不串扰）
  * @param opts.sink   输出行目标，缺省 process.stderr
+ * @param opts.box    内部接线位（child() 传父盒/命中盒用；外部勿传）
  */
-export function createLogger(opts: { module?: string; level?: LogLevel; sink?: LogSink } = {}): Logger {
+export function createLogger(
+  opts: { module?: string; level?: LogLevel; sink?: LogSink; box?: ThresholdBox } = {},
+): Logger {
   const module = opts.module ?? 'app';
   const sink = opts.sink ?? ((line) => process.stderr.write(line + '\n'));
-  let threshold = opts.level ?? defaultLevel();
-  /** 子 logger 登记表（setLevel 沿子树级联用；child 创建时登记，2026-08-23 独立重读轮 #23 落码） */
-  const children: Logger[] = [];
+  // 盒决定序：内部接线盒 > 显式 level 独立盒 > env override 命中盒 > 全局档盒
+  //（child 的 override 判定在 child() 内做——命中时传命中盒进来，此处自然最优先）
+  const box: ThresholdBox =
+    opts.box ??
+    (opts.level !== undefined ? { value: opts.level } : (matchModuleBox(module) ?? levelConfig().globalBox));
 
   const write = (level: LogLevel, message: string, fields?: LogFields): void => {
-    if (LEVEL_WEIGHT[level]! > LEVEL_WEIGHT[threshold]!) return;
+    // 盒值实时读：同盒任何成员 setLevel 后，本 logger 的过滤立即随之
+    if (LEVEL_WEIGHT[level]! > LEVEL_WEIGHT[box.value]!) return;
     // 结构化 JSON 行：time/level/module/msg 平铺，fields 顶展（一级平铺够诊断用，不嵌套）
     const line = JSON.stringify({ time: new Date().toISOString(), level, module, msg: message, ...fields });
     sink(line);
@@ -76,16 +159,13 @@ export function createLogger(opts: { module?: string; level?: LogLevel; sink?: L
     info: (m, f) => write('info', m, f),
     debug: (m, f) => write('debug', m, f),
     child: (prefix) => {
-      // 子 logger 继承创建时刻的阈值快照 + 登记进子树表（此后父 setLevel 会级联覆盖）
-      const child = createLogger({ module: `${module}:${prefix}`, level: threshold, sink });
-      children.push(child);
-      return child;
+      // child 盒判定：完整模块名（前缀级联后）命中 env override → 持命中盒；
+      // 否则持父盒（同盒 = 父调级随之；无登记表，弃用后 GC 自然回收——#2）
+      const full = `${module}:${prefix}`;
+      return createLogger({ module: full, sink, box: matchModuleBox(full) ?? box });
     },
     setLevel: (level) => {
-      threshold = level;
-      // 沿子树级联：运行时调级必须达全部派生 logger——不级联则调级后应用日志
-      // 仍按创建时的旧阈值过滤（技术栈篇拍板的运维调级面，应用 logger 必须随调）
-      for (const child of children) child.setLevel(level);
+      box.value = level;
     },
   };
 }
