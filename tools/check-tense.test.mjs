@@ -50,9 +50,22 @@ beforeAll(() => {
   writeFileSync(join(fixtureRoot, 'README.md'), ['# 夹具', '', '已落码 `src/never-zh.md`。', ''].join('\n'));
   writeFileSync(join(fixtureRoot, 'README.en.md'), ['# fixture', '', '已落码 `src/never-en.ts`。', ''].join('\n'));
   // 规则 1 对照锚 ROOT 上的 git log——夹具需 ≥1 笔 commit（无 commit 时 git log
-  // 非零退出使 execFileSync 抛错，夹具即废）；-c 注入身份防全局配置缺省拦截
+  // 非零退出使 execFileSync 抛错，夹具即废）；-c 注入身份防全局配置缺省拦截。
+  // env 密封：`git commit -- <pathspec>` 给 pre-commit 钩子导出 GIT_INDEX_FILE=
+  // 临时索引（绝对路径）等 git 定位变量——泄漏进夹具会让夹具的 git 读写真仓
+  // 索引（tree 构建混两仓对象库 → invalid object 崩夹具，本测文件级红）。
+  // 夹具仓自足，一律剥净 git 定位变量（第五十三批刀五提交链实证）。
+  const fixtureEnv = { ...process.env };
+  delete fixtureEnv.GIT_DIR;
+  delete fixtureEnv.GIT_INDEX_FILE;
+  delete fixtureEnv.GIT_WORK_TREE;
+  delete fixtureEnv.GIT_OBJECT_DIRECTORY;
+  delete fixtureEnv.GIT_CEILING_DIRECTORIES;
   const git = (args) =>
-    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd: fixtureRoot });
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], {
+      cwd: fixtureRoot,
+      env: fixtureEnv,
+    });
   git(['init', '-q']);
   git(['add', 'AGENTS.md']);
   git(['commit', '-qm', 'fixture']);
