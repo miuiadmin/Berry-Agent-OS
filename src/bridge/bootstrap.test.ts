@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
-import { createContext } from '../context/context.js';
+import { createContext, registerLiveEvent } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
 import { chainCaller } from '../context/chain.js';
 import { loadApps } from '../context/loader.js';
@@ -29,6 +29,7 @@ import {
   workerEntryUrl,
   registerHostHandlers,
   type WorkerDomain,
+  type RowBinding,
 } from './bootstrap.js';
 import { BridgeEndpoint } from './session.js';
 
@@ -318,16 +319,21 @@ describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收�
    */
   function setupHandlers() {
     const handlers = new Map<string, (frame: unknown[], signal?: AbortSignal) => unknown>();
-    // 假端点：handle 记入表后链式返回（BridgeEndpoint 结构面的测试替身）
+    // 宿主出站 tell 记录（evt 转发扇出数的断言面——O-1 宿主半观测位）
+    const tells: Array<{ event: string; payload: unknown }> = [];
+    // 假端点：handle 记入表后链式返回；tell 记出站帧（BridgeEndpoint 结构面的测试替身）
     const fakeEndpoint = {
       handle(service: string, method: string, fn: (frame: unknown[], signal?: AbortSignal) => unknown) {
         handlers.set(`${service}.${method}`, fn);
         return fakeEndpoint;
       },
+      tell(event: string, payload: unknown) {
+        tells.push({ event, payload });
+      },
     };
     const root = createContext({ name: 'bridge-host-handlers-test' });
     const tools = new FakeTools();
-    const bindings = new Map<string, { scope: ContextScope }>();
+    const bindings = new Map<string, RowBinding>();
     registerHostHandlers({
       endpoint: fakeEndpoint as unknown as BridgeEndpoint,
       workerId: 'unit-host',
@@ -337,7 +343,7 @@ describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收�
       root,
       tools: tools as unknown as ToolsService,
     });
-    return { handlers, root, tools, bindings };
+    return { handlers, root, tools, bindings, tells };
   }
 
   it('svc-invoke / tool-run 伪造行 id 拒绝（R1 绑定验）：跨墙 rowId 是自报值——无宿主绑定即拒（防归因身份伪造，宪章八）', async () => {
@@ -362,7 +368,7 @@ describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收�
     const svcInvoke = handlers.get('host.svc-invoke')!;
     // 合法绑定行（过绑定验后仍拒——本闸在 name 分派层，与绑定验正交）
     const scope = root.fork({ name: 'w-sd', rowId: 'w-sd', builtinRow: false });
-    bindings.set('w-sd', { scope });
+    bindings.set('w-sd', { scope, forwardedEvents: new Map() });
     // 修复前：nameArg='tools' 直落 root.get('tools') 拿真 ToolsService →
     // executor 可被直调（toolCallId/origin/def 全自报绕三段管道）
     const refused = await rejection(Promise.resolve().then(() => svcInvoke(['w-sd', 'tools', 'executor', [{}]])));
@@ -376,7 +382,7 @@ describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收�
     const toolRun = handlers.get('host.tool-run')!;
     // 行绑定先行（applyRow 语义的最小形——scope fork 即行锚，绑定簿登记）
     const scope = root.fork({ name: 'w9', rowId: 'w9', builtinRow: false });
-    bindings.set('w9', { scope });
+    bindings.set('w9', { scope, forwardedEvents: new Map() });
     // 宿主侧注册目标工具（tool-run 的 def 解析源；execute 直调哨兵——修复前
     // 直调 def.execute 会拿到它）
     tools.register({
@@ -417,7 +423,7 @@ describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收�
     // 第三方行绑定（跨墙 rowId 是自报值——sub/emit 落点 = binding.scope 行作用域，
     // 行籍由 loader 注入；此处按第三方行真实形态 builtinRow: false 构造）
     const third = root.fork({ name: 'w-u1', rowId: 'w-u1', builtinRow: false });
-    bindings.set('w-u1', { scope: third });
+    bindings.set('w-u1', { scope: third, forwardedEvents: new Map() });
     // sub 保留词：on() 在行作用域抛（修复前：第三方 worker 行经桥订阅审批决议位/
     // 工具瀑布——跨进程面零身份判据）
     const refusedSub = await rejection(Promise.resolve().then(() => sub(['w-u1', 'approval/answer'])));
@@ -427,9 +433,42 @@ describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收�
     expect(refusedEmit.code).toBe('EVENT_HOST_RESERVED');
     // 差分锚：官方名位行（builtinRow: true——承袭官方 id 的替换行形态）同帧照过
     const official = root.fork({ name: 'w-off', rowId: 'w-off', builtinRow: true });
-    bindings.set('w-off', { scope: official });
+    bindings.set('w-off', { scope: official, forwardedEvents: new Map() });
     sub(['w-off', 'approval/answer']);
     await official.dispose();
     await third.dispose();
+  });
+
+  it('sub 帧幂等 + unsub 退订对称（遗漏大扫 20260901 O-1 宿主半）：同 (行,事件) 二帧一转发器；unsub 摘后零扇出；再 sub 复活；重复 unsub 幂等', async () => {
+    const { handlers, root, bindings, tells } = setupHandlers();
+    const sub = handlers.get('host.sub')!;
+    const unsubHandler = handlers.get('host.unsub');
+    // 修复前 unsub 处理方不存在（退订面缺口——转发器只能靠行回卷整体清，
+    // 拆行前宿主侧转发器残留累积）
+    expect(unsubHandler).toBeDefined();
+    // 词汇入册（装载管线职责的单元形——fx/pulse 非目录内置词，直登记供行订阅）
+    registerLiveEvent(root, { name: 'fx/pulse', mode: 'emit', note: 'O-1 宿主半测试事件' });
+    const scope = root.fork({ name: 'w-dedup', rowId: 'w-dedup', builtinRow: false });
+    bindings.set('w-dedup', { scope, forwardedEvents: new Map() });
+    // 双 sub 帧（worker 半已 0→1 单发；此处钉宿主侧幂等——重复帧不重复挂转发器。
+    // 修复前：每帧各挂一个转发器 → 行内 emit 扇出 N 次，主域 parity 破）
+    sub(['w-dedup', 'fx/pulse']);
+    sub(['w-dedup', 'fx/pulse']);
+    scope.emit('fx/pulse', 42);
+    expect(tells.filter((x) => x.event === 'evt')).toHaveLength(1);
+    // unsub 摘转发器：后续 emit 零扇出
+    unsubHandler!(['w-dedup', 'fx/pulse']);
+    scope.emit('fx/pulse', 43);
+    expect(tells.filter((x) => x.event === 'evt')).toHaveLength(1);
+    // 再 sub 复活（帧序 FIFO——退订后重订阅的竞速序安全）
+    sub(['w-dedup', 'fx/pulse']);
+    scope.emit('fx/pulse', 44);
+    expect(tells.filter((x) => x.event === 'evt')).toHaveLength(2);
+    // 重复 unsub 幂等（行卸载竞窗第二来源——静默不炸）
+    unsubHandler!(['w-dedup', 'fx/pulse']);
+    unsubHandler!(['w-dedup', 'fx/pulse']);
+    scope.emit('fx/pulse', 45);
+    expect(tells.filter((x) => x.event === 'evt')).toHaveLength(2);
+    await scope.dispose();
   });
 });

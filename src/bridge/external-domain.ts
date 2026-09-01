@@ -299,7 +299,7 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
       if (meta === undefined) {
         return Promise.reject(new AppError(APP_LOAD_FAILED, `applyRow：行 ${row.id} 未先行 load（装载管线不变量）`));
       }
-      bindings.set(row.id, { scope });
+      bindings.set(row.id, { scope, forwardedEvents: new Map() });
       // 行级卸载联动：行作用域回卷 → 通知域清该行注册簿 + 解除宿主绑定
       scope.effect(() => () => {
         bindings.delete(row.id);

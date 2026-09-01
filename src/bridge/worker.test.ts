@@ -149,6 +149,8 @@ interface TestChannel {
   registered: Array<[string, string]>;
   /** 宿主侧记录：sub [rowId, event] 调用序列 */
   subs: Array<[string, string]>;
+  /** 宿主侧记录：unsub [rowId, event] 调用序列（O-1 退订对称面观测位） */
+  unsubs: Array<[string, string]>;
   /** 宿主侧记录：tools-register 载荷 */
   toolRegs: unknown[];
   /** 宿主侧记录：log 上行载荷 */
@@ -159,11 +161,13 @@ interface TestChannel {
   close(): void;
 }
 
-/** 建直连域 + 记录型宿主桩（svc-invoke 故意抛保码 AppError——信封链路断言用） */
-function makeChannel(): TestChannel {
+/** 建直连域 + 记录型宿主桩（svc-invoke 故意抛保码 AppError——信封链路断言用）。
+ * rejectSvcRegister = svc-register 桩改抛（L-7 迟到注册失败形态的注入面） */
+function makeChannel(opts?: { rejectSvcRegister?: boolean }): TestChannel {
   const { port1, port2 } = new MessageChannel();
   const registered: Array<[string, string]> = [];
   const subs: Array<[string, string]> = [];
+  const unsubs: Array<[string, string]> = [];
   const toolRegs: unknown[] = [];
   const logs: TestChannel['logs'] = [];
   const dropped: unknown[] = [];
@@ -176,10 +180,16 @@ function makeChannel(): TestChannel {
   });
   host
     .handle('host', 'svc-register', ([rowId, name]) => {
+      if (opts?.rejectSvcRegister) {
+        throw new AppError(BRIDGE_METHOD_NOT_FOUND, '宿主测试桩拒收 svc-register（注入）');
+      }
       registered.push([String(rowId), String(name)]);
     })
     .handle('host', 'sub', ([rowId, event]) => {
       subs.push([String(rowId), String(event)]);
+    })
+    .handle('host', 'unsub', ([rowId, event]) => {
+      unsubs.push([String(rowId), String(event)]);
     })
     .handle('host', 'emit', () => undefined)
     .handle('host', 'tools-register', (args) => {
@@ -197,6 +207,7 @@ function makeChannel(): TestChannel {
     host,
     registered,
     subs,
+    unsubs,
     toolRegs,
     logs,
     dropped,
@@ -449,5 +460,69 @@ describe('startWorkerRealm — 取消传播（apply 的入站 signal）', () => 
       const seen = (await ch.host.call('svc', 'invoke', ['fx', 'fx/hang-taps', 'list', []])) as string[];
       return seen.includes('aborted');
     });
+  });
+});
+
+/* ---------------- sub 幂等与退订对称面（遗漏大扫 20260901 O-1+L-7） ---------------- */
+
+/** 双订阅 fixture：同事件两 handler + 退订控制面（O-1 扇出/退订锁的载荷） */
+const FX_DBL = `
+export const name = 'fx-dbl';
+export default async function apply(ctx) {
+  const seen = [];
+  ctx.provide('fx/dbl-taps', { list: () => seen });
+  const off1 = ctx.on('fx/pulse', () => { seen.push('h1'); });
+  const off2 = ctx.on('fx/pulse', () => { seen.push('h2'); });
+  ctx.provide('fx/dbl-ctl', { off1: () => off1(), off2: () => off2() });
+}
+`;
+
+/** 迟到注册 fixture：apply 排水返还后异步 provide（L-7——注册 promise 无人 await 形态） */
+const FX_LATE = `
+export const name = 'fx-late';
+export default async function apply(ctx) {
+  setTimeout(() => { ctx.provide('fx/late-svc', {}); }, 10);
+}
+`;
+
+describe('startWorkerRealm — sub 帧单发与退订对称面（O-1 worker 半回归锁）', () => {
+  it('同事件双订阅 → 过界 sub 帧恰一条（0→1 单发；修复前每 on 一条——宿主侧 N 转发器扇出之源）', async () => {
+    const { ch, dir } = setup();
+    const entry = writeApp(dir, 'fx-dbl.ts', FX_DBL);
+    await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
+    await ch.host.call('svc', 'apply', ['fx', {}, {}]);
+    // 修复前：subs == [fx/pulse, fx/pulse]（每 ctx.on 一条 sub 帧）
+    expect(ch.subs).toEqual([['fx', 'fx/pulse']]);
+  });
+
+  it('退订对称面：2→1 不发 unsub；1→0 发恰一条（修复前退订器不回传宿主——转发器残留累积）', async () => {
+    const { ch, dir } = setup();
+    const entry = writeApp(dir, 'fx-dbl.ts', FX_DBL);
+    await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
+    await ch.host.call('svc', 'apply', ['fx', {}, {}]);
+    // 摘 h1（2→1）：仍有 handler 在订阅——不发 unsub
+    await ch.host.call('svc', 'invoke', ['fx', 'fx/dbl-ctl', 'off1', []]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(ch.unsubs).toEqual([]);
+    // 摘 h2（1→0）：最后一个 handler 清空 → 恰一条 unsub 回宿主
+    await ch.host.call('svc', 'invoke', ['fx', 'fx/dbl-ctl', 'off2', []]);
+    await until(async () => ch.unsubs.length > 0);
+    expect(ch.unsubs).toEqual([['fx', 'fx/pulse']]);
+  });
+
+  it('迟到注册失败留 warn 痕不炸域（L-7：排水返还后的注册 promise 无人 await——teardown 竞窗 reject 不得成 unhandledRejection）', async () => {
+    // 通道注入：宿主测试桩对 svc-register 一律拒收 → 一切注册 promise 都 reject
+    const rejectCh = makeChannel({ rejectSvcRegister: true });
+    channels.push(rejectCh);
+    const dir = makeFixtureDir();
+    dirs.push(dir);
+    const entry = writeApp(dir, 'fx-late.ts', FX_LATE);
+    await rejectCh.host.call('svc', 'load', [{ id: 'fx', entry }]);
+    // apply 排水时零注册即返（迟到 provide 尚未发生）→ 10ms 后 provide 触达拒收桩
+    await rejectCh.host.call('svc', 'apply', ['fx', {}, {}]);
+    // 修复前：迟到注册 promise reject 无人接（unhandledRejection 面上炸域）；
+    // 修复后：warn 日志上行留痕（「看不见的 bug 不允许靠进程日志独扛」——warn 即可见面）
+    await until(async () => rejectCh.logs.some((l) => l.level === 'warn' && l.message.includes('过界注册迟到失败')));
+    expect(rejectCh.registered).toEqual([]);
   });
 });

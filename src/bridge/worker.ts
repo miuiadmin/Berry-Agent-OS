@@ -82,6 +82,24 @@ function logUp(
   endpoint.tell('log', { rowId, level, message, fields });
 }
 
+/**
+ * 过界注册 promise 的孤儿护栏（遗漏大扫 20260901 L-7）：注册 promise 入列后
+ * 唯一消费者是 svc.apply 排水——排水返还后的迟到注册（apply 内异步发起、
+ * default 已返还）promise 无人 await，teardown 竞窗 reject 会成
+ * unhandledRejection 炸域。出生即挂 catch：失败上行 warn 留痕（warn 即
+ * 可见面——不靠进程日志独扛）；apply 窗内失败仍由排水 await 原 promise 使
+ * apply 同路失败（本护栏只兜孤儿腿，不吞 apply 语义）。
+ */
+function guardedRegistration<T>(endpoint: BridgeEndpoint, rowId: string, surface: string, p: Promise<T>): Promise<T> {
+  void p.catch((err: unknown) => {
+    logUp(endpoint, rowId, 'warn', '过界注册迟到失败（已吞——不构成域崩溃）', {
+      surface,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  return p;
+}
+
 /** 收窄面统一 throw（v1 同步收窄清单——宁响亮不静默假实现） */
 function narrowed(surface: string): never {
   throw new AppError(
@@ -153,7 +171,14 @@ function makeToolsStub(
       if (def.effect !== undefined) meta['effect'] = def.effect;
       if (def.timeoutMs !== undefined) meta['timeoutMs'] = def.timeoutMs;
       if (def.label !== undefined) meta['label'] = def.label;
-      registrations.push(endpoint.call('host', 'tools-register', [rowId, meta, opts?.domain]));
+      registrations.push(
+        guardedRegistration(
+          endpoint,
+          rowId,
+          'tools-register',
+          endpoint.call('host', 'tools-register', [rowId, meta, opts?.domain]),
+        ),
+      );
     },
     run(name, args) {
       // 便捷面：宿主工具走真管道（schema→守门→执行三段在宿主侧唯一实现）；
@@ -226,17 +251,31 @@ function makeStubCtx(
     on(event: string, handler: AppEventHandler, opts?: { prepend?: boolean }) {
       assertAlive(state, `on(${event})`);
       // 本地登记先行（宿主侧 sub 落定前事件回投不可能——tell 晚于注册往返）
+      const existed = state.eventHandlers.has(event);
       const list = state.eventHandlers.get(event) ?? [];
       if (opts?.prepend) list.unshift(handler);
       else list.push(handler);
       state.eventHandlers.set(event, list);
-      registrations.push(endpoint.call('host', 'sub', [rowId, event]));
+      // sub 帧 0→1 单发（遗漏大扫 20260901 O-1）：宿主侧按 (行,事件) 挂单一
+      // 转发器——每 on 一条 sub 帧会让宿主挂 N 个转发器，行内单次 emit 扇出
+      // N 次回投（主域 parity 破）
+      if (!existed) {
+        registrations.push(
+          guardedRegistration(endpoint, rowId, `sub:${event}`, endpoint.call('host', 'sub', [rowId, event])),
+        );
+      }
       return () => {
         const current = state.eventHandlers.get(event);
         if (current === undefined) return;
         const idx = current.indexOf(handler);
         if (idx >= 0) current.splice(idx, 1);
-        if (current.length === 0) state.eventHandlers.delete(event);
+        if (current.length === 0) {
+          state.eventHandlers.delete(event);
+          // 退订对称面（O-1）：本地末位 handler 清空 → unsub 回宿主摘转发器
+          // （1→0 发恰一条）。fire-and-forget：域死/行已回卷时静默——宿主侧
+          // 转发器随行作用域回卷已收，迟到的 unsub 不构成失败
+          void endpoint.call('host', 'unsub', [rowId, event]).catch(() => {});
+        }
       };
     },
     emit(event: string, ...args: unknown[]) {
@@ -269,7 +308,9 @@ function makeStubCtx(
     provide(name: string, impl: unknown) {
       assertAlive(state, `provide(${name})`);
       state.services.set(name, impl as Record<string, unknown>);
-      registrations.push(endpoint.call('host', 'svc-register', [rowId, name]));
+      registrations.push(
+        guardedRegistration(endpoint, rowId, `provide:${name}`, endpoint.call('host', 'svc-register', [rowId, name])),
+      );
       return () => {
         state.services.delete(name);
       };

@@ -44,6 +44,13 @@ import { BridgeEndpoint } from './session.js';
 export interface RowBinding {
   /** 行作用域（fork 产物——provide/on/emit 落点，随作用域回卷自动收） */
   readonly scope: ContextScope;
+  /**
+   * 行内已挂转发器簿：事件名 → scope.on 退订器（遗漏大扫 20260901 O-1）。
+   * sub 帧幂等判据——同 (行,事件) 已有转发器则不再挂（N 订阅 N 转发器 = 主域
+   * 扇出 parity 破）；unsub 帧到来时先出簿再退订（出簿先行：退订器重入安全）。
+   * 行作用域回卷时随绑定簿整体消亡，簿内残留不泄漏（dispose 幂等）。
+   */
+  readonly forwardedEvents: Map<string, () => void>;
 }
 
 /**
@@ -99,12 +106,33 @@ export function registerHostHandlers(t: HostHandlersTarget): void {
       const binding = requireBinding(rowId, 'svc-register');
       binding.scope.provide(String(nameArg), makeWorkerServiceProxy(t.endpoint, rowId, String(nameArg)));
     })
-    /* 域行订阅：行作用域 on + 转发器（args 过界 tell 回投域分派） */
+    /* 域行订阅：行作用域 on + 转发器（args 过界 tell 回投域分派）。
+     * sub 帧幂等（遗漏大扫 20260901 O-1）：同 (行,事件) 已挂转发器则直接
+     * 返还——worker 半 0→1 单发使常态下簿内无重复，此处是对重复帧/竞窗
+     * 重放的宿主侧防御（N 转发器 = 宿主 emit 扇出 N 次，主域 parity 破） */
     .handle('host', 'sub', ([rowIdArg, eventArg]) => {
-      const binding = requireBinding(String(rowIdArg), 'sub');
-      binding.scope.on(String(eventArg), (...args: unknown[]) => {
-        t.endpoint.tell('evt', { rowId: String(rowIdArg), event: String(eventArg), args });
-      });
+      const rowId = String(rowIdArg);
+      const event = String(eventArg);
+      const binding = requireBinding(rowId, 'sub');
+      if (binding.forwardedEvents.has(event)) return;
+      binding.forwardedEvents.set(
+        event,
+        binding.scope.on(event, (...args: unknown[]) => {
+          t.endpoint.tell('evt', { rowId, event, args });
+        }),
+      );
+    })
+    /* 域行退订：出簿先行再退订（遗漏大扫 20260901 O-1——退订对称面）。
+     * worker 半 1→0 时发恰一条 unsub；无簿项时静默（行卸载竞窗里行回卷
+     * 已清转发器，迟到的 unsub 不得炸——幂等面）。帧序 FIFO 保证
+     * unsub→sub 重订阅竞速的序安全（后到的 sub 必见已空的簿项） */
+    .handle('host', 'unsub', ([rowIdArg, eventArg]) => {
+      const binding = t.bindings.get(String(rowIdArg));
+      if (binding === undefined) return; // 行已回卷——转发器随作用域已收
+      const off = binding.forwardedEvents.get(String(eventArg));
+      if (off === undefined) return; // 无簿项（重复 unsub / 未订阅过）——静默
+      binding.forwardedEvents.delete(String(eventArg));
+      off();
     })
     /* 域行 emit：走宿主行作用域 emit（per-scope 限流单点） */
     .handle('host', 'emit', ([rowIdArg, eventArg, argsArg]) => {
@@ -457,7 +485,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
       if (meta === undefined) {
         return Promise.reject(new AppError(APP_LOAD_FAILED, `applyRow：行 ${row.id} 未先行 load（装载管线不变量）`));
       }
-      bindings.set(row.id, { scope });
+      bindings.set(row.id, { scope, forwardedEvents: new Map() });
       // 行级卸载联动：行作用域回卷（apply 失败 //reload）→ 通知 worker 清该行
       // 注册簿（effect 栈/服务/工具/事件处理器）+ 解除宿主绑定。effect 登记在
       // apply 最前 → LIFO 回卷时最后执行（worker 侧行注册先于宿主 provide 等收尾）
