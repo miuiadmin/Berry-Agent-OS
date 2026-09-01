@@ -18,6 +18,7 @@ import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import type { PathsService } from './composition.js';
 import { installExitSignals } from './signals.js';
+import { appendCrashRecord } from './crash-log.js';
 import { isDaemonAlive, readDaemonState } from './daemon-state.js';
 import { VERSION_WITH_CODENAME as VERSION } from './version.js';
 import { existsSync } from 'node:fs';
@@ -213,6 +214,8 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
       }
     },
     onFatal: async (error, kind) => {
+      // 崩溃证据先落盘（同步追写 crash.log——基建大扫 #52；stderr 终端关即蒸发）
+      appendCrashRecord({ kind, entry: 'tui', error });
       runtime.ctx.logger.error(`致命异常（${kind}），尽力落盘后退出`, {
         kind,
         error: error instanceof Error ? error.stack : String(error),

@@ -34,6 +34,7 @@ import type { RuntimeOptions } from './assembly.js';
 import { collectBuiltinMigrations } from './builtins.js';
 import { dbPath } from './paths.js';
 import { installExitSignals } from './signals.js';
+import { appendCrashRecord } from './crash-log.js';
 import { isDaemonAlive, readDaemonState } from './daemon-state.js';
 
 /** 取 run 内最后一条 assistant 消息的文本（text 块拼接；无则 undefined——run-main 同款） */
@@ -341,6 +342,8 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   const signals = installExitSignals({
     onGracefulQuit: () => entry.driver.requestQuit(),
     onFatal: async (error, kind) => {
+      // 崩溃证据先落盘（同步追写 crash.log——基建大扫 #52；stderr 终端关即蒸发）
+      appendCrashRecord({ kind, entry: 'tick', error });
       runtime.ctx.logger.error(`致命异常（${kind}），尽力落盘后退出`, {
         kind,
         error: error instanceof Error ? error.stack : String(error),

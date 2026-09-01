@@ -35,6 +35,7 @@ import { AppError, DAEMON_ALREADY_RUNNING, DAEMON_START_TIMEOUT, DAEMON_STOP_TIM
 import { dataDir, dbPath } from './paths.js';
 import { createRuntime, type AppRuntime } from './assembly.js';
 import { installExitSignals } from './signals.js';
+import { appendCrashRecord } from './crash-log.js';
 import { readAttachToken } from './attach-client.js';
 import { VERSION } from './version.js';
 import {
@@ -531,6 +532,9 @@ export async function daemonForegroundMain(port: number, deps: DaemonForegroundD
       runtime.front.requestQuit();
     },
     onFatal: async (error, kind) => {
+      // 崩溃证据先落盘（同步追写 crash.log——基建大扫 #52；daemon 形态 stderr 在
+      // daemon.log 但 crash.log 给全部入口一个统一排障面）
+      appendCrashRecord({ kind, entry: 'daemon', error });
       runtime.ctx.logger.error(`daemon 致命异常（${kind}），尽力落盘后退出`, {
         kind,
         error: error instanceof Error ? error.stack : String(error),

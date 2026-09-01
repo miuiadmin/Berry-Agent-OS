@@ -10,6 +10,7 @@ import type { AssistantMessage } from '../contracts/llm.js';
 import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import { installExitSignals } from './signals.js';
+import { appendCrashRecord } from './crash-log.js';
 
 /** 取 run 内最后一条 assistant 消息的文本（text 块拼接；无则 undefined） */
 function lastAssistantText(result: RunResult): string | undefined {
@@ -67,6 +68,8 @@ export async function runOnceMain(message: string, options: RuntimeOptions = {})
   const signals = installExitSignals({
     onGracefulQuit: () => conversation.requestQuit(),
     onFatal: async (error, kind) => {
+      // 崩溃证据先落盘（同步追写 crash.log——基建大扫 #52；stderr 终端关即蒸发）
+      appendCrashRecord({ kind, entry: 'run', error });
       runtime.ctx.logger.error(`致命异常（${kind}），尽力落盘后退出`, {
         kind,
         error: error instanceof Error ? error.stack : String(error),

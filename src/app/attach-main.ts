@@ -39,6 +39,7 @@ import {
 } from './attach-client.js';
 import { daemonTokenPath } from './daemon-state.js';
 import { installExitSignals } from './signals.js';
+import { appendCrashRecord } from './crash-log.js';
 import { dataDir } from './paths.js';
 import { VERSION } from './version.js';
 
@@ -379,8 +380,10 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
         quitResolve(); // SIGTERM/SIGHUP：退 attach（143/129 记账由 signals.exitCode）
       }
     },
-    onFatal: () => {
-      // 纯客户端无本地落盘——无需 flush（信号模块限时后自会 exit(1)）
+    onFatal: (error, kind) => {
+      // 纯客户端无本地 durable 面——无需 flush；但崩溃证据仍落 crash.log（基建大扫
+      // #52：终端关即蒸发的 stderr 不是可清算的证据——attach 崩溃同样有盘上第一手）
+      appendCrashRecord({ kind, entry: 'attach', error });
     },
   });
 
