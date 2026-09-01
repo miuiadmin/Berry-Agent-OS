@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createContext } from './context.js';
-import { loadApps } from './loader.js';
+import { createAppJiti, importAppEntry, loadApps } from './loader.js';
 import { chainCaller } from './chain.js';
 import type { AppSkillsInfo } from './loader.js';
 import type { ContextScope } from './types.js';
@@ -421,6 +421,67 @@ describe('loadApps import 来源门禁', () => {
     expect(result.failed[0]!.code).toBe(APP_IMPORT_FORBIDDEN);
     expect(result.failed[0]!.message).toContain('不可解析');
     expect(result.failed[0]!.message).toContain('自捆');
+  });
+
+  // 装载排队回归锁（20260901-d #13，契约篇 §1.2 注记⑤勘正）：TLA + 树内动态
+  // import 的应用与并发他载（admin 收割消费方形态）交错时，懒件 transform 须恒
+  // 见己根——修前无排队，X 的懒件在他载树根下被误判「逃逸出应用目录树」
+  // （berry 真身 loader 探针 25/25 误拒），或见他载已清空值走门禁静默放行
+  it('并发装载排队：TLA 懒件 transform 恒见己根，无误拒不旁路', async () => {
+    // X：顶层 await + 树内动态 import 链——求值跨异步边界，懒件 lazy 延后
+    // transform（verifier 探针实证：lazy 的 transform 落在 TLA 恢复时点）。
+    // 懒件自身携带相对 import（lazy → leaf）是复现关键：门禁扫的是**被转译
+    // 文件自身**的说明符——lazy 在他载根（dirY）下裁决 './leaf' 即逃逸误报
+    // （修前误拒腿 APP_IMPORT_FORBIDDEN；门禁若已清空则旁路——两腿同根因）
+    const dirX = makeFixtureDir();
+    const entryX = writeApp(
+      dirX,
+      'tla-x.ts',
+      [
+        'export const name = "tla-x";',
+        'await Promise.resolve();',
+        // im/port 断词拼接：拓扑 checker 只认整形的 import 形态（同文件 unused-bind
+        // 先例）——测试源文本不构成导入，运行时拼出真形写入 fixture
+        'const lazy = await im' + "port('./lazy-x');",
+        'export const marker = lazy.marker;',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    writeApp(
+      dirX,
+      'lazy-x.ts',
+      [
+        'im' + "port { marker as leafMarker } from './leaf-x';",
+        'export const marker = leafMarker;',
+        'export default async function apply() {}',
+        '',
+      ].join('\n'),
+    );
+    writeApp(dirX, 'leaf-x.ts', "export const marker = 'x';\nexport default async function apply() {}\n");
+    // Y：同形 TLA 应用——自身挂起拉宽「他载在飞」窗（root=dirY 恒在场至其结算，
+    // X 的懒件 transform 必落此窗内——修前在他载根下裁决即误拒）
+    const dirY = makeFixtureDir();
+    const entryY = writeApp(
+      dirY,
+      'tla-y.ts',
+      [
+        'export const name = "tla-y";',
+        'await Promise.resolve();',
+        'export const marker = "y";',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    // Promise.all 并发两装载（修前：Y 的树根在 X 懒件 transform 时点在场或已清空）
+    const [modX, modY] = await Promise.all([
+      importAppEntry(createAppJiti(), entryX),
+      importAppEntry(createAppJiti(), entryY),
+    ]);
+    // X 的树内动态 import 正常装载（修前误拒腿：APP_IMPORT_FORBIDDEN 逃逸误报）
+    expect((modX as { marker?: string }).marker).toBe('x');
+    expect((modY as { marker?: string }).marker).toBe('y');
+    // 排队后再次单飞装载仍绿——链收尾清根不染后续（builtin/防御路径恒 undefined）
+    const again = await importAppEntry(createAppJiti(), entryY);
+    expect((again as { marker?: string }).marker).toBe('y');
   });
 
   it('解析对账不等使用：import 了但未使用的越界说明符同样拒载', async () => {

@@ -111,11 +111,23 @@ function virtualModuleHint(err: unknown): string {
 /* ---------------- import 来源门禁（契约篇 §1.2 执法面②，2026-08-26 挖矿批 P0-2） ---------------- */
 
 /**
- * 当前装载行的应用目录树根（realpath 归一）：装载循环串行设置/清理（await
- * jiti.import 期间无并发——boot 与 /reload 不并发是装配序前提），transform 全图
+ * 当前装载行的应用目录树根（realpath 归一）：装载排队链串行设置/清理（见
+ * importAppEntry 的 loadChain——一切装载入口串行是机制事实），transform 全图
  * 扫描据此裁决树内外。builtin 行不经 jiti，期间恒 undefined（不拦）。
  */
 let currentTreeRoot: string | undefined;
+
+/**
+ * 装载排队链尾（20260901-d #13，契约篇 §1.2 注记⑤勘正）：一切 importAppEntry
+ * 调用串行。原「boot 与 /reload 不并发是装配序前提」的注释假设在 admin 装载
+ * 词表收割（configure / mount-config 预校验 / install·update）第三消费方落地
+ * 后失真——含顶层 await 的应用求值跨异步边界，TLA 恢复时懒件（动态 import
+ * 目标）的 transform 会见他载树根（本树合法导入误拒）或已清空值（门禁静默
+ * 放行）。排队把 TLA 求值持链至完成，懒件 transform 恒见己根。模块实例级
+ * （与 currentTreeRoot 同律）：worker realm 自持 loader 模块实例，链按 realm
+ * 隔离不与主域互扰。
+ */
+let loadChain: Promise<unknown> = Promise.resolve();
 
 /** 默认转译实例：只借公开 `.transform` 方法链默认 TS 转译（guard 通过后照常转译——零内部路径依赖） */
 const plainJiti = createJiti(import.meta.url);
@@ -232,20 +244,31 @@ export function createAppJiti(faces?: LoadAppsOptions['virtualFaces']) {
 
 /**
  * 单行入口 import（两半共用，第二十七批刀二 K3-b2）：设置 import 门禁树根 →
- * jiti import → finally 清空（防跨行串染；串行装载保证无竞态——boot 与 /reload
- * 不并发是装配序前提）。导出供 worker 半复用：currentTreeRoot 是**模块实例级**
- * 全局——worker realm 自持 loader 模块实例，树根状态按 realm 隔离不与主域互扰。
+ * jiti import → finally 清空（防跨行串染）。一切调用经 loadChain 排队串行
+ * （20260901-d #13：串行前提从注释假设变机制事实——TLA 求值持链至完成，
+ * 懒件 transform 恒见己根；链尾吞错防前载失败卡死后续装载，错误仍由各调用
+ * 自身的 promise 抛给调用方）。导出供 worker 半复用：currentTreeRoot 与
+ * loadChain 均是**模块实例级**——worker realm 自持 loader 模块实例，状态按
+ * realm 隔离不与主域互扰。
  */
 export async function importAppEntry(
   jiti: ReturnType<typeof createAppJiti>,
   entry: string,
 ): Promise<Record<string, unknown>> {
-  currentTreeRoot = realpathIfPossible(dirname(entry));
-  try {
-    return (await jiti.import(entry)) as Record<string, unknown>;
-  } finally {
-    currentTreeRoot = undefined;
-  }
+  const run = loadChain.then(async () => {
+    currentTreeRoot = realpathIfPossible(dirname(entry));
+    try {
+      return (await jiti.import(entry)) as Record<string, unknown>;
+    } finally {
+      currentTreeRoot = undefined;
+    }
+  });
+  // 链尾推进吞错（两向）——run 自身照常把装载错误抛给调用方
+  loadChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 /**
