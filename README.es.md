@@ -103,8 +103,9 @@ Bien, basta de romance. **Ahora el acero y el hierro.**
 Requiere Node.js ≥ 22.19. Tres formas de instalar (guía completa en [docs/使用指南](docs/使用指南.md) §1):
 
 ```bash
-# Opción 1: instalador de una línea (muestra el estado paso a paso; URL del repo se completará al publicar)
-curl -fsSL <repo>/scripts/install.sh | sh
+# Opción 1: script de instalación (dos pasos — descargar y luego ejecutar, así una conexión interrumpida nunca ejecuta un script parcial; estado paso a paso; URL del repo se completará al publicar)
+curl -fsSL -o install.sh <repo>/scripts/install.sh
+sh install.sh
 # Opción 2: npm (disponible tras la publicación)
 npm i -g berry-agent-os
 # Opción 3: desde el código (desarrolladores)

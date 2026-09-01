@@ -125,6 +125,26 @@ test('npm 身份零残留：旧包名/旧私有仓 URL 不入公开安装面（�
   assert.deepEqual(bad, [], `npm 身份残留（应改 berry-agent-os / Berry-Agent-OS）:\n${bad.join('\n')}`);
 });
 
+test('安装指引两段式：公开面禁 pipe 直灌形态（成熟度扫描 20260901 快赢#5）', () => {
+  // 管道直灌（curl ... | sh）在连接中段断裂时会让 sh 执行半截脚本——官方安装
+  // 指引恒两段式（curl -o 落盘后再 sh）；install.sh 头注释同律。扫描面与 npm
+  // 身份锁同构：根 README 族 + 使用指南 + 安装脚本本体
+  const faces = [
+    ...readdirSync(repoRoot)
+      .filter((f) => /^README.*\.md$/.test(f))
+      .map((f) => join(repoRoot, f)),
+    join(repoRoot, 'docs', '使用指南.md'),
+    join(repoRoot, 'scripts', 'install.sh'),
+  ];
+  const bad = [];
+  for (const abs of faces) {
+    if (/install\.sh\s*\|\s*sh/.test(readFileSync(abs, 'utf8'))) {
+      bad.push(`${relative(repoRoot, abs)}: 管道直灌形态`);
+    }
+  }
+  assert.deepEqual(bad, [], '安装指引须两段式（先下载再执行）——防半截脚本执行');
+});
+
 test('package-lock 与 package.json 名字同步（成熟度扫描 20260901 P0-1）', () => {
   // 改名批曾漏 lockfile 顶层 name——npm ci 不炸但工作树常驻非己所改 diff，且违
   // 「破坏性变更一笔原子化」纪律。锁两处：顶层 name 与 packages[""] name 同源。

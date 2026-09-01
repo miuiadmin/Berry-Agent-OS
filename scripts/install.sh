@@ -1,7 +1,10 @@
 #!/bin/sh
 # Berry 安装脚本（技术栈篇 §8.5 第 3 件，第五十一批「升级与上手基建」）
 #
-# 用法：curl -fsSL <仓库>/scripts/install.sh | sh
+# 用法（两段式——先下载再执行：管道直灌形态下连接中段断裂时 sh 会执行半截
+# 脚本，落盘后再跑无此险）：
+#   curl -fsSL -o install.sh <仓库>/scripts/install.sh
+#   sh install.sh
 # 职责三件：Node ≥22.19 检查（只查不装——缺失指引发官方指引）→ npm 全局装
 # berry-agent-os → berry --version 安装验证。失败路径全部带原因与出路口。
 # 显示效果：分步状态行（→ 步骤 / ✓ 成功 / ✗ 失败）+ 尾部欢迎横幅与下一步指引。
@@ -59,7 +62,7 @@ step '安装 berry-agent-os（npm i -g）'
 if ! npm install -g berry-agent-os; then
   fail "npm 安装失败。常见原因：
   · 权限不足 → nvm 管理 Node（推荐，免 sudo）或 sudo npm i -g berry-agent-os
-  · 网络问题 → 检查代理/镜像源（npm config set registry https://registry.npmmirror.com 等按需）"
+  · 网络问题 → 检查代理与 registry 配置（npm config get registry 核对当前源是否符合预期）"
 fi
 ok 'berry-agent-os 已安装'
 
