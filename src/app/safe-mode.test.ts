@@ -131,4 +131,30 @@ describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径�
       rmSync(compositionDir, { recursive: true, force: true });
     }
   });
+
+  it('dump-config env 生效面（基建大扫 #10/#32）：覆盖来源标注 + 子系统变量点名行', async () => {
+    const compositionDir = freshDir('safe-dump-env');
+    // 覆盖态双变量：模型行就地标注 + 子系统行点名（修前红：两形态皆不在输出）
+    const prevModel = process.env['APP_MODEL'];
+    const prevLog = process.env['APP_LOG_LEVEL'];
+    process.env['APP_MODEL'] = 'anthropic/claude-opus-5';
+    process.env['APP_LOG_LEVEL'] = 'debug';
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(await dumpConfigMain({ compositionDir, noApps: true })).toBe(0);
+      const out = write.mock.calls.map((call) => String(call[0])).join('');
+      // 模型行：env 覆盖终值 + 来源可辨（数据目录行同款机制——APP_DATA_DIR 由
+      // vitest setup 钉扎不可控，断言面落在模型行）
+      expect(out).toContain('模型：anthropic/claude-opus-5（APP_MODEL 覆盖）');
+      // 子系统级变量点名行：不在模型/数据目录行的四变量在此有答案
+      expect(out).toContain('env 覆盖面：APP_LOG_LEVEL');
+    } finally {
+      write.mockRestore();
+      if (prevModel === undefined) delete process.env['APP_MODEL'];
+      else process.env['APP_MODEL'] = prevModel;
+      if (prevLog === undefined) delete process.env['APP_LOG_LEVEL'];
+      else process.env['APP_LOG_LEVEL'] = prevLog;
+      rmSync(compositionDir, { recursive: true, force: true });
+    }
+  });
 });

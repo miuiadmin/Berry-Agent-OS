@@ -139,6 +139,30 @@ function renderDefaultApp(
 }
 
 /**
+ * env 覆盖来源标注（基建大扫 #10/#32）：终值来源可辨——诊断「为什么我的模型/
+ * 数据目录不对」从输出即可分 env 覆盖还是缺省，不用回查 shell 环境。
+ * @param key APP_* 变量名
+ * @returns 在场 = 「（KEY 覆盖）」标注；缺席 = 空串（缺省态不加噪声）
+ */
+function envOverrideNote(key: string): string {
+  return process.env[key] !== undefined ? `（${key} 覆盖）` : '';
+}
+
+/**
+ * env 生效面披露行（基建大扫 #10/#32）：四个子系统级 APP_* 变量（日志档/fd
+ * 发现路径/bash 路径/浏览器路径）不体现在模型/数据目录各行，在场者并一行点名
+ * ——「fd 补全为什么不工作」类排障从本屏即可见变量是否被设。
+ * 全缺席 = 行缺席（零配置常态零噪声）；APP_DATA_DIR/APP_MODEL 不在此行
+ * （已就地标注于所属行）、APP_DB_PATH 被 :memory: 诊断面钉死（设计使然）。
+ */
+function renderEnvOverrides(): string[] {
+  const keys = ['APP_LOG_LEVEL', 'APP_FD_PATH', 'APP_BASH_PATH', 'APP_BROWSER_PATH'];
+  const present = keys.filter((key) => process.env[key] !== undefined);
+  if (present.length === 0) return [];
+  return [`env 覆盖面：${present.join('、')}（已设——生效值见各子系统行为）`];
+}
+
+/**
  * 组合树打印主流程。
  * @param options 组合根选项透传（与生产同参——诊断的就是实际生效组合）
  * @returns 进程退出码（0 = 全激活/显式跳过；1 = 装载失败清单）
@@ -152,11 +176,14 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
     try {
       const lines = [
         `Berry ${VERSION}`,
-        `数据目录：${dataDir()}`,
+        // 来源标注（基建大扫 #10/#32）：env 覆盖 vs 缺省一屏可辨
+        `数据目录：${dataDir()}${envOverrideNote('APP_DATA_DIR')}`,
         `工作区：${runtime.workspace}`,
-        `模型：${runtime.model}`,
+        `模型：${runtime.model}${envOverrideNote('APP_MODEL')}`,
         `沙箱档：${runtime.sandboxMode}`,
         `审批档：${runtime.approval.policyMode}`,
+        // env 生效面（基建大扫 #10/#32）：子系统级变量在场点名行
+        ...renderEnvOverrides(),
         // 安全模式可见面（--no-apps 同径）：一行声明本树是安全模式产物——
         // Ring 2/3 跳过不是树坏是旗标使然，operator 一眼可辨
         ...(options.noApps

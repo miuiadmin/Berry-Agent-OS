@@ -159,11 +159,12 @@ const MODULE_EDGES = {
 const BARE_IMPORTS = {
   // context = 应用加载器（虚拟注入映射构造 + 行 config schema 校验 Value 面——契约篇 §1.2 落码注记③）
   typebox: ['contracts', 'context', 'tools', 'app', 'exec'],
-  // berryagent = 加载器注入的虚拟模块名（非 npm 包；loader.test fixture 源码内的合法引用面）
-  berryagent: ['context'],
+  // berryagent = 加载器注入的虚拟模块名（非 npm 包；loader.test fixture 源码 + echo.ts
+  // 宿主自养金样件〔app 域测试资产，import type 编译期擦除——与第三方作者同一导入面〕的合法引用面）
+  berryagent: ['context', 'app'],
   '@earendil-works/pi-ai': ['llm'],
   '@earendil-works/pi-tui': ['channels'],
-  'better-sqlite3': ['persist'],
+  'better-sqlite3': ['persist', 'app'], // app = daemon doctor ④ 库 readonly 只读探针（daemon 两测试同款直开）
   yaml: ['app', 'skills'],
   ignore: ['skills', 'tools', 'checkpoint', 'webui'], // tools = 检索族 gitignore 遍历（2026-08-25 检索族纵切）；checkpoint = 工作区快照 DFS 遍历（2026-08-30 会话篇 §5.3——CR-10 语义同源不共享，第四消费者仍再议）；webui = @-mention 文件补全行走（2026-08-30 契约篇 §6.8 刀三）
   jiti: ['context'],
@@ -270,7 +271,9 @@ for (const file of collect(srcRoot)) {
       continue;
     }
     const bareAllowed = BARE_IMPORTS[bare];
-    if (!bareAllowed || !(bareAllowed.includes(module) || module === 'app')) {
+    // app 恒放行已废（基建大扫 #48）：组合根所需包显式入表——误引 devDependencies
+    // （react/vite/tsx 等）时 typecheck 本地绿但发布物装机 require 不到，此门禁先红
+    if (!bareAllowed || !bareAllowed.includes(module)) {
       violations.push(`${relative(file)}：模块 ${module} 不允许裸导入 ${bare}`);
     }
   }

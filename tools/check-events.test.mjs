@@ -23,13 +23,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('check-events 机器闸（含应用声明层，第四十六批）', () => {
-  it('全绿：五族双向一致 + 汇总行报应用声明计数（exit 0 由 execFileSync 非零即抛保证）', () => {
+  it('全绿：六族双向一致 + 汇总行报应用声明计数与错误码册数（exit 0 由 execFileSync 非零即抛保证）', () => {
     const stdout = execFileSync(process.execPath, [join('tools', 'check-events.mjs')], {
       cwd: ROOT,
       encoding: 'utf8',
     });
     // 声明层计数锚：obs/alert 在册即 ≥1；并集被拆掉则脚本已红（到不了断言）
     expect(stdout).toMatch(/另应用声明 \d+ 词/);
+    // 族 6 锚（基建大扫 #46）：错误码册数 + 六族字样在场——族 6 被整块删除时
+    // 汇总行回五族形态，此断言先红（闸的闸）
+    expect(stdout).toMatch(/错误码 \d+ 册，六族双向一致/);
   });
 });
 

@@ -20,6 +20,10 @@
  *    - 联合字面量成员 ⊆ 目录名集（类型面不承认目录外词汇）；
  *    - 目录名集 ⊆ 联合字面量成员（目录新增名忘进联合 CI 即红）。
  *    （(string & {}) 逃生口不参与——它保住「自定义事件显式注册」的字符串面。）
+ * 6. 错误码注册表对账（基建大扫 #46，2026-09-02 第五十七批）：errors.ts 头注
+ *    「错误码与事件类型同纪律的 CI 校验」兑现——AppError 字面量码 ⊆ 注册表
+ *    （手拼/typo 码红）；注册表零使用即死码红（registerErrorCode 自防御抛码
+ *    经字面量构造算使用）。
  * 5. 公开面镜像对照（契约篇 §6.3#4 第五族，2026-08-31 第四十三批）：
  *    - docs/应用开发指南「活体总线词汇速览」表：词集 ≡ 总线目录名集 +
  *      标题计数/层括号计数和对照（提取锚 = 以 | 起头的表格行内反引号词）；
@@ -234,6 +238,9 @@ await jiti.import(fileURLToPath(new URL('../src/checkpoint/events.ts', import.me
 // goal 轮结算账本词同款（src/goal/events.ts——goal/evidence 轮结算写点在
 // goal/tools.ts，第三十九批 T4-A；goal/summary 随第四刀沉淀④步同笔注册）
 await jiti.import(fileURLToPath(new URL('../src/goal/events.ts', import.meta.url)));
+// 错误码注册表（族 6 数据源——基建大扫 #46：errors.ts 头注「CI 可校验」兑现，
+// 与事件词汇面同纪律的机器执法）
+const errorsMod = await jiti.import(fileURLToPath(new URL('../src/contracts/errors.ts', import.meta.url)));
 
 // 应用声明层总线词（契约篇 §6.3#4 族 1 词汇面 = 目录 ∪ 应用声明层，第四十六批）：
 // 官方件自有总线词的宿主面声明——轻量 events.ts named export（件 manifest 引同
@@ -568,6 +575,35 @@ for (const entry of liveCatalog) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* 族 6：错误码注册表对账（基建大扫 #46——手拼/typo 码与注册死码两向红）    */
+/* ------------------------------------------------------------------ */
+
+{
+  const registered = new Set(errorsMod.listErrorCodes());
+  // 字面量形态对账：new AppError('CODE', ...) 手拼码必在注册表——标识符形态
+  // 天然安全（具名常量只能从 registerErrorCode 产物定义），字面量是唯一逃逸面
+  const literalRe = /new AppError\(\s*'([A-Z][A-Z0-9_]*)'/g;
+  for (const file of files) {
+    for (const m of file.code.matchAll(literalRe)) {
+      if (!registered.has(m[1])) {
+        v(`${file.rel}：AppError 字面量码 ${m[1]} 未注册（registerErrorCode 注册即词汇表）`);
+      }
+    }
+  }
+  // 注册未用对账（死码口径，对齐事件面死词断言）：具名常量在 errors.ts 之外
+  // 零引用、且 errors.ts 内无字面量构造（registerErrorCode 自防御抛码经
+  // 字面量构造即使用）= 注册即死码
+  const errorsTs = files.find((f) => f.rel === 'src/contracts/errors.ts');
+  const literalInErrors = new Set([...(errorsTs?.code.matchAll(literalRe) ?? [])].map((m) => m[1]));
+  for (const code of registered) {
+    if (literalInErrors.has(code)) continue;
+    const wordRe = new RegExp(`\\b${code}\\b`);
+    const used = files.some((f) => f.rel !== 'src/contracts/errors.ts' && wordRe.test(f.code));
+    if (!used) v(`错误码 ${code} 注册未用（死码——词汇表不收尸体）`);
+  }
+}
+
 // ---- 汇总 ----
 if (violations.length > 0) {
   console.error(`check-events：${violations.length} 处目录/派发点漂移`);
@@ -575,5 +611,5 @@ if (violations.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-events ✓ 总线 ${liveCatalog.length} 项（另应用声明 ${declaredByName.size} 词）/ AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量，五族双向一致（含公开面镜像）`,
+  `check-events ✓ 总线 ${liveCatalog.length} 项（另应用声明 ${declaredByName.size} 词）/ AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量 / 错误码 ${errorsMod.listErrorCodes().length} 册，六族双向一致（含公开面镜像）`,
 );
