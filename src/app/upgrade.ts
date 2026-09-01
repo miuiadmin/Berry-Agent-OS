@@ -3,7 +3,8 @@
  *
  * 纯函数核心 + 编排器分离：dist-tags 解析 / semver 比对 / 装机形态判定 /
  * 指引文案全为纯函数（可测）；网络（node:fetch 零新依赖）与 spawn 只活在
- * upgradeMain 编排器。
+ * 编排器——编排器携注入面（UpgradeMainIo，遗漏大扫 20260901-b #8 第五十三批）：
+ * 行为契约（target 白名单/五态分派/退出码/npm 半态）进 vitest，真链路手验。
  *
  * 网络面正交声明（与 §8 末「默认不发任何网络包」的关系）：本命令是 CLI
  * 维护动词——与 npm install 同族的进程外用户显式维护动作，只读 GET
@@ -21,9 +22,6 @@ export type DistTagsResult =
   | { readonly status: 'ok'; readonly tags: Readonly<Record<string, string>> }
   | { readonly status: 'unpublished' }
   | { readonly status: 'network'; readonly message: string };
-
-/** dist-tags 查询端点（轻量端点——不拉全量 packument） */
-const DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/berryagent/dist-tags';
 
 /** 查询超时（毫秒）——用户在终端等着，快速失败好过悬挂 */
 const FETCH_TIMEOUT_MS = 10_000;
@@ -139,10 +137,56 @@ export function unpublishedGuidance(currentVersion: string): string {
 
 /* ---------------- 编排器（网络与 spawn 只在此） ---------------- */
 
+/** 官方 registry 根（解析失败/空输出的回退位——技术栈篇 §8.5 条 1） */
+const OFFICIAL_REGISTRY = 'https://registry.npmjs.org';
+
+/**
+ * 拼接 dist-tags 查询端点（纯函数——#16 判定腿与执行腿同源）。
+ * 尾斜杠归一（npm config 输出两种形态都常见）；空/空白串回退官方源。
+ */
+export function distTagsUrlFor(registryBase: string): string {
+  const base = registryBase.trim();
+  if (base === '') return `${OFFICIAL_REGISTRY}/-/package/berryagent/dist-tags`;
+  return `${base.replace(/\/+$/, '')}/-/package/berryagent/dist-tags`;
+}
+
+/** npm 进程执行面（resolveRegistryBase 的注入位——测试假面换跑，真面 spawn） */
+export type NpmRunner = (args: readonly string[]) => Promise<{ code: number; stdout: string }>;
+
+/** 真面：spawn npm（win32 走 npm.cmd + shell——与安装腿同款形态；10s 超时） */
+const realNpmRunner: NpmRunner = (args) =>
+  new Promise((resolve) => {
+    const child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', [...args], {
+      shell: process.platform === 'win32',
+      timeout: FETCH_TIMEOUT_MS,
+    });
+    let stdout = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+    });
+    // 失败/超时/空输出一律走回退——registry 解析是尽力而为的取齐，不是硬前置
+    child.on('error', () => resolve({ code: 1, stdout: '' }));
+    child.on('close', (code) => resolve({ code: code ?? 1, stdout }));
+  });
+
+/**
+ * 解析用户 npm 配置源（#16：判定腿与安装腿同源——spawn npm i -g 走用户 .npmrc，
+ * 版本检查原硬编码官方源即两腿分叉：镜像滞后窗口「可升级」结论失真 + 重试恒败）。
+ * 不自研 .npmrc 解析层（global/user/project 三层与 scoped registry 属 npm 自家
+ * 配置_resolution），`npm config get registry` 是唯一诚实单源；失败回退官方源。
+ */
+export async function resolveRegistryBase(run: NpmRunner = realNpmRunner): Promise<string> {
+  const { code, stdout } = await run(['config', 'get', 'registry']);
+  if (code !== 0) return OFFICIAL_REGISTRY;
+  const base = stdout.trim();
+  return base === '' ? OFFICIAL_REGISTRY : base;
+}
+
 /** 查询 registry dist-tags（node:fetch + 超时；404 = 未发布，与网络错分立） */
 export async function fetchDistTags(): Promise<DistTagsResult> {
+  const url = distTagsUrlFor(await resolveRegistryBase());
   try {
-    const res = await fetch(DIST_TAGS_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (res.status === 404) return { status: 'unpublished' };
     if (!res.ok) return { status: 'network', message: `registry 返回 ${res.status}` };
     const tags = (await res.json()) as Record<string, string>;
@@ -169,9 +213,13 @@ export interface UpgradeCheck {
     | { kind: 'source'; target: string };
 }
 
-export async function runUpgradeCheck(localVersion: string, entryRealPath: string): Promise<UpgradeCheck> {
+export async function runUpgradeCheck(
+  localVersion: string,
+  entryRealPath: string,
+  io: { readonly fetchDistTags?: () => Promise<DistTagsResult> } = {},
+): Promise<UpgradeCheck> {
   const form = detectInstallForm(entryRealPath);
-  const remote = await fetchDistTags();
+  const remote = await (io.fetchDistTags ?? fetchDistTags)();
   const base = { localVersion, form, remote } as const;
   if (remote.status === 'unpublished') return { ...base, verdict: { kind: 'unpublished' } };
   if (remote.status === 'network') return { ...base, verdict: { kind: 'network' } };
@@ -190,59 +238,27 @@ const green = (s: string): string => `\x1b[32m${s}\x1b[0m`;
 const red = (s: string): string => `\x1b[31m${s}\x1b[0m`;
 
 /**
- * `berry upgrade` 主流程（CLI 编排器）：
- * 检查 → 三态分派（npm 自升级 / 源码指引 / 未发布告知）→ 重启提示。
- * @returns 进程退出码（0 成功/已最新/指引类态；1 升级失败或网络检查失败——用法错由 CLI 层退 2）
+ * 编排器依赖注入面（遗漏大扫 20260901-b #8 回归锁——技术栈篇 §8.5 条 1）：
+ * 网络/spawn/stdio 全可换假面，vitest 锁行为契约（target 白名单安全线 / 五态
+ * verdict 分派 / 退出码契约 / npm 半态收场）；缺省全真面，真链路由
+ * `berry upgrade` 手验——两层互补不互代。
  */
-export async function upgradeMain(): Promise<number> {
-  const localVersion = VERSION;
-  process.stdout.write(`${bold(`Berry ${localVersion}（${CODENAME}）`)} ${dim('— 升级维护动词（berry upgrade）')}\n`);
+export interface UpgradeMainIo {
+  /** dist-tags 查询（缺省真网络面） */
+  readonly fetchDistTags?: () => Promise<DistTagsResult>;
+  /** npm 安装腿（缺省真 spawn npm i -g；resolve = 退出码） */
+  readonly spawnNpm?: (target: string) => Promise<number>;
+  /** 入口 real path（缺省 argv[1] 解析） */
+  readonly entryRealPath?: () => string;
+  /** stdout 写口（缺省 process.stdout.write） */
+  readonly out?: (s: string) => void;
+  /** stderr 写口（缺省 process.stderr.write） */
+  readonly err?: (s: string) => void;
+}
 
-  const form = detectInstallForm(entryRealPath());
-  process.stdout.write(`${dim('· 装机形态：')}${form === 'npm' ? 'npm 全局' : '源码'}\n`);
-
-  process.stdout.write(`${dim('· 检查更新（registry dist-tags）…')}\n`);
-  const check = await runUpgradeCheck(localVersion, entryRealPath());
-
-  if (check.verdict.kind === 'unpublished') {
-    process.stdout.write(
-      red('· 未发布：') + 'berryagent 尚未发布到 npm\n\n' + unpublishedGuidance(localVersion) + '\n',
-    );
-    return 0;
-  }
-  if (check.verdict.kind === 'network') {
-    const netMessage = check.remote.status === 'network' ? check.remote.message : '未知网络错误';
-    process.stdout.write(red(`· 网络检查失败：${netMessage}\n`));
-    process.stdout.write(dim('（registry 不可达不影响使用；稍后重试或走源码升级路）\n'));
-    return 1;
-  }
-  const target = check.verdict.target;
-  process.stdout.write(`${dim('· 远端最新：')}${target}\n`);
-
-  if (check.verdict.kind === 'source') {
-    process.stdout.write('\n' + sourceUpgradeGuidance(localVersion) + '\n');
-    return 0;
-  }
-  if (check.verdict.kind === 'up-to-date') {
-    process.stdout.write(green(`✓ 已是最新（${localVersion} ≥ ${target}）\n`));
-    return 0;
-  }
-
-  // 包管理器甄别（冷读 m1 余款）：pnpm/yarn 全局装 → 原管理器指引不代执行
-  const manager = detectPackageManager(entryRealPath());
-  if (manager !== 'npm') {
-    process.stdout.write('\n' + foreignManagerGuidance(manager) + '\n');
-    return 0;
-  }
-  // npm 形态自升级：spawn npm i -g（stdio 继承——npm 自带进度即显示面）。
-  // target 来自 registry 响应（不可信输入）——进 spawn 参数前过 semver 形状
-  // 白名单（win32 shell:true 形态下插值即命令注入面，白名单钉死）
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(target)) {
-    process.stderr.write(red(`✗ 远端版本号形状非法（${target}）——拒绝执行，请人工核对 registry\n`));
-    return 1;
-  }
-  process.stdout.write(`${dim('· 升级到')} ${bold(target)} ${dim('（npm i -g berryagent@' + target + '）…')}\n`);
-  const code = await new Promise<number>((resolve) => {
+/** npm 安装腿真面（stdio 继承——npm 自带进度即显示面；resolve 退出码） */
+const realSpawnNpm = (target: string): Promise<number> =>
+  new Promise<number>((resolve) => {
     const child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install', '-g', `berryagent@${target}`], {
       stdio: 'inherit',
       shell: process.platform === 'win32',
@@ -253,12 +269,72 @@ export async function upgradeMain(): Promise<number> {
     });
     child.on('close', (exitCode) => resolve(exitCode ?? 1));
   });
-  if (code !== 0) {
-    process.stderr.write(red(`✗ 升级失败（npm 退出码 ${code}）——包未变动，可重试\n`));
+
+/**
+ * `berry upgrade` 主流程（CLI 编排器）：
+ * 检查 → 三态分派（npm 自升级 / 源码指引 / 未发布告知）→ 重启提示。
+ * @param io 注入面（测试假面——缺省全真）
+ * @returns 进程退出码（0 成功/已最新/指引类态；1 升级失败或网络检查失败——用法错由 CLI 层退 2）
+ */
+export async function upgradeMain(io: UpgradeMainIo = {}): Promise<number> {
+  const out = io.out ?? ((s: string) => void process.stdout.write(s));
+  const err = io.err ?? ((s: string) => void process.stderr.write(s));
+  const fetcher = io.fetchDistTags ?? fetchDistTags;
+  const spawnNpm = io.spawnNpm ?? realSpawnNpm;
+  const realPath = io.entryRealPath ?? entryRealPath;
+
+  const localVersion = VERSION;
+  out(`${bold(`Berry ${localVersion}（${CODENAME}）`)} ${dim('— 升级维护动词（berry upgrade）')}\n`);
+
+  const form = detectInstallForm(realPath());
+  out(`${dim('· 装机形态：')}${form === 'npm' ? 'npm 全局' : '源码'}\n`);
+
+  out(`${dim('· 检查更新（registry dist-tags）…')}\n`);
+  const check = await runUpgradeCheck(localVersion, realPath(), { fetchDistTags: fetcher });
+
+  if (check.verdict.kind === 'unpublished') {
+    out(red('· 未发布：') + 'berryagent 尚未发布到 npm\n\n' + unpublishedGuidance(localVersion) + '\n');
+    return 0;
+  }
+  if (check.verdict.kind === 'network') {
+    const netMessage = check.remote.status === 'network' ? check.remote.message : '未知网络错误';
+    out(red(`· 网络检查失败：${netMessage}\n`));
+    out(dim('（registry 不可达不影响使用；稍后重试或走源码升级路）\n'));
     return 1;
   }
-  process.stdout.write(green(`✓ 升级完成：${localVersion} → ${target}\n`));
-  process.stdout.write(
+  const target = check.verdict.target;
+  out(`${dim('· 远端最新：')}${target}\n`);
+
+  if (check.verdict.kind === 'source') {
+    out('\n' + sourceUpgradeGuidance(localVersion) + '\n');
+    return 0;
+  }
+  if (check.verdict.kind === 'up-to-date') {
+    out(green(`✓ 已是最新（${localVersion} ≥ ${target}）\n`));
+    return 0;
+  }
+
+  // 包管理器甄别（冷读 m1 余款）：pnpm/yarn 全局装 → 原管理器指引不代执行
+  const manager = detectPackageManager(realPath());
+  if (manager !== 'npm') {
+    out('\n' + foreignManagerGuidance(manager) + '\n');
+    return 0;
+  }
+  // npm 形态自升级：spawn npm i -g（stdio 继承——npm 自带进度即显示面）。
+  // target 来自 registry 响应（不可信输入）——进 spawn 参数前过 semver 形状
+  // 白名单（win32 shell:true 形态下插值即命令注入面，白名单钉死）
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(target)) {
+    err(red(`✗ 远端版本号形状非法（${target}）——拒绝执行，请人工核对 registry\n`));
+    return 1;
+  }
+  out(`${dim('· 升级到')} ${bold(target)} ${dim('（npm i -g berryagent@' + target + '）…')}\n`);
+  const code = await spawnNpm(target);
+  if (code !== 0) {
+    err(red(`✗ 升级失败（npm 退出码 ${code}）——包未变动，可重试\n`));
+    return 1;
+  }
+  out(green(`✓ 升级完成：${localVersion} → ${target}\n`));
+  out(
     dim('运行中的进程仍持旧版（升级不热替换内存）——重启 berry / daemon 后生效：\n') +
       dim('  · TUI：退出后重新 `berry`\n') +
       dim('  · daemon：`berry daemon stop && berry daemon start`\n'),

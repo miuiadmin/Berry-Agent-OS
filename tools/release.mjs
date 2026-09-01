@@ -244,6 +244,20 @@ export const INJECT_SCENARIOS = {
       probe: () => ({ code: 0, stdout: '', stderr: '', deferEqual: true }),
     },
   },
+  'smoke-exit-red': {
+    description:
+      '契约 3/6 安装冒烟 dump-config 退出码非 0——装机产物不可装配，publish 永不触达（遗漏大扫 20260901-b #25：G-1 真握手闸补红例）',
+    steps: {
+      'smoke:apps': () => ({ code: 1, stdout: '', stderr: '注入：dump-config 炸' }),
+    },
+  },
+  'smoke-apps-missing': {
+    description:
+      '契约 3/6 安装冒烟 dump-config 未见默认应用——apps/ 疑似缺席，首启默认应用承诺将静默破裂，publish 永不触达（遗漏大扫 20260901-b #25：G-1 真握手闸补红例）',
+    steps: {
+      'smoke:apps': () => ({ code: 0, stdout: '默认应用：（缺席）\n', stderr: '' }),
+    },
+  },
 };
 
 // ───────────────────────── 编排骨舞（io 注入缝） ─────────────────────────

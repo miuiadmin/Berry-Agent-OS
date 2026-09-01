@@ -403,6 +403,36 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     expect(ran).not.toContain('publish');
   });
 
+  it('smoke-exit-red：dump-config 退出码非 0 拒——publish 永不触达（G-1 真握手闸红例，遗漏大扫 20260901-b #25）', async () => {
+    const version = '1.0.0-alpha.3';
+    const base = greenBase(version);
+    const { io, calls } = scriptedIo(base);
+    await expect(
+      runRelease(['--inject', 'smoke-exit-red'], applyScenario(io, INJECT_SCENARIOS['smoke-exit-red']), {
+        workDir,
+        pkg: { name: 'berryagent', version, binName: 'berry' },
+      }),
+    ).rejects.toThrow(/安装冒烟失败：.* dump-config 退出码 1/);
+    const ran = labels(calls);
+    expect(ran).toContain('smoke:run'); // 冒烟段真到过（smoke:apps 本尊被注入器接管不进记录）
+    expect(ran).not.toContain('publish'); // 装机产物不可装配即止
+  });
+
+  it('smoke-apps-missing：dump-config 未见「默认应用：coder」拒——publish 永不触达（G-1 真握手闸红例，遗漏大扫 20260901-b #25）', async () => {
+    const version = '1.0.0-alpha.3';
+    const base = greenBase(version);
+    const { io, calls } = scriptedIo(base);
+    await expect(
+      runRelease(['--inject', 'smoke-apps-missing'], applyScenario(io, INJECT_SCENARIOS['smoke-apps-missing']), {
+        workDir,
+        pkg: { name: 'berryagent', version, binName: 'berry' },
+      }),
+    ).rejects.toThrow(/未见「默认应用：coder」/);
+    const ran = labels(calls);
+    expect(ran).toContain('smoke:run'); // 冒烟段真到过（smoke:apps 本尊被注入器接管不进记录）
+    expect(ran).not.toContain('publish');
+  });
+
   it('shasum-mismatch：同版本异质响亮拒——publish 永不触达', async () => {
     const version = '1.0.0-alpha.3';
     const base = greenBase(version); // probe 被谱接管（在场异质），其余照底座

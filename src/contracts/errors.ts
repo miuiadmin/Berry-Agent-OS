@@ -136,6 +136,9 @@ export const BROWSER_ENGINE_NOT_FOUND = registerErrorCode('BROWSER_ENGINE_NOT_FO
 /** browser：引擎连接期一码收口（spawn 失败 / DevToolsActivePort 读取失败 / HTTP 握手失败 / WebSocket 建立失败——含双开 profile 锁与 Linux 缺系统库场景；契约篇 §6.10，MCP/LSP connect 一码同律） */
 export const BROWSER_CONNECT_FAILED = registerErrorCode('BROWSER_CONNECT_FAILED');
 
+/** browser：运行时 Node 版本不达标（< 22.19——WebSocket 全局缺席；engines 唯一运行时执法位，起链前拒不留半建态；契约篇 §6.10 生命周期收口⑥，遗漏大扫 20260901-b #15） */
+export const BROWSER_NODE_UNSUPPORTED = registerErrorCode('BROWSER_NODE_UNSUPPORTED');
+
 /** prompts：具名提示词段 id 非法（须小写含 `/` 应用域前缀，如 `memory/core`——防撞宿主自留地；pi-4(a) 拍板，契约篇 §1.3 落码形态①） */
 export const PROMPT_SECTION_INVALID = registerErrorCode('PROMPT_SECTION_INVALID');
 /** prompts：具名提示词段撞名（段 id 已注册——与 TOOL_DUPLICATE 同纪律，拒绝静默覆盖） */

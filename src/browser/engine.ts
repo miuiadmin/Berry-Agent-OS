@@ -32,7 +32,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppLogger } from '../contracts/app.js';
-import { AppError, BROWSER_CONNECT_FAILED } from '../contracts/errors.js';
+import { AppError, BROWSER_CONNECT_FAILED, BROWSER_NODE_UNSUPPORTED } from '../contracts/errors.js';
 import { applyCaptureEvent, SessionCapture } from './capture.js';
 import {
   CdpConnection,
@@ -44,6 +44,27 @@ import {
 } from './cdp.js';
 import { discoverEngine } from './discover.js';
 import type { BrowserAppConfig, DiscoveredEngine, EngineStatus, SessionBrowserState } from './types.js';
+
+/** 运行时最低 Node 版本（package.json engines 同源——WebSocket 全局自 Node 22 起在场） */
+const MIN_NODE_CORE = [22, 19, 0] as const;
+
+/**
+ * Node 运行时版本闸（纯函数——遗漏大扫 20260901-b #15）：bringUp 入口消费。
+ * @param v process.versions.node 形态串（`22.19.1` / `20.11.0`；带尾缀按主三段判）
+ * @returns undefined = 过闸；否则 = 拒绝理由（AppError 文案直接用）
+ */
+export function nodeVersionProblem(v: string): string | undefined {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v.trim());
+  // 非法形态按 0.0.0 兜底判红（fail-closed——未知版本不放行）
+  const core = m === null ? [0, 0, 0] : [Number(m[1]), Number(m[2]), Number(m[3])];
+  for (let i = 0; i < 3; i++) {
+    if (core[i]! < MIN_NODE_CORE[i]!) {
+      return `Node ${v} 低于运行时要求（≥22.19）——browser 件的 WebSocket 全局自 Node 22 起在场。请升级 Node（如 nvm install 22）后重试`;
+    }
+    if (core[i]! > MIN_NODE_CORE[i]!) break; // 高位已过线，低位不再看
+  }
+  return undefined;
+}
 
 /** 裸 spawn 产物结构（组合根 browser-spawn.ts 投影——pid + 活探测两键） */
 export interface EngineChild {
@@ -287,6 +308,12 @@ export class BrowserEngine {
 
   /** 引擎起链（spawn 形态全链 / attach 形态只连） */
   private async bringUp(): Promise<void> {
+    // 运行时版本闸（遗漏大扫 20260901-b #15，生命周期收口⑥）：两形态共用入口
+    // 先验——engines 缺省 advisory 只警告，不达标时装机/boot/对话全正常，cdp 连接
+    // 层 new WebSocket 首用才以裸 ReferenceError 延迟爆炸（与根因距离极远）。此闸
+    // 把失败提前到 spawn/连接之前 + 错误码带升级指引（不留半建态不留野进程）。
+    const problem = nodeVersionProblem(process.versions.node);
+    if (problem !== undefined) throw new AppError(BROWSER_NODE_UNSUPPORTED, problem);
     if (this.deps.config.cdpEndpoint !== undefined) {
       await this.bringUpAttach(this.deps.config.cdpEndpoint);
       return;

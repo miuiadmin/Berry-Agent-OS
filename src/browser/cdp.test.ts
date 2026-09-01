@@ -37,7 +37,7 @@ import { AppError, BROWSER_ENGINE_NOT_FOUND, describeError } from '../contracts/
 import type { ToolDefinition } from '../contracts/tools.js';
 import { CdpConnection, disposeSessionContext, fetchVersionInfo, openSessionContext } from './cdp.js';
 import { discoverEngine } from './discover.js';
-import { BrowserEngine } from './engine.js';
+import { BrowserEngine, nodeVersionProblem } from './engine.js';
 import { applyCaptureEvent, ConsoleRing, SessionCapture } from './capture.js';
 import { renderAccessibilitySnapshot, type FlatDocNode } from './a11y.js';
 import { saveScreenshot, SCREENSHOTS_KEEP } from './screenshots.js';
@@ -1148,5 +1148,27 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
     const stale = await run('browser_click', { ref: '@e0' });
     expect(stale.isError).toBe(true);
     expect((stale.content[0] as { text: string }).text).toContain('不在最近快照');
+  });
+});
+
+describe('browser 运行时 Node 版本闸（纯函数——遗漏大扫 20260901-b #15）', () => {
+  it('达标形态全过闸（边界值 22.19.0 恰过）', () => {
+    expect(nodeVersionProblem('22.19.0')).toBeUndefined();
+    expect(nodeVersionProblem('22.19.1')).toBeUndefined();
+    expect(nodeVersionProblem('23.0.0')).toBeUndefined();
+    expect(nodeVersionProblem('30.1.2')).toBeUndefined();
+  });
+  it('不达标：主/次/补丁三段任一低于线 → 拒绝理由（含当前版本与升级指引）', () => {
+    for (const v of ['20.11.0', '21.0.0', '22.0.0', '22.18.9']) {
+      const problem = nodeVersionProblem(v);
+      expect(problem, v).toBeDefined();
+      expect(problem).toContain(v);
+      expect(problem).toContain('22.19');
+      expect(problem).toContain('升级 Node');
+    }
+  });
+  it('非法形态按 0.0.0 兜底判红（fail-closed——未知版本不放行）', () => {
+    expect(nodeVersionProblem('garbage')).toBeDefined();
+    expect(nodeVersionProblem('')).toBeDefined();
   });
 });
