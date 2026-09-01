@@ -78,8 +78,10 @@ const MODULE_EDGES = {
   // 取（sessions/paths/agent/channels/ui——运行时零跨模块 import）；fork 边界
   // 探针走 sessions.lastClosedBoundary() 宿主面单源（件不触 session 内部——
   // 修前件内自算曾以词级过滤数组喂 lastClosedTurnBoundary 恒错位，收敛宿主
-  // 后 session 边退役）
-  checkpoint: ['contracts', 'context'],
+  // 后 session 边退役）；tools 边 = restore 写段入 per-canonical-path 写串行
+  // 链（2026-09-01 遗漏大扫 20260901-c #5——serializeWrites/canonicalize 两
+  // 单点，链覆盖面注记见骨架篇 §7.5②；非工具族装配依赖）
+  checkpoint: ['contracts', 'context', 'tools'],
   // admin = 平台管理面官方件（2026-08-27 契约篇 §3.4 第一刀，默认层第十行）：
   // apps_list/events_query 两只读工具 + 管理 Skill 随件携带。工具/服务全经
   // ctx.get 运行时取（结构子集类型本地收窄）——零跨模块 import，contracts

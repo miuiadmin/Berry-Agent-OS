@@ -89,8 +89,12 @@ function textResult(text: string, details?: Record<string, unknown>): AgentToolR
  * 不存在的路径回退到最近存在的祖先做 realpath 再拼回尾部段——
  * 保证 fence 比较双方都是「真实位置」，符号链逃逸（可写根内 symlink 指向根外）
  * 会在 contain 检查处暴露。
+ *
+ * 导出消费方（2026-09-01 遗漏大扫 20260901-c #5）：checkpoint restore——
+ * manifest 路径定写串行链键须与工具写同键同源（链键 = canonical 物理路径，
+ * 各写者自行 canonicalize 会在拼写差异上漏互斥）。
  */
-async function canonicalize(abs: string): Promise<string> {
+export async function canonicalize(abs: string): Promise<string> {
   try {
     return await realpath(abs);
   } catch {

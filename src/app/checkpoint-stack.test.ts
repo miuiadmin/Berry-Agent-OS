@@ -13,12 +13,35 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions, Usage } from '../contracts/llm.js';
 import type { UiBackend } from '../channels/types.js';
 import { createRuntime } from './assembly.js';
 import type { AppRuntime } from './assembly.js';
 import { listSessionManifests, type CheckpointManifest } from '../checkpoint/store.js';
+import { canonicalize, serializeWrites } from '../tools/fs.js';
+
+/* ---------------- guard 捕获窗口时序探针（20260901-c #5 回归锁） ---------------- */
+
+/**
+ * guard 捕获窗口钩子（vi.hoisted——vi.mock 工厂在 import 相位执行，探针状态
+ * 必须先于工厂初始化）。对 captureSnapshot 做**不改行为的包一层**（时序探针
+ * 非行为 mock——真捕获照跑）：窗口内拿到确定性控制点，用于「guard 快照进行
+ * 中同会话 run 启动」的 TOCTOU 编排。hook 一次性自摘防污染其余捕获。
+ */
+const guardProbe = vi.hoisted(() => ({ hook: undefined as (() => void | Promise<void>) | undefined }));
+vi.mock('../checkpoint/snapshot.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../checkpoint/snapshot.js')>();
+  return {
+    ...actual,
+    captureSnapshot: (...args: Parameters<typeof actual.captureSnapshot>) => {
+      const hook = guardProbe.hook;
+      guardProbe.hook = undefined; // 一次性（下一捕获恢复直通）
+      const run = () => actual.captureSnapshot(...args);
+      return hook === undefined ? run() : Promise.resolve(hook()).then(run);
+    },
+  };
+});
 
 /* ---------------- 测试基建（与 goal.test / subagent-app.test 同款） ---------------- */
 
@@ -40,6 +63,17 @@ const toolCallMessage = (name: string, args: Record<string, unknown>): Assistant
   usage: NO_USAGE,
   stopReason: 'toolUse',
   timestamp: 1,
+});
+
+/** abort 终止事件（error 流事件编码 reason:'aborted'——loop 终值映射 aborted 的输入形；
+ * conversation.test 同款——挂起流的 abort 合作收口用） */
+const abortEvent = (message: AssistantMessage) => ({
+  value: {
+    type: 'error' as const,
+    reason: 'aborted' as const,
+    error: { ...message, stopReason: 'aborted' as const },
+  },
+  done: false as const,
 });
 
 /** 合成流（start → done） */
@@ -114,13 +148,13 @@ afterEach(async () => {
 /** 装配 + 登记（通知后端随装随挂——审批/命令回执两消费面就位）；返回运行时与其工作区根 */
 async function assemble(
   overrides: Parameters<typeof createRuntime>[0] = {},
-): Promise<{ runtime: AppRuntime; ws: string }> {
+): Promise<{ runtime: AppRuntime; ws: string; notifies: string[] }> {
   const ws = overrides.workspace !== undefined ? String(overrides.workspace) : makeTempDir('app-cpk-ws-');
   const runtime = await createRuntime({ dbPath: ':memory:', workspace: ws, ...overrides });
-  const { backend } = recordingBackend();
+  const { backend, notifies } = recordingBackend();
   runtime.ui.attach(backend);
   runtimes.push(runtime);
-  return { runtime, ws };
+  return { runtime, ws, notifies };
 }
 
 /** checkpoint 件数据根（行 id = checkpoint——appDataDirOf 布局单源） */
@@ -255,6 +289,105 @@ describe('/rewind 命令（两段事务 + guard 防误退）', () => {
     expect(rewindData.newSessionId).not.toBe(oldId);
     // adopt 兑现：路由切新会话
     expect(sessionsFace(runtime).currentSessionId()).toBe(rewindData.newSessionId);
+  });
+
+  it('guard 快照窗口期 run 启动 → 二次复验中止回退（20260901-c #5）：文件不动、会话不切、guard 快照保留（修前：TOCTOU 窗内照常回退）', async () => {
+    // 前 6 次模型调用 = 两 run 的脚本序；第 7 次（窗口期 run）挂起在流里——
+    // running 常真，直到 afterEach shutdown 收口
+    const scripted = scriptedStream([
+      toolCallMessage('write', { path: 'a.txt', content: 'v1' }),
+      textMessage('首写完成'),
+      toolCallMessage('read', { path: 'a.txt' }),
+      toolCallMessage('write', { path: 'a.txt', content: 'v2-改' }),
+      textMessage('改完'),
+    ]);
+    let calls = 0;
+    // 窗口期 run 的流：start 后挂起直到 abort（conversation.test pendingOnceStream
+    // 同款 abort 合作形——不合作则 run 永不结算，afterEach shutdown 拖死后续用例）
+    const streamFn: StreamFn = (context: LlmContext, options: StreamFnOptions, signal?: AbortSignal) => {
+      calls += 1;
+      if (calls <= 5) return scripted.streamFn(context, options);
+      const message = textMessage('窗口期慢答');
+      const events = [{ type: 'start' as const, partial: { ...message, content: [] } }];
+      return {
+        [Symbol.asyncIterator]() {
+          let index = 0;
+          return {
+            next: async () => {
+              if (index < events.length) return { value: events[index++]!, done: false as const };
+              // 已 abort 短路先判（信号只发一次，事后挂监听收不到）
+              if (signal?.aborted) return abortEvent(message);
+              await new Promise((resolve) => {
+                signal?.addEventListener('abort', resolve, { once: true });
+              });
+              return abortEvent(message);
+            },
+          };
+        },
+        // result() 契约：abort 编码进返回消息 stopReason——loop 终态以它为准
+        result: async () => (signal?.aborted ? { ...message, stopReason: 'aborted' } : message),
+      };
+    };
+    const { runtime, ws } = await assemble({ streamFn });
+    await runtime.conversation!.submitOnce('写 a.txt 初版');
+    await runtime.conversation!.submitOnce('改 a.txt');
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v2-改');
+    const oldId = runtime.session!.header.sessionId;
+    const busyFace = runtime.ctx.get<{ isBusy: (sessionId?: string) => boolean }>('sessions');
+
+    // TOCTOU 编排：guard 捕获窗口内（webui /submit 同款路径——launch 即 running）
+    // 启动同会话 run，确认 running 落位后才放 guard 快照继续
+    guardProbe.hook = async () => {
+      void runtime.conversation!.submitOnce('窗口期新输入').catch(() => undefined);
+      await vi.waitFor(() => expect(busyFace.isBusy(oldId)).toBe(true));
+    };
+    const { backend: windowBackend, notifies: windowNotifies } = recordingBackend();
+    runtime.ui.attach(windowBackend);
+    expect(await runtime.channels.commands.dispatch('/rewind latest')).toBe('ok');
+    // 诚实中止面：回执点名 run 已启动 + guard 快照保留可重试
+    expect(windowNotifies.join('\n')).toContain('guard 快照期间会话 run 已启动——已中止回退');
+    // 文件不动（修前：窗口内照常回退——a.txt 回 v1）
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v2-改');
+    // 会话不切（无 fork+adopt）
+    expect(sessionsFace(runtime).currentSessionId()).toBe(oldId);
+    // guard 快照保留（第 3 条、guard=true——可重试的撤销点）
+    const after = await listSessionManifests(cpkDataRoot(), oldId);
+    expect(after).toHaveLength(3);
+    expect(after[0]!.guard).toBe(true);
+    // 收口挂起 run（abort 合作形流随之结算）——不留在飞 run 拖死 afterEach
+    // shutdown（registry 不清 → 后续用例 AGENT_ROLE_EXISTS 连锁红）
+    await runtime.conversation!.interrupt();
+  });
+
+  it('restore 写段入写串行链（20260901-c #5）：同路径在飞写段持有链时恢复排队其后（修前：裸 writeFile 直接交叠）', async () => {
+    const { streamFn } = scriptedStream([
+      toolCallMessage('write', { path: 'a.txt', content: 'v1' }),
+      textMessage('首写完成'),
+      toolCallMessage('read', { path: 'a.txt' }),
+      toolCallMessage('write', { path: 'a.txt', content: 'v2-改' }),
+      textMessage('改完'),
+    ]);
+    const { runtime, ws } = await assemble({ streamFn });
+    await runtime.conversation!.submitOnce('写 a.txt 初版');
+    await runtime.conversation!.submitOnce('改 a.txt');
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v2-改');
+
+    // 占住 a.txt 的写链（在飞工具写形态——与 write/edit 同键同链）
+    const key = await canonicalize(join(ws, 'a.txt'));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    void serializeWrites([key], () => gate);
+
+    // /rewind latest（目标 = 改前快照 a.txt:v1）：guard 只读不入链、恢复写段
+    // 须排队——60ms 余量后仍未覆写即证入链（修前裸写早已落盘）
+    const rewound = runtime.channels.commands.dispatch('/rewind latest');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v2-改');
+    release();
+    expect(await rewound).toBe('ok');
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v1');
   });
 });
 

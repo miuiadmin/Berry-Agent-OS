@@ -371,6 +371,17 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
           notify(`guard 快照拍摄失败：${String(err)}——已中止（回退前必须有可撤销点）。`);
           return;
         }
+        // 前置拒第二段（2026-09-01 遗漏大扫 20260901-c #5，§5.3 两段收口）：
+        // isBusy 是纯读探针非锁非预留，guard 快照（全工作区 walk）秒级窗口内
+        // 同会话 run 可经 webui /submit 启动——guard 完成后、恢复开始前二次
+        // 复验，run 已启动即中止（guard 快照保留可重试；残余微窗由 restore
+        // 写段入写串行链收口——restore.ts 头注）
+        if (sessions.isBusy(focusedId)) {
+          notify(
+            'guard 快照期间会话 run 已启动——已中止回退（guard 快照保留，可重试；文件恢复不得在跑动的 agent 脚下进行）。',
+          );
+          return;
+        }
         // ② 文件恢复（失败不 fork、快照保留——§5.3 失败语义）
         let report;
         try {
