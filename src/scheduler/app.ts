@@ -173,7 +173,17 @@ async function applySchedulerApp(ctx: AppContext, deps: SchedulerAppDeps): Promi
         return { ok: false, message: `schedule 不合法：${parsed.error}` };
       }
       const now = (deps.now ?? Date.now)();
-      // upsert：名确定性 goal-<goalId>（重挂 = 同行覆盖，last_run_at 触发史保留）
+      // once@ 重挂先删行再插（定向复扫 20260902 第七轮 M-3 修死）：putOwned 的
+      // upsert 保留 last_run_at（对 every@/daily@ 是防补拍双跑的正确语义——K2-c），
+      // 但 evaluateDue 的 once 分支对 last_run_at 非空行无条件 done 短路——once
+      // 触发过一次后重挂新时刻 = 永不触发且回执谎称已登记（死钟）。先 removeOwned
+      // 清行（触发史随行清零，与 /tick rm+add 语义对齐——运行时骨架「后台唤醒」
+      // 条重挂行史语义补裁 2026-09-02）；every/daily 保留 upsert 语义不动。
+      if (parsed.schedule.kind === 'once') {
+        store.removeOwned(GOAL_JOB_OWNER, input.goalId);
+      }
+      // 写行：名确定性 goal-<goalId>（重挂 = 同行；once 形已先删行重插——触发史
+      // 清零，every/daily 走 upsert 保留 last_run_at 触发史防补拍双跑）
       store.putOwned({
         name: goalJobName(input.goalId),
         prompt: input.promptSnapshot,

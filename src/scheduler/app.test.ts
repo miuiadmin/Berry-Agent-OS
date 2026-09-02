@@ -10,6 +10,7 @@ import { createContext } from '../context/context.js';
 import { createLogger } from '../context/logger.js';
 import { openStore, type Store } from '../persist/index.js';
 import { JobsStore, migrations } from './index.js';
+import { evaluateDue, parseSchedule } from './schedule.js';
 import { createSchedulerApp, goalJobName, GOAL_JOB_OWNER } from './app.js';
 import type { GoalJobsFace } from './app.js';
 
@@ -74,5 +75,50 @@ describe('GoalJobsFace：disable/enable/remove（生命周期位 + 幽灵行）'
   it('goalJobName 名约定：goal-<goalId>（确定性——重挂即同行）', async () => {
     await face.register({ goalId: 'g1', sessionId: 's1', schedule: 'every@1h', promptSnapshot: '目标' });
     expect(jobs.get('goal-g1')).toBeDefined();
+  });
+});
+
+describe('GoalJobsFace：重挂行史语义（once 清零 / every 保留——定向复扫 20260902 第七轮 M-3）', () => {
+  it('once@ 已触发后重挂新时刻：触发史随行清零，evaluateDue 应 wait 非 done（修前红）', async () => {
+    const t0 = Date.now();
+    // 首挂未来 60s 的 once 钟
+    const first = await face.register({
+      goalId: 'g1',
+      sessionId: 's1',
+      schedule: `once@${new Date(t0 + 60_000).toISOString()}`,
+      promptSnapshot: '目标',
+    });
+    expect(first.ok).toBe(true);
+    const name = goalJobName('g1');
+    // 模拟首挂已到点触发（抢占推进 last_run_at——once 已跑 = 生命周期终）
+    expect(jobs.reserveRun(name, t0 + 60_000, 'scheduled')).toBe('reserved');
+    // 重挂新未来时刻（1h 后）：修前 putOwned 保留 last_run_at → once 分支
+    // 无条件 done 短路——新时刻永不触发且回执谎称已登记（死钟）
+    const again = await face.register({
+      goalId: 'g1',
+      sessionId: 's1',
+      schedule: `once@${new Date(t0 + 3600_000).toISOString()}`,
+      promptSnapshot: '目标',
+    });
+    expect(again.ok).toBe(true);
+    const row = jobs.get(name)!;
+    // 行刚经 register 重写——schedule 必非空（类型面 null 属行缺省态，此处不存在）
+    const parsed = parseSchedule(row.schedule!, t0);
+    if (!parsed.ok) throw new Error(`重挂后 schedule 应可解析：${row.schedule}`);
+    const decision = evaluateDue(parsed.schedule, row.lastRunAt, row.createdAt, t0);
+    // 修前 = done（回执谎称已登记）；修后 = wait 到新 at
+    expect(decision).toEqual({ action: 'wait', nextAt: t0 + 3600_000 });
+  });
+
+  it('every@ 重挂保留触发史（防补拍双跑——upsert 语义锁，恒绿）', async () => {
+    await face.register({ goalId: 'g1', sessionId: 's1', schedule: 'every@1h', promptSnapshot: '目标' });
+    const name = goalJobName('g1');
+    const firedAt = Date.now();
+    expect(jobs.reserveRun(name, firedAt, 'scheduled')).toBe('reserved');
+    // 重挂改间隔：last_run_at 保留（删了就会立即补拍一跑——K2-c 防补拍双跑口径）
+    await face.register({ goalId: 'g1', sessionId: 's1', schedule: 'every@2h', promptSnapshot: '目标' });
+    const row = jobs.get(name)!;
+    expect(row.schedule).toBe('every@2h');
+    expect(row.lastRunAt).toBe(firedAt);
   });
 });

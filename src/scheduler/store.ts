@@ -93,7 +93,9 @@ export class JobsStore {
   /**
    * 归属行 upsert（重挂 = 同名覆盖）：新行 INSERT；同名已存 UPDATE 覆盖
    * prompt/schedule/session_id/owner/owner_key 并复活 enabled=1——
-   * last_run_at（抢占比对键）与 created_at 保留（重挂不是重置触发史）。
+   * last_run_at（抢占比对键）与 created_at 保留（every/daily 重挂不是重置触发史
+   * ——防补拍双跑；once 形重挂在调用侧先 removeOwned 清史再插，见 app.ts
+   * goalFace.register——定向复扫 20260902 第七轮 M-3）。
    * 名确定性由调用方约定（face 侧 goal-<goalId>），同名即同行。
    */
   putOwned(job: {
