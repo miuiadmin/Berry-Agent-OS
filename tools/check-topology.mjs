@@ -182,6 +182,61 @@ const TEST_BARE_IMPORTS = {
 };
 const TEST_ONLY_BARE = new Set(['vitest']);
 
+/** 跨模块导入目标·公开面四名（契约篇 §6.3#2 目标态的文件名白名单——P1-9，2026-09-02）：
+ * 目标文件名（去 .ts）属此集合的跨模块导入自由（index 目录面 / types 类型面 /
+ * events 事件目录面 / contract 契约面），此外的深文件须在下方 LEGACY_DEEP_FACES 册 */
+const PUBLIC_FACES = new Set(['index', 'types', 'events', 'contract']);
+/** 存量深挖面册（P1-9 摸底收册，2026-09-02）：产码跨模块实际引用的深文件全清单——
+ * 双向棘轮：新深挖（册外）即红——先入对方公开面再导出；册死项（产码跨模块零引用）
+ * 即红——已收敛进公开面或已内聚，删册行。册随真用单向收紧，勿扩册。
+ * 大头注记：contracts 域 11 项是 L0 分域契约面本体（errors/tools/typebox 等按域拆的
+ * 公共类型件）——收敛方向是 contracts 域 index 再导出，非各引用方改 import。 */
+const LEGACY_DEEP_FACES = new Set([
+  'agent/loop.ts',
+  'agent/queue.ts',
+  'bridge/bootstrap.ts',
+  'bridge/external-domain.ts',
+  'channels/commands.ts',
+  'channels/service.ts',
+  'channels/tui.ts',
+  'chat/app.ts',
+  'context/chain.ts',
+  'context/context.ts',
+  'context/loader.ts',
+  'context/logger.ts',
+  'context/rate-limit.ts',
+  'context/workspace.ts',
+  'contracts/app.ts',
+  'contracts/bridge.ts',
+  'contracts/channels.ts',
+  'contracts/errors.ts',
+  'contracts/exec.ts',
+  'contracts/jobs.ts',
+  'contracts/llm.ts',
+  'contracts/messages.ts',
+  'contracts/session-events.ts',
+  'contracts/skills.ts',
+  'contracts/subagent.ts',
+  'contracts/tools.ts',
+  'contracts/typebox.ts',
+  'exec/env.ts',
+  'exec/tool.ts',
+  'persist/store.ts',
+  'safety/allowlist.ts',
+  'safety/approval.ts',
+  'safety/gate.ts',
+  'safety/roots.ts',
+  'session/derive.ts',
+  'session/event-types.ts',
+  'session/session.ts',
+  'session/snapshot.ts',
+  'subagent/inprocess.ts',
+  'tools/apply-patch.ts',
+  'tools/fs.ts',
+  'tools/pipeline.ts',
+  'tools/registry.ts',
+]);
+
 /** 递归收集 src 下全部 ts 文件（webui/client 排除——vite 打包域：bundler 解析 + JSX，不进 Node 模块 DAG，刀二冷读 CR-7/9 同族排除） */
 function collect(dir) {
   const out = [];
@@ -230,6 +285,9 @@ const usedEdges = new Set();
 // 产码裸导入记录（"bare module"）——裸导入死项断言的用例证据（P1-8，口径同 usedEdges）：
 // 测试引用住 TEST_BARE_IMPORTS 测试账，不给产码账续命
 const usedBare = new Set();
+// 产码跨模块深挖面引用记录（"src 相对路径"）——深挖面册死项断言的用例证据（P1-9）：
+// 只计产码跨模块（同模块内引自由、测试豁免同 DAG 两账——口径与 usedEdges 同源）
+const usedDeep = new Set();
 
 for (const file of collect(srcRoot)) {
   const module = moduleOf(file);
@@ -270,6 +328,18 @@ for (const file of collect(srcRoot)) {
         continue;
       }
       usedEdges.add(`${module} ${targetModule}`);
+      // 公开面收敛执法（P1-9，契约篇 §6.3#2）：跨模块导入目标须是公开面四名或存量册深挖面
+      const targetRel = target.slice(srcRoot.length + 1);
+      const stem = targetRel.split('/').at(-1).replace(/\.ts$/, '');
+      if (PUBLIC_FACES.has(stem)) {
+        // 公开面四名自由（index 目录面 / types 类型面 / events 事件目录面 / contract 契约面）
+      } else if (LEGACY_DEEP_FACES.has(targetRel)) {
+        usedDeep.add(targetRel); // 册内深挖面合法——证据入账供册死项断言
+      } else {
+        violations.push(
+          `${relative(file)}：跨模块深挖非公开面 ${module} → ${targetRel}（先入对方 index/types 再导出，勿扩册——契约篇 §6.3#2）`,
+        );
+      }
       if (module !== '(root-files)' && !allowed.includes(targetModule)) {
         violations.push(
           `${relative(file)}：${module} → ${targetModule} 不在白名单边 ${allowed.join(', ') || '（无）'}`,
@@ -373,6 +443,18 @@ function relative(file) {
   }
 }
 
+/* ---------------- 深挖面册死项断言（契约篇 §6.3#2 公开面收敛棘轮，P1-9，2026-09-02） ----------------
+ * 册项产码跨模块零引用 = 已收敛进公开面（引用方改走 index/types 再导出）或已内聚回
+ * 同模块——删册行。册随真用单向收紧，勿扩册（新深挖先入公开面再导出）。
+ * 证据口径只计产码跨模块 import（与 usedEdges/usedBare 同源——测试深挖不给册续命）。 */
+{
+  for (const face of LEGACY_DEEP_FACES) {
+    if (!usedDeep.has(face)) {
+      violations.push(`深挖面册死项：${face} 产码跨模块零引用——已收敛或已内聚，删册行（契约篇 §6.3#2 公开面收敛棘轮）`);
+    }
+  }
+}
+
 /* ---- 规则 3：公开面模块计数锚（2026-09-01 复盘 G-3 根治） ----
  * 「模块增行不滚计数」五起漂移的机器面：公开文档的模块数宣称必须等于边表实数。
  * 断言面（每文件逐处对照，非只头部）：
@@ -425,5 +507,5 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `拓扑检查通过：${seenModules.size} 个模块（${[...seenModules].sort().join(', ')}），边表 ${Object.keys(MODULE_EDGES).length} 行（死边零，裸导入产码死项零，双向执法，公开面模块计数锚对照绿）`,
+  `拓扑检查通过：${seenModules.size} 个模块（${[...seenModules].sort().join(', ')}），边表 ${Object.keys(MODULE_EDGES).length} 行（死边零，裸导入产码死项零，深挖面册死项零，双向执法，公开面模块计数锚对照绿）`,
 );

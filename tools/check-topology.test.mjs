@@ -89,6 +89,7 @@ describe('check-topology 机器闸（复盘 20260901 T-3）', () => {
     expect(stdout).toMatch(/拓扑检查通过：\d+ 个模块/);
     expect(stdout).toContain('死边零');
     expect(stdout).toContain('裸导入产码死项零'); // P1-8 汇总锚（真树产码账全对子有据）
+    expect(stdout).toContain('深挖面册死项零'); // P1-9 汇总锚（真树册项全活）
   });
 
   it('违规夹具 exit 1：agent → session 越边 import 被 stderr 点名（CHECK_ROOT 根缝）', () => {
@@ -150,6 +151,49 @@ describe('check-topology 机器闸（复盘 20260901 T-3）', () => {
       expect(run.stderr).not.toContain('dogfood-fixture');
     } finally {
       rmSync(root2, { recursive: true, force: true });
+    }
+  });
+
+  it('P1-9 深挖面册死项断言在岗：空席夹具的册死项被 stderr 点名（断言块删除后本测必红）', () => {
+    const run = spawnSync(process.execPath, [SCRIPT], {
+      cwd: ROOT,
+      env: { ...process.env, CHECK_ROOT: fixtureRoot },
+      encoding: 'utf8',
+    });
+    expect(run.status).toBe(1);
+    // 空席夹具零产码跨模块 import → 册 43 项皆死项；点名任一具体册项即证明断言在岗
+    //（断言块被静默删除 / 证据口径误含测试文件时此断言先红——成熟度扫描 20260901 P1-9）
+    expect(run.stderr).toContain('深挖面册死项：session/session.ts');
+  });
+
+  it('P1-9 新深挖即红 + 册内放行：册外深文件被点名，册内深文件（合法边）不点名', () => {
+    const root3 = mkdtempSync(join(tmpdir(), 'berry-check-topo-p19-'));
+    try {
+      for (const mod of SEATS) {
+        const dir = join(root3, 'src', mod);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'index.ts'), '');
+      }
+      // 组合根纪律段读此文件——缺失会 ENOENT 崩脚本（空档即可）
+      writeFileSync(join(root3, 'src', 'app', 'assembly.ts'), '');
+      // 册内深文件实体（session/session.ts 在册）+ 册外深文件实体（session/secret.ts）
+      writeFileSync(join(root3, 'src', 'session', 'session.ts'), '');
+      writeFileSync(join(root3, 'src', 'session', 'secret.ts'), '');
+      // chat → session 是白名单边：册内深挖合法——stderr 不得点名本文件
+      writeFileSync(join(root3, 'src', 'chat', 'index.ts'), "import type { X } from '../session/session.js';\n");
+      // 同边册外深文件——必点名（新深挖即红）
+      writeFileSync(join(root3, 'src', 'chat', 'evil.ts'), "import type { Y } from '../session/secret.js';\n");
+      const run = spawnSync(process.execPath, [SCRIPT], {
+        cwd: ROOT,
+        env: { ...process.env, CHECK_ROOT: root3 },
+        encoding: 'utf8',
+      });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('chat/evil.ts：跨模块深挖非公开面 chat → session/secret.ts');
+      // 反向锁：深挖检查整块退化为恒放行时，册外深文件不再被点名——本行先红
+      expect(run.stderr).not.toContain('chat/index.ts');
+    } finally {
+      rmSync(root3, { recursive: true, force: true });
     }
   });
 });
