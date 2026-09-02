@@ -108,6 +108,29 @@ describe('scanSkillLocation（发现算法）', () => {
     expect(skills.map((s) => s.name)).toEqual(['normal-skill']);
   });
 
+  it('嵌套 .gitignore 无斜杠模式任意深度 basename 匹配（git 语义，第七轮 L-3）：本层与深层同名目录同被忽略', () => {
+    const dir = makeRoot();
+    mkdirSync(join(dir, 'sub'), { recursive: true });
+    // 无斜杠模式 `build`：git 语义 = sub 子树任意深度 basename 匹配（本层 sub/build 与深层 sub/x/build 都算）
+    writeFileSync(join(dir, 'sub', '.gitignore'), 'build\n');
+    writeSkill(join(dir, 'sub', 'build'), 'same-level-skill'); // 本层——修前后都被忽略（锚定面盖住）
+    writeSkill(join(dir, 'sub', 'x', 'build'), 'deep-build-skill'); // 深层——修前漏配仍被发现（红）
+    writeSkill(join(dir, 'sub', 'x', 'normal'), 'kept-skill'); // 对照组：非忽略名照常发现
+    const { skills } = scanSkillLocation({ dir, source: 'user' });
+    expect(skills.map((s) => s.name)).toEqual(['kept-skill']);
+  });
+
+  it('嵌套 .gitignore 前导 / 锚定模式维持本层精确匹配不外溢深层（锚定判据锁）', () => {
+    const dir = makeRoot();
+    mkdirSync(join(dir, 'sub'), { recursive: true });
+    // 前导 / = 显式锚定本层：sub/build 被忽略，sub/x/build 深层不受辖（git 同判）
+    writeFileSync(join(dir, 'sub', '.gitignore'), '/build\n');
+    writeSkill(join(dir, 'sub', 'build'), 'same-level-skill');
+    writeSkill(join(dir, 'sub', 'x', 'build'), 'deep-build-skill');
+    const { skills } = scanSkillLocation({ dir, source: 'user' });
+    expect(skills.map((s) => s.name)).toEqual(['deep-build-skill']);
+  });
+
   it('SKILL.md 本身被 gitignore → 该目录不算技能根，继续向下递归', () => {
     const dir = makeRoot();
     // 忽略 aa/SKILL.md（文件级模式）而非整个 aa 目录

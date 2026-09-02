@@ -86,9 +86,19 @@ function prefixIgnorePattern(line: string, prefix: string): string | null {
   } else if (pattern.startsWith('\\!')) {
     pattern = pattern.slice(1);
   }
-  // 锚定根的模式去掉前导 / 后再前缀化（相对本目录）
-  if (pattern.startsWith('/')) pattern = pattern.slice(1);
-  const prefixed = prefix ? `${prefix}${pattern}` : pattern;
+  // 前导 / = 显式锚定标记（先记下再去掉；锚定形相对本目录精确匹配）
+  const rooted = pattern.startsWith('/');
+  if (rooted) pattern = pattern.slice(1);
+  if (!prefix) return negated ? `!${pattern}` : pattern;
+  // git 锚定语义判据（定向复扫 20260902 第七轮 L-3 修死）：模式体（去尾随目录标记
+  // 斜杠——尾随 / 是目录标记不是锚点）含斜杠 = 相对路径锚定本层；前导 / 同为锚定。
+  // 两者以外的纯 basename 模式（如 `build`、`secret/`）= 所在目录子树**任意深度**
+  // basename 匹配——前缀化须插 '**/' 才能让 ignore 包同时匹配本层（sub/build）与
+  // 深层（sub/x/build）；直接拼前缀会造出锚定路径，深层漏配、被忽略目录里的
+  // SKILL.md 仍被发现注入。根 .gitignore（prefix 空）不受影响——模式原样已天然任意深度。
+  const body = pattern.endsWith('/') ? pattern.slice(0, -1) : pattern;
+  const anchored = rooted || body.includes('/');
+  const prefixed = anchored ? `${prefix}${pattern}` : `${prefix}**/${pattern}`;
   return negated ? `!${prefixed}` : prefixed;
 }
 
