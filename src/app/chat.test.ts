@@ -565,6 +565,34 @@ describe('S3 信封转接（双驱动事件各带归属键——互不绞屏的�
     expect(envelopes.every((e) => e.sessionId === aId || e.sessionId === bId)).toBe(true);
     void second;
   });
+
+  it('迟到消费者全量转接：sink 挂接时非聚焦活驱动照达（遗漏大扫 20260902-b #9——修前只即时转接聚焦驱动，非聚焦活驱动的信封从此不到达迟到消费者直至退役）', async () => {
+    const { streamFn, release } = pendingStream();
+    const { runtime } = await assemble({ streamFn });
+    const front = runtime.front;
+    const first = runtime.drivers.focused()!;
+    const aId = first.session.header.sessionId;
+
+    // A 开跑（挂起流）→ 开 B 聚焦切换（A 变非聚焦活驱动——run 在飞）
+    front.submit('慢问');
+    await spinUntil(() => first.driver.isRunning, 'A 在飞');
+    const second = runtime.drivers.open()!;
+    const bId = second.session.header.sessionId;
+
+    // 迟到消费者挂接（webui 行重挂/SSE 再挂形态——此刻 B 聚焦、A 非聚焦在飞）
+    const lateEnvelopes: { sessionId: string; type: string }[] = [];
+    front.addDisplay((envelope) => lateEnvelopes.push({ sessionId: envelope.sessionId, type: envelope.event.type }));
+
+    release(); // 放行 A 的流终值——A 在非聚焦态结算
+    await first.driver.settle();
+
+    // A（挂接时非聚焦）的迟到事件照达迟到消费者——修前此面结构性断供
+    const aTypes = lateEnvelopes.filter((e) => e.sessionId === aId).map((e) => e.type);
+    expect(aTypes).toContain('message_end');
+    expect(aTypes).toContain('agent_end');
+    // 挂接时聚焦的 B 路（既有行为）不回退：B 的 open 全量接线仍走 frontDisplays 面
+    void bId;
+  });
 });
 
 describe('S3 退出扇出（requestQuit 从聚焦单路扩为全部活驱动 abort）', () => {

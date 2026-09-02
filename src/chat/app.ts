@@ -829,11 +829,14 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
     quit: frontQuit,
     addDisplay: (sink) => {
       frontDisplays.push(sink);
-      // 即时转接当前聚焦驱动（转接闭包捕获当时聚焦 id——信封补键在转接层）
-      const current = registry.focused();
-      if (current !== undefined) {
-        const sid = current.session.header.sessionId;
-        current.driver.addDisplay((event) => sink({ sessionId: sid, event }));
+      // 即时转接全部非退役驱动（遗漏大扫 20260902-b #9——与 open 的「既有消费者
+      // 全量接入新驱动」对称：转接扇两方向同一形状）。修前只接聚焦驱动——迟到
+      // 消费者（webui 行重挂/SSE 再挂）从此收不到非聚焦活驱动的 display 信封
+      // 直至其退役，SSE display 族「全部会话帧」承诺被聚焦指针单点接线击穿
+      for (const entry of entries.values()) {
+        if (entry.retired) continue; // 退役条目只保 durable 底账（迟到结算走摘要行语义）
+        const sid = entry.session.header.sessionId;
+        entry.driver.addDisplay((event) => sink({ sessionId: sid, event }));
       }
     },
     // S3 扇出：等全部活驱动的 run 结算（退出序列在 abort 后先等它们收尾再 flush）
