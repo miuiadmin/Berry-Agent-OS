@@ -150,11 +150,12 @@ describe('契约 5 planTagOperations / assertDistTagTerminal：终态统一律',
 });
 
 describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
-  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + LICENSE + 教学例 + 官方应用清单 + 出厂技能 + 构建溯源面） */
+  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + LICENSE + 教学例 + 官方应用清单 + 出厂技能 + 构建溯源面 + 版本史入口） */
   const CLEAN = [
     'package.json',
     'README.md',
     'LICENSE',
+    'CHANGELOG.md',
     'dist/app/main.js',
     'dist/webui/index.html',
     'dist/admin/skills/admin/SKILL.md',
@@ -193,6 +194,13 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     const v = inspectPackEntries(CLEAN.filter((p) => p !== 'dist/.build-meta.json'));
     expect(v.ok).toBe(false);
     expect(v.missing.join(' ')).toMatch(/dist\/\.build-meta\.json/);
+  });
+  it('缺 CHANGELOG.md 版本史入口 → 检视不过（遗漏大扫 20260902-b #12：自称随包物但 README/LICENSE 之外裸奔无锚）', () => {
+    // files 数组显式含 CHANGELOG.md 且档内自称「包内消费者版本史入口」——手滑
+    // 删 files 行时检视照绿的静默漂移恰是白名单机器验收的设计目标所防
+    const v = inspectPackEntries(CLEAN.filter((p) => p !== 'CHANGELOG.md'));
+    expect(v.ok).toBe(false);
+    expect(v.missing.join(' ')).toMatch(/CHANGELOG\.md/);
   });
   it('测试/声明/映射/源码/构建配置混入 → 违禁（violations 逐个点名）', () => {
     const v = inspectPackEntries([
@@ -394,6 +402,9 @@ function greenBase(version) {
             'package.json',
             'README.md',
             'LICENSE',
+            // 版本史入口（遗漏大扫 20260902-b #12）：greenBase 罐头面与必在清单同步——
+            // 缺行会让契约 3 检视在管线测里红（夹具随身带新锚面，先例=上 #4 溯源面注）
+            'CHANGELOG.md',
             'dist/app/main.js',
             'dist/webui/index.html',
             'dist/admin/skills/admin/SKILL.md',

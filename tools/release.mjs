@@ -222,6 +222,10 @@ export function inspectPackEntries(files) {
   // files 含 dist 整目录隐式随包，缺席时运行侧 readBuildMeta=null 静默降级无机器红
   //（G-1 apps/skills 缺席同型风险），显式锚定后 files 面漂移即检视红
   mustHave('dist/.build-meta.json（构建溯源面）', (p) => p === 'dist/.build-meta.json');
+  // 版本史入口（遗漏大扫 20260902-b #12）：CHANGELOG.md 自我声明「npm 包内的
+  // 消费者经本文件得到版本史入口」且 files 数组显式含它——同级随包物 README/
+  // LICENSE 都有 mustHave，唯独它裸奔；手滑删 files 行即静默绿发布
+  mustHave('CHANGELOG.md（版本史入口）', (p) => p === 'CHANGELOG.md');
   const violations = paths.filter(
     (p) =>
       /\.test\.js$/.test(p) ||
