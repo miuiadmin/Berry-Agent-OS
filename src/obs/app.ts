@@ -84,11 +84,17 @@ export const OBS_ALERTS_ROTATE_BYTES = 10 * 1024 * 1024;
 /**
  * 留账追写前的代际轮转：账本超帽 → rename 为 alerts.jsonl.1（旧 .1 先删再
  * 换——POSIX rename 原子覆盖、Windows 撞存在目标报错故先清位，daemon.log
- * 同语义）。轮转失败不吞触发不阻追写（与留账失败同策略：warn 留痕
- * best-effort——rename 炸时调用方 catch 兜，本函数静默让追写原地续尾即回
- * 到无轮转语义，膨胀面交下次触发重试）。
+ * 同语义）。轮转失败不吞触发不阻追写（与留账失败同策略）：清位/归档两步
+ * 失败经注入的 warn 面**当场留痕**（遗漏大扫 20260902-c #14——旧形注释宣称
+ * 「rename 炸时调用方 catch 兜」是结构性死路：本函数就地吞错后外层 catch
+ * 永不触发，规范承诺的 warn 诊断信号零出现、账本超帽无界膨胀无迹可查），
+ * 追写原地续尾即回到无轮转语义，膨胀面交下次触发重试。
  */
-function rotateAlertsIfNeeded(alertsPath: string): void {
+function rotateAlertsIfNeeded(
+  alertsPath: string,
+  /** warn 留痕面（调用方注入 logger.warn——与留账失败 warn 同格式可归因「轮转」面） */
+  warn: (message: string, fields: Record<string, unknown>) => void,
+): void {
   let size: number;
   try {
     size = statSync(alertsPath).size;
@@ -99,13 +105,19 @@ function rotateAlertsIfNeeded(alertsPath: string): void {
   const archived = `${alertsPath}.1`;
   try {
     rmSync(archived, { force: true }); // force：旧代缺席即 no-op
-  } catch {
-    /* 删不动（权限等）——留给 rename 覆盖位报错路 */
+  } catch (err) {
+    warn('obs 告警轮转清位失败（旧代 .1 删不动——归档 rename 大概率同败，追写原地续尾）', {
+      alertsPath,
+      error: err instanceof Error ? err.stack : String(err),
+    });
   }
   try {
     renameSync(alertsPath, archived);
-  } catch {
-    /* 轮转失败不阻追写（见 JSDoc） */
+  } catch (err) {
+    warn('obs 告警轮转归档失败（rename 炸——账本超帽续尾，膨胀面交下次触发重试）', {
+      alertsPath,
+      error: err instanceof Error ? err.stack : String(err),
+    });
   }
 }
 
@@ -399,9 +411,9 @@ export function createObsApp(): BuiltinAppModule {
           // mkdir 的 mode 只作用于新建段，目录已在时是死位，且权限已由 0700 数据
           // 根罩住——遗漏大扫 20260902 U1 死位清理，防「权限已收紧」错觉）
           mkdirSync(dataDir, { recursive: true });
-          // 追写前轮转检查（#5）：超帽代际归档 .1——旧代先删再换，轮转失败不阻
-          // 追写（best-effort 同本块失败策略）
-          rotateAlertsIfNeeded(alertsPath);
+          // 追写前轮转检查（#5）：超帽代际归档 .1——旧代先删再换，轮转失败
+          // warn 当场留痕（20260902-c #14）不阻追写（best-effort 同本块失败策略）
+          rotateAlertsIfNeeded(alertsPath, (message, fields) => ctx.logger.warn(message, fields));
           appendFileSync(
             alertsPath,
             // firedAt = 触发时点 ISO；op 取自规则行（不在 obs/alert 信封里——信封

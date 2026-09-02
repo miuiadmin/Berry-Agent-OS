@@ -219,7 +219,18 @@ export class SessionFtsIndex {
       const work: string[] = [];
       for (const sessionId of source.listSessionIds()) {
         const row = counts.size > 0 ? this.stateRow(sessionId) : undefined;
-        if (row === undefined || row.verifiedCount === null || row.verifiedCount !== source.countEvents(sessionId)) {
+        const count = source.countEvents(sessionId);
+        if (
+          row === undefined ||
+          row.verifiedCount === null ||
+          row.verifiedCount !== count ||
+          // 水位越尾（遗漏大扫 20260902-c #7）：活体接线 FTS 领先 durable 尾
+          // （sink 先 enqueue、onLiveEvent 同步 indexEvent），硬崩溃落窗内时
+          // events 停在 N 行而 FTS 留 seq=N 幽灵行、水位=N、verified_count 仍是
+          // 上次的 N——快径 N===N 恰好豁免。水位 ≥ 事件总数（健康态上界 =
+          // count-1）即越尾半态，进工作集交 reconcileSession 整卷重建自愈。
+          row.seq >= count
+        ) {
           work.push(sessionId);
         }
       }
@@ -259,7 +270,8 @@ export class SessionFtsIndex {
   private reconcileSession(source: SessionFtsSource, sessionId: string): void {
     const row = this.stateRow(sessionId);
     const count = source.countEvents(sessionId);
-    if (row !== undefined && row.verifiedCount === count) return; // 预检后已被并发对账收敛
+    // 预检后已被并发对账收敛——水位越尾半态不豁免（与预检同一判据，20260902-c #7）
+    if (row !== undefined && row.verifiedCount === count && row.seq < count) return;
     const events = source.loadEvents(sessionId);
     const watermark = row?.seq ?? -1;
     // 实有行数（核验判据左值——事务内现读，不用预检快照）

@@ -155,6 +155,15 @@ export class BridgeEndpoint {
       // 调用方 abort → 本地结算 + 通知对端停工
       if (opts?.signal) {
         entry.signal = opts.signal;
+        // 前置检查（遗漏大扫 20260902-c #4）：abort 事件只派发一次——对已中止
+        // 的信号 addEventListener('abort') 永不回调，不检查即照发 ask：worker 域
+        // 以活控制器跑满全程（cancel 永不到达），宿主只能等管道 60s 缺省帽或
+        // 迟到 result 兜底。与 subagent/service.ts 后台路、webui/approvals.ts
+        // claim 同形——监听与前置检查成对出现。未发 ask 故无需 cancel 帧。
+        if (opts.signal.aborted) {
+          this.settleFailure(entry, callId, BRIDGE_CANCELLED, '调用方已取消（调用发起前信号已中止，未发 ask）');
+          return;
+        }
         entry.onAbort = () => {
           if (entry.settled) return;
           this.settleFailure(entry, callId, BRIDGE_CANCELLED, '调用方已取消（本地结算，不等对端）');

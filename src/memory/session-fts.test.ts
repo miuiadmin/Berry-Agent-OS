@@ -140,6 +140,29 @@ describe('synchronize 激活期对账', () => {
     expect(fts.search('juliet')).toHaveLength(1); // 无水位——整卷重放补齐
     expect(fts.search('kilo')).toHaveLength(1);
   });
+
+  it('水位越尾崩溃半态不豁免（遗漏大扫 20260902-c #7）：FTS 领先 durable 尾时快径放行进工作集，整卷重建自愈', () => {
+    // 活体接线序：sink 先 enqueue（write-behind 批落）→ onLiveEvent 同步 indexEvent
+    // ——FTS 领先 durable 尾。硬崩溃落窗内：events 停在 N 行、FTS 留 seq=N 幽灵行
+    // 且水位=N，而 verified_count 仍是上次对账的 N —— 快径判据 N===N 恰好豁免。
+    const logs = { s1: [userEv(0, '在库消息 lima'), userEv(1, '在库消息 mike')] };
+    const source = sourceOf(logs);
+    fts.indexEvent('s1', logs.s1![0]!);
+    fts.indexEvent('s1', logs.s1![1]!);
+    fts.synchronize(source); // 健康态过账：verified_count = 2 标记入账
+    // 模拟崩溃半态：FTS 已提交 seq=2 的行与水位（durable 尾在 write-behind 窗丢失）
+    fts.indexEvent('s1', userEv(2, '幽灵消息 November'));
+
+    fts.synchronize(source); // 修前：verified_count===count（2===2）快径整会话豁免
+
+    expect(fts.search('November')).toHaveLength(0); // 修前必红：幽灵行滞留——检索命中 durable 不存在的内容
+    expect(fts.search('lima')).toHaveLength(1); // 整卷重建后原行完好
+    // 水位校直回日志尾（直写重放尾值——不走 MAX，半态虚高不滞留）
+    const row = store.connection.prepare(`SELECT seq FROM session_fts_state WHERE session_id = 's1'`).get() as {
+      seq: number;
+    };
+    expect(row.seq).toBe(1); // 修前必红：残留 2
+  });
 });
 
 describe('search 检索面', () => {
@@ -309,5 +332,62 @@ describe('遗漏大扫 20260901 O-8/L-8（对账成本三档 + 零语句事件�
     fts.indexEvent('s1', log[2]!);
     fts.synchronize(countedSource({ s1: log }, { loads: 0 })); // 核验须通过——零重建
     expect(fts.search('quebec')).toHaveLength(1);
+  });
+});
+
+describe('遗漏大扫 20260902-c #7（假见证态豁免击穿——计数吻合但水位虚高于日志尾）', () => {
+  /** 计数读源：loadEvents 次数 = 豁免判据可观察面（豁免 = 零全量读，同 O-8 手法） */
+  function countedSource(logs: Record<string, SessionEvent[]>, counter: { loads: number }): SessionFtsSource {
+    return {
+      listSessionIds: () => Object.keys(logs),
+      loadEvents: (id) => {
+        counter.loads++;
+        return logs[id] ?? [];
+      },
+      countEvents: (id) => (logs[id] ?? []).length,
+    };
+  }
+
+  it('#7 假见证态不豁免：撕裂修复窄窗终态 → 进工作集重建校直——修复前必红（豁免短路，僵尸行与虚水位永久滞留）', () => {
+    // 终态种植（竞态窗太窄无法确定性命中——直接种终态）：四事件活体索引（水位
+    // =3、行集含 hotel/india 两段）后，撕裂尾修复删 e2/e3，且窄窗已让补差腿把
+    // verified_count 按删后总数=2 入账——state 即「计数吻合 + 水位虚高」假见证态
+    const full = [
+      userEv(0, '首段 foxtrot'),
+      userEv(1, '次段 golf'),
+      userEv(2, '撕裂前段 hotel'),
+      userEv(3, '撕裂前段 india'),
+    ];
+    for (const e of full) fts.indexEvent('s1', e);
+    // 直种终态（活体索引已留水位行 3——upsert 覆写补标记：模拟补差腿在撕裂修复
+    // 后重读计数入账的窄窗终态）
+    store.connection
+      .prepare(
+        `INSERT INTO session_fts_state (session_id, seq, verified_count) VALUES ('s1', 3, 2)
+           ON CONFLICT(session_id) DO UPDATE SET seq = excluded.seq, verified_count = excluded.verified_count`,
+      )
+      .run();
+    // 删后日志：只余 e0/e1（总数=2 与标记吻合——旧单看标记的判据此处即豁免）
+    const repaired = { s1: full.slice(0, 2) };
+    const counter = { loads: 0 };
+    fts.synchronize(countedSource(repaired, counter));
+    expect(counter.loads).toBe(1); // 未豁免——假见证态进工作集（修复前 = 0）
+    expect(fts.search('hotel')).toHaveLength(0); // 僵尸行清除（修复前命中 1——已删事件仍可检索）
+    expect(fts.search('foxtrot')).toHaveLength(1); // 存活段不误伤
+    expect(fts.search('golf')).toHaveLength(1);
+    // 水位校直：重放尾值直写 = 1（修复前虚高 3 永久滞留）
+    const row = store.connection.prepare(`SELECT seq FROM session_fts_state WHERE session_id = 's1'`).get() as {
+      seq: number;
+    };
+    expect(row.seq).toBe(1);
+  });
+
+  it('健康水位不受新判据误伤：标记吻合且 seq < 总数照常豁免（green 锁——O-8 稳态语义保持）', () => {
+    const logs = { s1: [userEv(0, '健康 kilo'), userEv(1, '健康 lima')] };
+    fts.synchronize(countedSource(logs, { loads: 0 }));
+    const counter = { loads: 0 };
+    fts.synchronize(countedSource(logs, counter));
+    expect(counter.loads).toBe(0); // 稳态豁免照旧（水位 1 < 总数 2）
+    expect(fts.search('kilo')).toHaveLength(1);
   });
 });

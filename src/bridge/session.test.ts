@@ -140,6 +140,27 @@ describe('BridgeEndpoint：取消消息化（PoC ④ 桩语义回归锁）', () 
     await vi.waitFor(() => expect(dropped).toContain('result'), { timeout: 1000 });
   });
 
+  it('已中止信号前置拒（遗漏大扫 20260902-c #4）：不发 ask 即本地结算 BRIDGE_CANCELLED，对端零执行', async () => {
+    const { a, b } = makePair();
+    let handlerRuns = 0;
+    b.handle('slow', 'job', () => {
+      handlerRuns += 1;
+      return 'done';
+    });
+    const aborted = new AbortController();
+    aborted.abort();
+    // abort 事件只派发一次——对已中止信号 addEventListener('abort') 永不回调。
+    // 修前形态：ask 照发（worker 域以活控制器跑满全程、cancel 永不到达），
+    // promise 只能挂到 timeoutMs 兜底错结 BRIDGE_CALL_TIMEOUT
+    const err = (await a
+      .call('slow', 'job', [], { signal: aborted.signal, timeoutMs: 2_000 })
+      .catch((e: unknown) => e)) as AppError;
+    expect(err).toBeInstanceOf(AppError);
+    expect(err.code).toBe('BRIDGE_CANCELLED'); // 修前必红：BRIDGE_CALL_TIMEOUT
+    // ask 从未抵达对端——worker 域零执行零感知（未发 ask 故无需 cancel 帧）
+    expect(handlerRuns).toBe(0); // 修前必红：ask 已发出、handler 已跑
+  });
+
   it('迟到 cancel（入站调用已不在簿记）走丢弃观测不炸', async () => {
     const dropped: string[] = [];
     const { port1, port2 } = new MessageChannel();

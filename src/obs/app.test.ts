@@ -633,6 +633,61 @@ describe('obs 告警留账（成熟度扫描 20260901 P1-12）：触发第四件
     expect(notifies.some((n) => n.includes('观测告警'))).toBe(true); // 轮转不吞触发
   });
 
+  it('轮转失败 warn 留痕不吞追写（遗漏大扫 20260902-c #14）：清位/归档双败当场可见，触发照常落账', async () => {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-rotate-fail-')));
+    const compositionDir = join(root, 'composition');
+    mkdirSync(compositionDir, { recursive: true });
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: obs\n    config: { flushMs: 60 }\n');
+
+    const runtime = await createRuntime({ dbPath: ':memory:', workspace: root, compositionDir });
+    runtimes.push(runtime);
+    const notifies: string[] = [];
+    runtime.ui.attach({
+      id: 'rec-fail',
+      notify: (text: string) => notifies.push(text),
+      setStatus: () => {},
+      confirm: async () => true,
+    });
+    expect(await runtime.channels.commands.dispatch('/obs-alerts add sum llm.calls >= 1 24 0')).toBe('ok');
+
+    // 预置超帽账本 + **毒化旧代位**：alerts.jsonl.1 造成目录（内含文件）——
+    // rmSync(force) 对目录抛 EISDIR（清位败）、rename 撞目录再败（归档败）——
+    // 两步失败全走真实 fs 语义，零 mock
+    const ledgerPath = findRollupDb(root).replace(/rollup\.db$/, 'alerts.jsonl');
+    const filler = `${'x'.repeat(1023)}\n`;
+    writeFileSync(ledgerPath, filler.repeat(Math.ceil((OBS_ALERTS_ROTATE_BYTES + 1) / filler.length)));
+    mkdirSync(`${ledgerPath}.1`);
+    writeFileSync(join(`${ledgerPath}.1`, 'stale'), '旧代占位');
+
+    const captured = captureStderr();
+    const session = runtime.session;
+    expect(session).toBeDefined();
+    session!.append('request/header', {
+      config: {},
+      systemPrompt: 'x',
+      toolSchemas: [],
+      reason: 'initial',
+      app: 'chat',
+    });
+    session!.append('llm/usage', {
+      callId: 'c-rotate-fail',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
+    await settle(300);
+    captured.restore();
+
+    // 修前必红：rotateAlertsIfNeeded 就地吞错，外层 catch 永不触发——stderr 零 warn
+    const stderrText = captured.lines.join('');
+    expect(stderrText).toContain('轮转'); // 清位或归档至少一面留痕（可归因「轮转」面）
+    // 不吞触发不阻追写：账本原地续尾（新触发行追在超帽旧档之后）
+    const { readFileSync } = await import('node:fs');
+    const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
+    expect((JSON.parse(lines.at(-1)!) as Record<string, unknown>).metric).toBe('llm.calls');
+    expect(notifies.some((n) => n.includes('观测告警'))).toBe(true);
+  });
+
   it('无头整笔跳过不写账（R-2 整笔一致——留账是第四件同生共死）', async () => {
     const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-ledger-headless-')));
     const compositionDir = join(root, 'composition');
