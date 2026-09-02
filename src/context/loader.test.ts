@@ -750,6 +750,81 @@ describe('loadApps import 来源门禁', () => {
       message: expect.stringContaining('outside.cjs') as string,
     });
   });
+
+  it('运行期兜底·前置守卫保 require 属性面：resolve 惯用面可用且包裹仍受辖（修前 TypeError）', async () => {
+    const outsideDir = makeFixtureDir();
+    writeFileSync(join(outsideDir, 'outside.js'), 'export const leaked = true;\n');
+    const dir = makeFixtureDir();
+    // 过 transform 的 TS 模块 = 前置守卫注入面（遗漏大扫 20260902-c #2）：
+    // require 是 jiti 求值包裹参数，其属性面是合法 CJS 惯用面——require.resolve
+    // （可选依赖探测）必须在守卫包裹后照常可用。裸函数遮蔽会整体丢属性面
+    // （干净环境实测 require.resolve is not a function——合法第三方应用结构性
+    // 不可装载，修 A 破 B）；Proxy apply 形态 = 属性读取透传 + 调用面受辖。
+    const entry = writeApp(
+      dir,
+      'guard-face.ts',
+      [
+        'export const name = "guard-face";',
+        'const resolveType = typeof require.resolve;',
+        'let resolvedFs = "THREW";',
+        'try { resolvedFs = require.resolve("node:fs"); } catch {}',
+        `const target = ${JSON.stringify(join(outsideDir, 'outside.js'))};`,
+        'let deniedCode = "";',
+        'try { require(target); } catch (e) { deniedCode = e && e.code ? e.code : String(e); }',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("fx/guard-face-marker", { resolveType, resolvedFs, deniedCode });',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadApps(root, [{ id: 'guard-face', entry }]);
+
+    expect(result.failed).toEqual([]);
+    const marker = root.tryGet<Record<string, unknown>>('fx/guard-face-marker')!;
+    expect(marker['resolveType']).toBe('function'); // 修前裸函数遮蔽 → 'undefined'
+    expect(marker['resolvedFs']).not.toBe('THREW'); // 修前调用即 TypeError（被 try 吞进哨兵）
+    expect(marker['deniedCode']).toBe(APP_IMPORT_FORBIDDEN); // 包裹不松执法——计算说明符仍拒
+  });
+
+  it('运行期兜底·纯 CJS 迟发 require：apply 期（装载窗已还原）区外文件即拒（修前装载成功且逃逸）', async () => {
+    const outsideDir = makeFixtureDir();
+    writeFileSync(join(outsideDir, 'secret.cjs'), "module.exports = { secret: 'host-secret' };\n");
+    const dir = makeFixtureDir();
+    // 逃逸形态 = TS 入口经**纯 CJS 中间模块**迟发 require（遗漏大扫 20260902-c
+    // #3）：mid.cjs 不经 transform（jiti 对纯 CJS native 直载——前置守卫结构性
+    // 缺席），迟发 require 在 apply 期发生：装载窗（Module._load 补丁 +
+    // currentTreeRoot）已还原，修前 require 区外绝对路径成功读宿主文件、行照常
+    // 激活。行寿命执法 = 树根留在活动树根集、补丁常驻（集合镜像当前组合树，
+    // loadApps 每轮剪枝）。纯 CJS 直接入口过不了形状校验（jiti interop 的
+    // default = 整个 exports 对象，探针实证）——中间模块即现实攻击形态。
+    writeFileSync(
+      join(dir, 'mid.cjs'),
+      [
+        `const OUTSIDE = ${JSON.stringify(join(outsideDir, 'secret.cjs'))};`,
+        'exports.lateLoad = function lateLoad() { return require(OUTSIDE).secret; };',
+      ].join('\n'),
+    );
+    const entry = writeApp(
+      dir,
+      'cjs-late.ts',
+      [
+        // require 形（非 import 声明）：夹具字符串不触发 check-topology 的静态
+        // 导入扫描（.cjs 无解析候选）；同时实测 Proxy 包裹对合法树内 require 放行
+        'const { lateLoad } = require("./mid.cjs");',
+        'export const name = "cjs-late";',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("fx/cjs-late-escaped", lateLoad() === "host-secret");',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadApps(root, [{ id: 'cjs-late', entry }]);
+
+    expect(result.activated).toEqual([]); // 修前：逃逸成功、行照常激活
+    expect(result.failed[0]!.code).toBe(APP_APPLY_FAILED); // apply 内抛错族（门禁 AppError 被 activateOne 包装）
+    expect(result.failed[0]!.message).toContain('secret.cjs');
+    expect(result.failed[0]!.message).toContain('运行期兜底'); // 兜底层标注可分辨
+  });
 });
 
 /* ---------------- apply 抛错回卷与生命周期事件 ---------------- */

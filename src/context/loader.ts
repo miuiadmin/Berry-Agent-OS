@@ -118,6 +118,20 @@ function virtualModuleHint(err: unknown): string {
 let currentTreeRoot: string | undefined;
 
 /**
+ * 活动树根集（**行寿命**，2026-09-02 勘正〔遗漏大扫 20260902-c #3〕）：镜像
+ * 当前组合树——装载即入（importAppEntry 窗内 add），loadApps 每轮开始按本轮
+ * 将 import 的行剪枝（卸载/禁用/换载体行的树根即逐出）。Module._load 常驻补丁
+ * （ensureNodeLoadGate）据此集合裁决纯 CJS 迟发 require——集合空纯透传。与
+ * currentTreeRoot 的分工：后者是**装载窗**事实（transform 扫描裁决用），前者是
+ * **行存活期**事实（apply 期/定时器期迟发 require 裁决用）。模块实例级（同
+ * currentTreeRoot 律）：worker realm 自持实例，其行寿命 = realm 寿命，无需剪枝。
+ */
+const activeTreeRoots = new Set<string>();
+
+/** Module._load 常驻补丁安装旗标（模块实例级，幂等） */
+let nodeLoadGateInstalled = false;
+
+/**
  * 装载排队链尾（20260901-d #13，契约篇 §1.2 注记⑤勘正）：一切 importAppEntry
  * 调用串行。原「boot 与 /reload 不并发是装配序前提」的注释假设在 admin 装载
  * 词表收割（configure / mount-config 预校验 / install·update）第三消费方落地
@@ -273,6 +287,11 @@ const DIRECTIVE_PROLOGUE_RE = /^(?:\s*(?:'[^'\\\n]*'|"[^"\\\n]*")\s*;)+/;
  * - jiti 求值包裹签名为 (exports, require, module, __filename, __dirname,
  *   jitiImport, jitiESMResolve)——本段以 var 声明遮蔽 require/jitiImport 两参，
  *   原值先经 typeof 捕获（var 与参数同名合并绑定，赋值前读到的就是原参数值）；
+ * - 包裹形态 = **Proxy apply 陷阱**（2026-09-02 勘正〔遗漏大扫 20260902-c #2〕）：
+ *   属性面自动透传（无 get 陷阱即转发目标函数），require.resolve / require.cache
+ *   等合法 CJS 惯用面照常可用；裸函数遮蔽会整体丢失属性面（干净环境实测
+ *   require.resolve is not a function——合法第三方应用结构性不可装载，修 A 破
+ *   B），调用面经 apply 陷阱受辖。
  * - 树根随 transform 时点烙成字面量进模块闭包——apply 期迟发动态 import 同受辖
  *   （不依赖装载窗在场，绕开 currentTreeRoot 生命周期）；
  * - __dirname（求值包裹参数）即裁决 fromDir；守卫经 globalThis 键回查宿主
@@ -291,8 +310,16 @@ function injectRuntimeGuardPrelude(code: string, treeRoot: string): string {
     `  var e = __igGate && __igGate(String(id), __dirname, __igRoot);` +
     `  if (e) throw e;` +
     `};` +
-    `var require = function (id) { __igCheck(id); return __igOrigRequire(id); };` +
-    `var jitiImport = function (id) { __igCheck(id); return __igOrigImport(id); };`;
+    // Proxy apply 陷阱包裹：属性读取无陷阱即透传目标（resolve/cache 惯用面保全），
+    // 仅调用面过 __igCheck；目标非函数（无 require 面的求值环境）原样返回
+    `var __igWrap = function (orig) {` +
+    `  if (typeof orig !== "function") return orig;` +
+    `  return new Proxy(orig, {` +
+    `    apply: function (target, thisArg, args) { __igCheck(args[0]); return target.apply(thisArg, args); }` +
+    `  });` +
+    `};` +
+    `var require = __igWrap(__igOrigRequire);` +
+    `var jitiImport = __igWrap(__igOrigImport);`;
   return code.slice(0, insertAt) + prelude + code.slice(insertAt);
 }
 
@@ -302,36 +329,45 @@ type NodeModuleLoadFn = (request: string, parent: { filename?: string | null } |
 /**
  * 运行期兜底第二腿：纯 CJS 面（.cjs / 无 ESM 语法的 .js）jiti 不调自定义
  * transform（evalModule 的转译判定：非 TS、无 ESM 语法即 native require 直载，
- * 探针实证 transform 零调用）——字面量早拦与前置守卫注入双双缺席。补丁在
- * loadChain 窗内包 node `Module._load`：**请求父模块（require 发起文件）落在
- * 当前装载树内**才过三道裁决；父在树外（宿主自身/测试框架的 require）恒放行
- * ——窗内全局补丁的零误伤面由父门保证。返回还原面（importAppEntry finally
- * 恒调）。worker realm 自持 Module 实例——补丁按 realm 天然隔离。
+ * 探针实证 transform 零调用）——字面量早拦与前置守卫注入双双缺席。
+ *
+ * **行寿命执法**（2026-09-02 勘正〔遗漏大扫 20260902-c #3〕）：原窗式装拆
+ * （importAppEntry 窗内包 Module._load、finally 还原）对 apply 期迟发 require
+ * 全裸——装载器在 importAppEntry 返回**之后**才调 apply，纯 CJS 中间模块体内
+ * 的 require（定时器/事件回调里发起同理）落在窗外即逃逸（实验复现 ESCAPED:
+ * host-secret）。改为**首个活动树根安装后按 realm Module 实例寿命常驻**：
+ * 补丁按 activeTreeRoots 集合裁决——**请求父模块（require 发起文件）落在任一
+ * 活动树内**才过三道裁决（树根互斥：各自行目录，首个包含即裁决树）；父在树外
+ * （宿主自身/测试框架的 require）恒放行；集合空（无活动行）纯透传，零行为面。
+ * 集合镜像当前组合树：装载即入、loadApps 每轮剪枝——「常驻」不等于「无界」。
+ * worker realm 自持 Module 实例与 loader 模块实例——补丁按 realm 天然隔离，
+ * 其行寿命 = realm 寿命，无需剪枝。
  */
-function patchNodeLoadForTree(): () => void {
+function ensureNodeLoadGate(): void {
+  if (nodeLoadGateInstalled) return;
   const ModuleInternals = Module as unknown as { _load?: NodeModuleLoadFn };
   const origLoad = ModuleInternals._load;
-  if (typeof origLoad !== 'function') return () => undefined; // 防御：形态漂移时只缺兜底不炸装载
+  if (typeof origLoad !== 'function') return; // 防御：形态漂移时只缺兜底不炸装载
   const gated: NodeModuleLoadFn = (request, parent, isMain) => {
-    const treeRoot = currentTreeRoot;
-    const parentFile = parent?.filename;
-    if (
-      treeRoot !== undefined &&
-      parentFile !== undefined &&
-      parentFile !== null &&
-      insideTree(realpathIfPossible(parentFile), treeRoot)
-    ) {
-      const violation = adjudicateImport(request, dirname(parentFile), treeRoot);
-      if (violation !== undefined) {
-        throw importForbiddenError(request, violation, `运行期兜底：require 发起文件 ${parentFile}`);
+    if (activeTreeRoots.size > 0) {
+      const parentFile = parent?.filename;
+      if (parentFile !== undefined && parentFile !== null) {
+        const realParent = realpathIfPossible(parentFile);
+        for (const treeRoot of activeTreeRoots) {
+          if (insideTree(realParent, treeRoot)) {
+            const violation = adjudicateImport(request, dirname(parentFile), treeRoot);
+            if (violation !== undefined) {
+              throw importForbiddenError(request, violation, `运行期兜底：require 发起文件 ${parentFile}`);
+            }
+            break; // 树根互斥（各自行目录）——首个包含即裁决树，免继续扫
+          }
+        }
       }
     }
     return origLoad.call(Module, request, parent, isMain);
   };
   ModuleInternals._load = gated;
-  return () => {
-    ModuleInternals._load = origLoad;
-  };
+  nodeLoadGateInstalled = true;
 }
 
 export function createAppJiti(faces?: LoadAppsOptions['virtualFaces']) {
@@ -377,14 +413,17 @@ export async function importAppEntry(
   entry: string,
 ): Promise<Record<string, unknown>> {
   const run = loadChain.then(async () => {
-    currentTreeRoot = realpathIfPossible(dirname(entry));
-    // 运行期兜底第二腿（S-1）：CJS 面 native require 直载不经 transform——窗内
-    // 包 Module._load 补同裁决（父门见 patchNodeLoadForTree）
-    const restoreNodeLoad = patchNodeLoadForTree();
+    const treeRoot = realpathIfPossible(dirname(entry));
+    currentTreeRoot = treeRoot;
+    // 运行期兜底第二腿（S-1 + 20260902-c #3 行寿命）：CJS 面 native require
+    // 直载不经 transform——Module._load 补丁首个活动树根安装后常驻
+    // （ensureNodeLoadGate），树根入活动集（装载窗后不还原；集合由 loadApps
+    // 每轮剪枝镜像组合树，worker realm 行寿命 = realm 寿命无需剪枝）
+    ensureNodeLoadGate();
+    activeTreeRoots.add(treeRoot);
     try {
       return (await jiti.import(entry)) as Record<string, unknown>;
     } finally {
-      restoreNodeLoad();
       currentTreeRoot = undefined;
     }
   });
@@ -644,6 +683,22 @@ export async function loadApps(
   // Kahn 探测按行读链解析（app 区行 inject 只能命中 本区表→系统区表→根表；
   // 跨区行 zone='system' 只命中 根表∪系统区表，装载律③——区际依赖同拒）
   const zone = root.zone;
+
+  // 活动树根集剪枝（行寿命执法的镜像维护，20260902-c #3）：本轮将 import 的
+  // 行 = 非跳过 / 已解析 / 非 builtin（宿主函数引用无树）/ carrier main——
+  // 其余行（卸载/禁用/解析失败/换载体 worker·external——分域 realm 自持集
+  // 合）的旧树根即逐出，常驻 Module._load 补丁对已逐出树的迟发 require 回归
+  // 纯透传。import 失败行的树根留到下轮剪枝收（fail-closed：半载模块比活行
+  // 更不该外读，宁可多辖一拍）。
+  const keepRoots = new Set<string>();
+  for (const row of rows) {
+    if (row.skip || row.unresolved !== undefined || row.builtin !== undefined) continue;
+    if (resolveRowCarrier(row) !== 'main') continue;
+    keepRoots.add(realpathIfPossible(dirname(row.entry!)));
+  }
+  for (const treeRoot of activeTreeRoots) {
+    if (!keepRoots.has(treeRoot)) activeTreeRoots.delete(treeRoot);
+  }
 
   /* ---- ① 跳过行 / 解析失败行：不 import（禁用行不要求已装——挂载休眠精神） ---- */
   // 两域混排的 pending（第二十七批刀二）：main 行持校验后模块（同进程 apply）；
