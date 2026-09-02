@@ -265,6 +265,27 @@ describe('compaction 官方件 apply', () => {
     await expect(h.overflow()!.drain()).resolves.toBeUndefined();
   });
 
+  it('【回归锁 20260902-c #5 C-1】attempt 首段同步注册在飞位：fire 返回即 drain 可捕捉（注册位之前禁 await）', async () => {
+    const h = setup();
+    for (let i = 0; i < 5; i++) h.addTurn();
+    h.setUsage(150_000);
+    // 永不决 complete：在飞位一旦注册即永持——观察面收敛为「注册了没有」单问
+    h.setComplete(() => new Promise(() => undefined));
+    h.fire();
+    // 同步断言位：fire 返回后（结算派发波内）立取 drain——中间零 await。若
+    // attempt 首段在 runSerialized 注册位前引入 await，此处快照为空、drain
+    // 直返即 tick 收口等不到自己要等的链（时序不变式见会话篇溢出兜底条）
+    let drained = false;
+    void h
+      .overflow()!
+      .drain()
+      .then(() => {
+        drained = true;
+      });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(drained).toBe(false); // 已捕捉在飞位——drain 未决
+  });
+
   it('冷却 derive：failed 事件在冷却窗内 → 过阈也不触发', async () => {
     const h = setup();
     h.session.append('compaction/failed', { reason: 'threshold', error: '上次失败' });

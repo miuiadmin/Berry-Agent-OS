@@ -265,6 +265,14 @@ async function applyMemoryApp(ctx: AppContext, config: MemoryConfig | undefined,
     ...(cfg.consolidationAnchorMs !== undefined ? { consolidationAnchorMs: cfg.consolidationAnchorMs } : {}),
   });
   ctx.effect(() => () => review.dispose());
+  // memory-review 窄面（遗漏大扫 20260902-c #5 规范先行——[记忆与自进化]篇
+  // 「周期路」条 + [运行时骨架]篇 §6.8「后台唤醒」条裁决③；名从官方名位
+  // 服务名单段小写连字符律）：单法 idle——在飞 review/consolidation 收尾
+  // 等待（无在飞即回）。唯一消费方 = tick 编排收口（run 尾窗起跑的残尾链
+  // 不被进程收口掐死——tick 无人在场，unbounded 等待成本为零）。面窄化只透
+  // idle 不透 dispose：退订属件内生命周期（ctx.effect 已挂），非跨件可调面。
+  // persist:false 降级路早退不达此处——面缺席即消费方 tryGet 直通语义。
+  ctx.provide('memory-review', { idle: () => review.idle() });
 
   /* ---- ⑤ 跨会话索引：激活期对账（尽力而为）+ session/event 活体镜像增量 ---- */
   try {

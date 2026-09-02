@@ -359,4 +359,25 @@ describe('goal ⑥ 轮间沉淀机器（onRunSettled → runGoalSummary）', () 
       ),
     ).toBe(true);
   });
+
+  it('【回归锁 20260902-c #5 D-1】双守卫落点：stalls 硬停走真码路径对 tick 照落（守卫乙在 capped 块后——不为豁免复刻判据）', () => {
+    const h = setup('tick');
+    const goalId = h.seedGoal();
+    // 停滞素材：连续 3 轮 surface_only（stallsDecision 硬停线——era 无边界全日志即本 era）
+    for (let i = 0; i < 3; i++) h.session.append('goal/evidence', { goalId, outcome: 'surface_only' });
+    h.fire('completed');
+    // stalls 硬停是结算回调前段真码路径：tick 豁免（守卫乙落点在其后）不触及——
+    // 纯挂钟喂养的停滞 goal 仍会硬停（修前单早退若上移到 stalls 前即漏此执法）
+    expect(h.store.getByGoalId(goalId)!.status).toBe('stopped');
+    expect(
+      h.session.events.some(
+        (e) =>
+          e.type === 'goal/evidence' &&
+          (e.data as { goalId?: string }).goalId === goalId &&
+          (e.data as { reason?: string }).reason === 'stalls',
+      ),
+    ).toBe(true);
+    // 停摆即终点：零投递
+    expect(h.sent()).toHaveLength(0);
+  });
 });

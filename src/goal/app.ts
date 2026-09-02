@@ -440,34 +440,21 @@ async function applyGoalApp(
             suspendWake(goal.goalId);
             return;
           }
-          // tick 形态豁免（遗漏大扫 20260902-c #5 规范先行——骨架篇 §6.8
-          // 「后台唤醒」条归属裁决①）：tick 子进程是单发执行体——submitOnce
-          // resolve 后 finally 即收口，结算回调派生的异步腿（续跑投递开的新
-          // run / 轮间沉淀 LLM 单发）结构性被 retire/进程退出掐死（启动即
-          // abort 即纯浪费：provider 侧计费、结果丢弃、durable 账本噪声）。
-          // 挂钟语义本就是每跳一轮——接力交给下一跳 OS 钟。**同步记账面照走**
-          // （规范原文）：capped 帽落账不受豁免影响（超帽 evidence 照落——纯
-          // 挂钟喂养的 goal 超帽史仍可判读；stalls 硬停在上文已走，纯挂钟喂
-          // 养的停滞 goal 仍会硬停）。轮间沉淀的滞后面 = 水位不进即重试语义
-          // 天然兜底（长命进程触及该 goal 结算时补账；纯挂钟 goal 无新摘要为
-          // 已披露降级面——摘要的活消费者〔续跑提示注入〕本路已跳过）。
-          if (deps.processKind === 'tick') {
-            const tickGate = wakeGate({
-              goalId: goal.goalId,
-              now: Date.now(),
-              events: sessions.eventsOfType('user/message'),
-            });
-            if (!tickGate.allow) {
-              sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'capped', willRetry: true });
-            }
-            return;
-          }
           // ⑥ 沉淀触发（刀四 T6-A）：与续跑判定独立——capped 拒发不影响沉淀
           //（上下文管理不随唤醒拒发而停）。fire-and-forget：与下方投递并发，
           // 渲染面读行时点的缓存列——竞窗只影响「本轮续跑提示是否携带新摘要」
           //（下轮起必携带），正确性无涉。ALS 路由：结算回调链内 sessions 面
-          // 天然路由到结算会话 = goal 绑定会话（重绑护栏已让位）
-          attemptSummary(goal);
+          // 天然路由到结算会话 = goal 绑定会话（重绑护栏已让位）。
+          //
+          // 【守卫甲】tick 形态豁免——沉淀腿（遗漏大扫 20260902-c #5 规范先行，
+          // 骨架篇 §6.8「后台唤醒」条裁决①；冷读复审 D-1 定型双守卫落点）：tick
+          // 子进程是单发执行体——submitOnce resolve 后 finally 即收口，attemptSummary
+          // 的 LLM 单发链会被 retire/进程退出掐死在出生点（provider 侧计费、结果
+          // 丢弃）。滞后面 = 水位不进即重试语义天然兜底（长命进程触及该 goal 结算
+          // 时补账）；纯挂钟 goal 无新摘要为**已披露降级面**——摘要的活消费者两处：
+          // 结算边界续跑注入（tick 路已跳过）与挂钟 ⑤b 动态渲染（**在场**——每跳
+          // 提示恒携带最近一次沉淀的陈旧/缺席摘要；只影响提示质量，非状态机正确性）。
+          if (deps.processKind !== 'tick') attemptSummary(goal);
           // 唤醒帽执法（刀三 T5-A「执法点 = wakeGate 单源」）：超帽动作 = 暂停
           // 投递非终态停——goal 仍 active，自激路拒发本轮唤醒，停因事件落 durable
           //（willRetry=true——下一 run 结算或到窗后再试）
@@ -480,6 +467,14 @@ async function applyGoalApp(
             sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'capped', willRetry: true });
             return;
           }
+          // 【守卫乙】tick 形态豁免——续跑投递腿（裁决①；冷读复审 D-1 定型双守卫
+          // 落点）：落点在 wakeGate capped 帽块**之后**——执法点单源：上方 stalls
+          // 硬停与 capped 帽落账走真码路径对 tick 照落（纯挂钟喂养的停滞 goal 仍
+          // 硬停、超帽史仍可判读——不为豁免复刻判据）。tick 单发收口：此处往下的
+          // 投递腿（duties/到窗复评/wakeId/sendUserMessage）开的 run 会被 shutdown
+          // retire 掐死在出生点即纯浪费；挂钟语义本就是每跳一轮——接力交给下一跳
+          // OS 钟。
+          if (deps.processKind === 'tick') return;
           // 停滞指令段（needsReplan / needsFloorRecovery——机器判据点名的行为义务）
           const duties: string[] = [];
           if (stalls.needsReplan) {

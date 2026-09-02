@@ -380,14 +380,20 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   } finally {
     // 归属回写（事实陈述：本轮落在哪个会话——成败都记）+ 落盘关停
     store.recordLastSession(jobName, entry.session.header.sessionId, Date.now());
-    // 收口序（遗漏大扫 20260902-c #5——骨架篇 §6.8「后台唤醒」条归属裁决③）：
+    // 收口序（遗漏大扫 20260902-c #5——骨架篇 §6.8「后台唤醒」条归属裁决③④）：
     // submitOnce resolve → 结算同步记账波（goal 记账 / 判阈起压缩）→ **drain
-    // 在飞压缩** → shutdown（retire + flush）。tick 会话按 job 定向跨跳累积，
-    // 阈值压缩是其唯一上下文回收路——不等即被进程收口掐死（上下文无界增长）。
-    // 结算回调同步起跑的 attempt 已在 fireRunSettled 波内注册在飞位，drain 必
-    // 等得到；drain 期间落的事件经 shutdown flush 落盘，收口零丢失面。面缺席
-    // （compaction 行未装载）直通——无在飞面即无链可等。
-    await runtime.ctx.tryGet<{ readonly drain: () => Promise<void> }>('compaction')?.drain();
+    // 双面**（在飞压缩 drain + memory 周期路残尾 idle）→ shutdown（retire +
+    // flush）。压缩面：tick 会话按 job 定向跨跳累积，阈值压缩是其唯一上下文
+    // 回收路——不等即被进程收口掐死（上下文无界增长）；结算回调同步起跑的
+    // attempt 已在 fireRunSettled 波内注册在飞位（C-1 不变式：注册位之前禁
+    // await），drain 必等得到。memory 面：周期 review 起跑点在 run 中途、长
+    // run 内多已自然完成，idle 等的只是 run 尾窗起跑的残尾——tick 无人在场，
+    // unbounded 等待成本零。drain/idle 期间落的事件经 shutdown flush 落盘，
+    // 收口零丢失面。面缺席（行未装载）直通——无在飞面即无链可等。
+    await Promise.all([
+      runtime.ctx.tryGet<{ readonly drain: () => Promise<void> }>('compaction')?.drain(),
+      runtime.ctx.tryGet<{ readonly idle: () => Promise<void> }>('memory-review')?.idle(),
+    ]);
     signals.dispose();
     await runtime.shutdown();
   }

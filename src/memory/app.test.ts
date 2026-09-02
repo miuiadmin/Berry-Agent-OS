@@ -193,6 +193,13 @@ describe('memory 官方件 apply（全栈接线序）', () => {
     // 周期路闸门关闭（canAfford false）：不触 complete
     expect(h.llmCalls()).toBe(0);
 
+    // memory-review 窄面（遗漏大扫 20260902-c #5）：恒提供——闸门关闭/无在飞
+    // 不影响面在场；单法 idle 无在飞即回（唯一消费方 tick 编排收口的 tryGet
+    // 直通语义依赖此形）
+    const reviewFace = h.ctx.tryGet<{ idle(): Promise<void> }>('memory-review');
+    expect(reviewFace).toBeDefined();
+    await expect(reviewFace!.idle()).resolves.toBeUndefined();
+
     // dispose 回卷：全部注册注销（/reload 卸载半边的本模块证据）
     await h.ctx.dispose();
     expect(h.toolNames()).toEqual([]);
