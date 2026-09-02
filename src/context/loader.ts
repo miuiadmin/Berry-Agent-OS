@@ -26,7 +26,7 @@
  */
 
 import { createJiti, type TransformOptions, type TransformResult } from 'jiti';
-import { createRequire, isBuiltin } from 'node:module';
+import { createRequire, isBuiltin, Module } from 'node:module';
 import { realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import * as typeboxRoot from 'typebox';
@@ -192,11 +192,30 @@ function adjudicateImport(specifier: string, fromDir: string, treeRoot: string):
 }
 
 /**
+ * import 越界拒载错误构造器（字面量早拦与运行期兜底同码同出口——差异只在
+ * originNote 标注拦截层，消息可分辨）。白名单指路尾文本两层共享（探针 #12：
+ * 第三方撞墙时错误必须自带合法路）。
+ */
+function importForbiddenError(specifier: string, violation: string, originNote: string): AppError {
+  return new AppError(
+    APP_IMPORT_FORBIDDEN,
+    `import 越界：${specifier}——${violation}（${originNote}）。` +
+      `白名单三道：虚拟面六键（${VIRTUAL_MODULE_KEYS.map((k) => `'${k}'`).join('、')}）/ node: 内建 / 应用目录树内；` +
+      `宿主类型与工厂经虚拟面取（契约篇 §1.2 注记⑤）`,
+  );
+}
+
+/**
  * 执法 transform（§1.2 执法面②，spike 实证形态）：jiti 全依赖图每文件过检
  * （moduleCache:false 保证无缓存旁路）——先扫说明符，违规即抛
  * APP_IMPORT_FORBIDDEN（transform 抛错先于 eval——模块永不求值，副作用零触达）；
  * 合法后链 plainJiti 默认转译。currentTreeRoot undefined（builtin 行/防御路径）
  * 时不拦照转——真实文件装载路径必设。
+ *
+ * 运行期兜底第一腿（全面复盘 20260902 S-1，契约篇 §1.2 注记⑤勘正）：字面量
+ * 扫描只认引号字面量，**计算说明符**（拼串变量求值出的绝对路径/裸包名）结构性
+ * 失明——转译产物指令序后注入 require/jitiImport 求值入口包裹（见
+ * injectRuntimeGuardPrelude），每次调用运行期复跑同一三道裁决。
  */
 function guardTransform(opts: TransformOptions): TransformResult {
   const treeRoot = currentTreeRoot;
@@ -204,19 +223,121 @@ function guardTransform(opts: TransformOptions): TransformResult {
     for (const specifier of extractSpecifiers(opts.source ?? '')) {
       const violation = adjudicateImport(specifier, dirname(opts.filename), treeRoot);
       if (violation !== undefined) {
-        throw new AppError(
-          APP_IMPORT_FORBIDDEN,
-          `import 越界：${specifier}——${violation}（文件 ${opts.filename}）。` +
-            `白名单三道：虚拟面六键（${VIRTUAL_MODULE_KEYS.map((k) => `'${k}'`).join('、')}）/ node: 内建 / 应用目录树内；` +
-            `宿主类型与工厂经虚拟面取（契约篇 §1.2 注记⑤）`,
-        );
+        throw importForbiddenError(specifier, violation, `文件 ${opts.filename}`);
       }
     }
   }
-  return { code: plainJiti.transform(opts) };
+  const code = plainJiti.transform(opts);
+  // 树根缺席（builtin 行/防御路径）时守卫无锚可烙——与字面量层「不拦照转」同律
+  return { code: treeRoot === undefined ? code : injectRuntimeGuardPrelude(code, treeRoot) };
+}
+
+/* ---------------- 运行期 import 门禁兜底（全面复盘 20260902 S-1，契约篇 §1.2 注记⑤勘正） ---------------- */
+
+/**
+ * 运行期门禁检查面键（globalThis）：transform 注入的前置守卫闭包与宿主裁决间
+ * 唯一稳定通道——jiti 以 vm.runInThisContext 求值（同域 globalThis），守卫产码
+ * 与宿主模块不能共享闭包，全局键是两界最短桥。命名去品牌化（通用领域语义）。
+ * 键值形态 = (specifier, fromDir, treeRoot) => AppError | undefined——undefined
+ * 放行；AppError 由守卫原样 throw（同码 APP_IMPORT_FORBIDDEN，与字面量早拦
+ * 同出口）。worker realm 自持 loader 模块实例——两域各装各的（globalThis 按
+ * realm 隔离，键不跨域互扰）。
+ */
+const RUNTIME_GATE_KEY = '__appLoaderImportGate';
+
+/** 运行期门禁检查面安装（createAppJiti 每次幂等覆装——函数无状态，重复装零副作用） */
+function installRuntimeGate(): void {
+  (globalThis as Record<string, unknown>)[RUNTIME_GATE_KEY] = (
+    specifier: string,
+    fromDir: string,
+    treeRoot: string,
+  ): AppError | undefined => {
+    const violation = adjudicateImport(specifier, fromDir, treeRoot);
+    return violation === undefined
+      ? undefined
+      : importForbiddenError(specifier, violation, `运行期兜底：求值文件目录 ${fromDir}`);
+  };
+}
+
+/**
+ * 指令序正则：函数体开头的连续字符串指令（"use strict" 等）。守卫必须插在指令
+ * 序之后——插在前面会使其后的 "use strict" 降级为普通表达式（指令只有位居函数
+ * 体首才生效），模块严格性语义漂移。指令字符串不含转义（含转义的字面量本就不
+ * 构成指令），正则按此收紧。
+ */
+const DIRECTIVE_PROLOGUE_RE = /^(?:\s*(?:'[^'\\\n]*'|"[^"\\\n]*")\s*;)+/;
+
+/**
+ * 运行期兜底第一腿注入体：在转译产物指令序后、一切语句前插入 require/jitiImport
+ * 包裹。要点：
+ * - jiti 求值包裹签名为 (exports, require, module, __filename, __dirname,
+ *   jitiImport, jitiESMResolve)——本段以 var 声明遮蔽 require/jitiImport 两参，
+ *   原值先经 typeof 捕获（var 与参数同名合并绑定，赋值前读到的就是原参数值）；
+ * - 树根随 transform 时点烙成字面量进模块闭包——apply 期迟发动态 import 同受辖
+ *   （不依赖装载窗在场，绕开 currentTreeRoot 生命周期）；
+ * - __dirname（求值包裹参数）即裁决 fromDir；守卫经 globalThis 键回查宿主
+ *   adjudicateImport（产码不能持有宿主闭包引用）；
+ * - 虚拟面六键 / node: 内建由三道裁决放行——合法路径零行为变化。
+ */
+function injectRuntimeGuardPrelude(code: string, treeRoot: string): string {
+  const prologue = DIRECTIVE_PROLOGUE_RE.exec(code);
+  const insertAt = prologue ? prologue[0].length : 0;
+  const prelude =
+    `var __igGate = globalThis[${JSON.stringify(RUNTIME_GATE_KEY)}];` +
+    `var __igRoot = ${JSON.stringify(treeRoot)};` +
+    `var __igOrigRequire = typeof require === "function" ? require : null;` +
+    `var __igOrigImport = typeof jitiImport === "function" ? jitiImport : null;` +
+    `var __igCheck = function (id) {` +
+    `  var e = __igGate && __igGate(String(id), __dirname, __igRoot);` +
+    `  if (e) throw e;` +
+    `};` +
+    `var require = function (id) { __igCheck(id); return __igOrigRequire(id); };` +
+    `var jitiImport = function (id) { __igCheck(id); return __igOrigImport(id); };`;
+  return code.slice(0, insertAt) + prelude + code.slice(insertAt);
+}
+
+/** node Module._load 结构签名（内部 API，@types 未声明——结构收窄自用） */
+type NodeModuleLoadFn = (request: string, parent: { filename?: string | null } | null, isMain: boolean) => unknown;
+
+/**
+ * 运行期兜底第二腿：纯 CJS 面（.cjs / 无 ESM 语法的 .js）jiti 不调自定义
+ * transform（evalModule 的转译判定：非 TS、无 ESM 语法即 native require 直载，
+ * 探针实证 transform 零调用）——字面量早拦与前置守卫注入双双缺席。补丁在
+ * loadChain 窗内包 node `Module._load`：**请求父模块（require 发起文件）落在
+ * 当前装载树内**才过三道裁决；父在树外（宿主自身/测试框架的 require）恒放行
+ * ——窗内全局补丁的零误伤面由父门保证。返回还原面（importAppEntry finally
+ * 恒调）。worker realm 自持 Module 实例——补丁按 realm 天然隔离。
+ */
+function patchNodeLoadForTree(): () => void {
+  const ModuleInternals = Module as unknown as { _load?: NodeModuleLoadFn };
+  const origLoad = ModuleInternals._load;
+  if (typeof origLoad !== 'function') return () => undefined; // 防御：形态漂移时只缺兜底不炸装载
+  const gated: NodeModuleLoadFn = (request, parent, isMain) => {
+    const treeRoot = currentTreeRoot;
+    const parentFile = parent?.filename;
+    if (
+      treeRoot !== undefined &&
+      parentFile !== undefined &&
+      parentFile !== null &&
+      insideTree(realpathIfPossible(parentFile), treeRoot)
+    ) {
+      const violation = adjudicateImport(request, dirname(parentFile), treeRoot);
+      if (violation !== undefined) {
+        throw importForbiddenError(request, violation, `运行期兜底：require 发起文件 ${parentFile}`);
+      }
+    }
+    return origLoad.call(Module, request, parent, isMain);
+  };
+  ModuleInternals._load = gated;
+  return () => {
+    ModuleInternals._load = origLoad;
+  };
 }
 
 export function createAppJiti(faces?: LoadAppsOptions['virtualFaces']) {
+  // 运行期门禁检查面安装（S-1 兜底第一腿的宿主侧——前置守卫闭包经 globalThis
+  // 键回查；幂等覆装，worker realm 各自实例化时各自装）
+  installRuntimeGate();
   return createJiti(import.meta.url, {
     moduleCache: false,
     // 应用代码统一走 jiti 转译一条路径（native import 无法解析虚拟模块——防行为分叉）
@@ -257,9 +378,13 @@ export async function importAppEntry(
 ): Promise<Record<string, unknown>> {
   const run = loadChain.then(async () => {
     currentTreeRoot = realpathIfPossible(dirname(entry));
+    // 运行期兜底第二腿（S-1）：CJS 面 native require 直载不经 transform——窗内
+    // 包 Module._load 补同裁决（父门见 patchNodeLoadForTree）
+    const restoreNodeLoad = patchNodeLoadForTree();
     try {
       return (await jiti.import(entry)) as Record<string, unknown>;
     } finally {
+      restoreNodeLoad();
       currentTreeRoot = undefined;
     }
   });

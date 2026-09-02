@@ -667,6 +667,89 @@ describe('loadApps import 来源门禁', () => {
     expect(marker['llmKeys']).toBe(0);
     expect(marker['sqliteKeys']).toBe(0);
   });
+
+  // 运行期兜底三形回归锁（全面复盘 20260902 S-1，契约篇 §1.2 注记⑤勘正）：
+  // 字面量早拦只认引号字面量——计算说明符（运行期拼串求值）与纯 CJS 面（jiti
+  // 对 .cjs/无 ESM 语法 .js 不调自定义 transform，探针实证）结构性失明，
+  // 修前三形全部装载成功（逃逸到宿主文件系统/宿主 node_modules）。
+  it('运行期兜底·计算绝对路径：拼串动态 import 树外真文件即拒（修前装载成功）', async () => {
+    const outsideDir = makeFixtureDir(); // 树外真目录——诱饵目标真实存在，拒的是越界非解析失败
+    writeFileSync(join(outsideDir, 'outside.js'), 'export const leaked = true;\n');
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'computed-abs.ts',
+      [
+        'export const name = "computed-abs";',
+        // 说明符运行期拼出——SPECIFIER_RE 只认引号字面量，transform 期扫描结构性看不见
+        `const base = ${JSON.stringify(outsideDir)};`,
+        'const mod = await im' + "port(base + '/outside.js');",
+        'export const marker = mod.leaked;',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadApps(root, [{ id: 'computed-abs', entry }]);
+
+    expect(result.activated).toEqual([]);
+    expect(result.failed[0]!.code).toBe(APP_IMPORT_FORBIDDEN);
+    expect(result.failed[0]!.message).toContain('相对路径解析逃逸出应用目录树');
+    expect(result.failed[0]!.message).toContain('outside.js');
+    // 兜底层标注——与字面量早拦（「文件 …」origin）可分辨
+    expect(result.failed[0]!.message).toContain('运行期兜底');
+  });
+
+  it('运行期兜底·计算裸包名：拼串动态 import 解析上逃宿主 node_modules 即拒（修前装载成功）', async () => {
+    const dir = makeFixtureInsideHostTree();
+    try {
+      const entry = writeApp(
+        dir,
+        'computed-bare.ts',
+        [
+          'export const name = "computed-bare";',
+          // 裸包名运行期拼出——fixture 在宿主 node_modules 内，解析向上走必达宿主侧
+          "const pkg = ['j', 'i', 't', 'i'].join('');",
+          'const mod = await im' + 'port(pkg);',
+          'export const marker = typeof mod.createJiti;',
+          'export default async function apply() {}',
+        ].join('\n'),
+      );
+      const root = makeRoot();
+      const result = await loadApps(root, [{ id: 'computed-bare', entry }]);
+
+      expect(result.activated).toEqual([]);
+      expect(result.failed[0]!.code).toBe(APP_IMPORT_FORBIDDEN);
+      expect(result.failed[0]!.message).toContain('包解析逃逸出应用目录树');
+      expect(result.failed[0]!.message).toContain('运行期兜底');
+    } finally {
+      cleanupFixture(dir);
+    }
+  });
+
+  it('运行期兜底·纯 CJS 字面量 require：jiti 不调 transform 的面即拒（修前装载成功）', async () => {
+    const outsideDir = makeFixtureDir();
+    writeFileSync(join(outsideDir, 'outside.cjs'), 'module.exports = { leaked: true };\n');
+    const dir = makeFixtureDir();
+    // 纯 CJS 入口：字面量 require 明晃晃在场——但 jiti 对纯 CJS 不调自定义
+    // transform（evalModule 转译判定：非 TS、无 ESM 语法即 native require 直载），
+    // 字面量扫描结构性缺席；native 路径由 loadChain 窗内 Module._load 补丁执法
+    // （require 发起文件落在装载树内即过裁决）。走 importAppEntry 直载面断言
+    // 原生 AppError 形状（不经 loadApps 失败清单转译）。
+    const entry = writeApp(
+      dir,
+      'cjs-literal.cjs',
+      [
+        `const mod = require(${JSON.stringify(join(outsideDir, 'outside.cjs'))});`,
+        'exports.name = "cjs-literal";',
+        'exports.marker = mod.leaked;',
+        'exports.default = async function apply() {};',
+      ].join('\n'),
+    );
+    await expect(importAppEntry(createAppJiti(), entry)).rejects.toMatchObject({
+      code: APP_IMPORT_FORBIDDEN,
+      message: expect.stringContaining('outside.cjs') as string,
+    });
+  });
 });
 
 /* ---------------- apply 抛错回卷与生命周期事件 ---------------- */
