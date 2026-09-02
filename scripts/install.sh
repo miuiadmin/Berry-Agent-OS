@@ -3,7 +3,7 @@
 #
 # 用法（两段式——先下载再执行：管道直灌形态下连接中段断裂时 sh 会执行半截
 # 脚本，落盘后再跑无此险）：
-#   curl -fsSL -o install.sh <仓库>/scripts/install.sh
+#   curl -fsSL -o install.sh https://raw.githubusercontent.com/miuiadmin/Berry-Agent-OS/main/scripts/install.sh
 #   sh install.sh
 # 职责三件：Node ≥22.19 检查（只查不装——缺失指引发官方指引）→ npm 全局装
 # berry-agent-os → berry --version 安装验证。失败路径全部带原因与出路口。
