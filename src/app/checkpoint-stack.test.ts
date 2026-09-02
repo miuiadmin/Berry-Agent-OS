@@ -421,6 +421,45 @@ describe('子代理捕获（身份判据 = chainSessionId ?? routed）', () => {
   });
 });
 
+/* ---------------- ⑤ 行 config exclude 接线（追加语义——全面复盘 20260902 S-2） ---------------- */
+
+describe('行 config exclude 追加语义（接线级——全面复盘 20260902 S-2）', () => {
+  it("config exclude=['!.env']：.env 入快照、.env.local / id_rsa 仍排除（修前：整组替换使全部秘密回快照面）", async () => {
+    // 工作区预置四件（宿主直写不触捕获监听）：字面秘密 + 变体 + 未点名私钥 + 普通文件
+    const ws = makeTempDir('app-cpk-excl-ws-');
+    writeFileSync(join(ws, '.env'), 'API_TOKEN=sk-live-9f2c', 'utf8');
+    writeFileSync(join(ws, '.env.local'), 'API_TOKEN=sk-local', 'utf8');
+    writeFileSync(join(ws, 'id_rsa'), '-----BEGIN OPENSSH PRIVATE KEY-----', 'utf8');
+    writeFileSync(join(ws, 'a.txt'), '正常文件', 'utf8');
+    // 行 config 仅写否定 glob（operator 显式声明该工作区的 .env 可入快照——会话篇
+    // §5.3 例外放开面）；overlay 同 id 字段级替换即接线面（snapshot.test.ts:217 已
+    // 直接锁 captureSnapshot 的拼接语义，本测锁 apply→cfg→captureCx 的整段接线）
+    const compositionDir = makeTempDir('app-cpk-excl-comp-');
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      "rows:\n  - id: checkpoint\n    config: { exclude: ['!.env'] }\n",
+    );
+    const { streamFn } = scriptedStream([
+      toolCallMessage('write', { path: 'b.txt', content: '触发捕获' }),
+      textMessage('写完'),
+    ]);
+    const { runtime } = await assemble({ streamFn, workspace: ws, compositionDir });
+    const answer = await runtime.conversation!.submitOnce('写 b.txt');
+    expect(answer?.status).toBe('completed');
+    const sid = runtime.session!.header.sessionId;
+    // 件数据根随 compositionDir（覆写时它即数据根——paths.appDataDir 单源；与
+    // cpkDataRoot 的 envDataDir 形态分流，本测自持 compositionDir）
+    const manifests = await listSessionManifests(join(compositionDir, 'apps', 'checkpoint'), sid);
+    expect(manifests).toHaveLength(1);
+    // 捕获 = pre-mutation（b.txt 尚未落盘）：断言集恰为预置四件的过滤结果
+    const rels = manifests[0]!.files.map((f) => f.rel);
+    expect(rels).toContain('.env'); // 显式放开生效
+    expect(rels).toContain('a.txt'); // 普通文件照入
+    expect(rels).not.toContain('.env.local'); // 变体不随字面放开联动（修前在——整组替换裸奔）
+    expect(rels).not.toContain('id_rsa'); // 未点名秘密缺省排除（修前在——整组替换裸奔）
+  });
+});
+
 /** manifest 类型落地引用（导入面完整性——断言均经 CheckpointManifest 结构） */
 const typeAnchor = (m: CheckpointManifest): string => m.id;
 void typeAnchor;

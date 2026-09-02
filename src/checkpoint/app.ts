@@ -87,7 +87,7 @@ export const checkpointConfig = Type.Object({
   maxSnapshots: Type.Optional(Type.Number({ minimum: 1, maximum: 10_000 })),
   /** 全局 blob 软帽（字节——跨会话 oldest-first；下界 = 在册会话最新一条） */
   maxTotalBytes: Type.Optional(Type.Number({ minimum: 1024 * 1024 })),
-  /** 排除 glob（工作区遍历——PRUNE 硬表 node_modules/.git 之上叠加；缺省 = DEFAULT_EXCLUDE） */
+  /** 排除 glob（工作区遍历——PRUNE 硬表 node_modules/.git 之上叠加；追加语义：配置项恒接在缺省清单之后，否定 glob 即例外放开） */
   exclude: Type.Optional(Type.Array(Type.String())),
 });
 
@@ -181,7 +181,12 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
       const cfg: ResolvedConfig = {
         maxSnapshots: (cfgRaw.maxSnapshots as number) ?? 50,
         maxTotalBytes: (cfgRaw.maxTotalBytes as number) ?? 512 * 1024 * 1024,
-        exclude: (cfgRaw.exclude as string[] | undefined) ?? DEFAULT_EXCLUDE,
+        // exclude = 追加语义（会话篇 §5.3：否定 glob 例外放开）：行配置项恒接在
+        // 缺省清单 DEFAULT_EXCLUDE 之后——ignore 后规则覆盖前规则，operator 写
+        // '!.env' 即显式重开字面 .env、其余秘密缺省排除不动。修前整组替换
+        //（?? DEFAULT_EXCLUDE）使仅写 ['!.env'] 的配置反把 .env.local / id_rsa
+        // 等全部秘密放回快照面（全面复盘 20260902 S-2——规范本就写追加，落码对齐）。
+        exclude: [...DEFAULT_EXCLUDE, ...((cfgRaw.exclude as readonly string[] | undefined) ?? [])],
       };
 
       /**
