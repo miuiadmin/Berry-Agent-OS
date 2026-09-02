@@ -186,6 +186,23 @@ describe('loadOfficialApps：官方目录装载', () => {
     }
   });
 
+  it('装载表序 = id 字母序（文件名仅人读不参与排序——改名中间态回归锁）', () => {
+    // 背景（2026-09-02 CI 红修死）：重命名战役的文件名先行（coder.app.yaml →
+    // berrycode.app.yaml 而 id 未改）曾让文件名序牵动在册披露序——berrycode
+    // 文件名跳到 chat 前、id 序不变，两序错位即 assembly 两测红。本锁钉死：
+    // 文件名与 id 任意错开（zz 文件名带 alpha id / mm 文件名带 beta id），
+    // 装载表迭代序恒按 id 字母序（alpha、beta）——修前按文件名序得 [beta, alpha] 必红。
+    const dir = mkdtempSync(join(tmpdir(), 'app-reg-test-'));
+    try {
+      writeFileSync(join(dir, 'zz-renamed.app.yaml'), 'id: alpha\nlabel: 甲\ncomponents:\n  - builtin:chat\n');
+      writeFileSync(join(dir, 'mm-mid.app.yaml'), 'id: beta\nlabel: 乙\ncomponents:\n  - builtin:chat\n');
+      const apps = loadOfficialApps(dir);
+      expect([...apps.keys()]).toEqual(['alpha', 'beta']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('坏 yaml = APP_INVALID 拒启（官方件随包，坏 = 发版事故）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'app-reg-test-'));
     try {

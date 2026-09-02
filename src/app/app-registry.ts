@@ -87,7 +87,13 @@ export function loadOfficialApps(dir: string = OFFICIAL_APPS_DIR): Map<string, A
       `默认应用声明冲突：${marked.map((m) => m.id).join('、')} 均带 default: true（全局唯一属性，恰一带标——修改其余清单的 default 键）`,
     );
   }
-  return apps;
+  /* 装载表按 id 字母序定序：文件名仅人读（MANIFEST_SUFFIX 头注——id 以清单内容
+   * 为准），排序基准同为 id。若按文件名序入表（readdir+文件名 sort），文件名与
+   * id 不同名的中间态（重命名战役文件名先行）会让文件名序牵动一切用户可见序
+   * （APP_NOT_FOUND 在册披露行 / /app 可用应用行）——两序错位即测试红（CI 实证）。
+   * 按 id 定序后装载表序只随 id 走，文件名怎么改都不外露。 */
+  const ordered = [...apps.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return new Map(ordered.map((m) => [m.id, m]));
 }
 
 /**
