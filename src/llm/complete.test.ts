@@ -20,7 +20,7 @@ import {
   AppError,
   describeError,
 } from '../contracts/errors.js';
-import type { AssistantMessage, Message } from '../contracts/llm.js';
+import type { Message } from '../contracts/llm.js';
 import { createLlmRuntime } from './runtime.js';
 import { createLlmService } from './complete.js';
 import { InFlightTracker } from './inflight.js';

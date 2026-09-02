@@ -278,7 +278,6 @@ describe('latestSessionId（TUI 启动续接取数面，技术栈篇 §5）', ()
   it('created_at 同毫秒并列：rowid 取后建者（DESC, rowid DESC 兜底序）', () => {
     const store = openStore({ path: nextPath() });
     const ws = '/ws/tie';
-    const regWs = { ...reg('tie-1'), cwd: ws };
     // created_at 由 appendCore 内 Date.now() 落——两次紧邻调用可能同毫秒；
     // 循环多建几个，断言最终 latest = 最后建的那个 id
     const ids: string[] = [];

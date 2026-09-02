@@ -23,7 +23,6 @@ import type {
   SubagentProvider,
   SubagentProviderInfo,
   SubagentRequest,
-  SubagentResult,
   SubagentRun,
   SubagentSettlement,
   SubagentStart,

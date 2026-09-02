@@ -471,7 +471,7 @@ describe('ConversationDriver turn 级 auto-retry（S4 前置债①）', () => {
   });
 
   it('followUp 合流：退避期入队的消息与续入同批（重试不吞用户插话）', async () => {
-    const { driver, session, calls } = makeRetryDriver([errorAssistant('retryable-mark: x'), okAssistant('恢复')], {
+    const { driver, calls } = makeRetryDriver([errorAssistant('retryable-mark: x'), okAssistant('恢复')], {
       retryPolicy: { enabled: true, maxRetries: 3, baseDelayMs: 50 },
     });
     driver.submit('第一问');

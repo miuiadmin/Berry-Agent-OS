@@ -168,15 +168,6 @@ function sessionsFace(runtime: AppRuntime) {
   }>('sessions');
 }
 
-/** 快照审计事件载荷形状 */
-interface SnapshotAudit {
-  id: string;
-  triggerTool: string;
-  files: number;
-  bytes: number;
-  guard: boolean;
-}
-
 /* ---------------- ① 捕获监听：变更类工具触发、read 不触发 ---------------- */
 
 describe('捕获监听（tools_pre_execute 末位）', () => {

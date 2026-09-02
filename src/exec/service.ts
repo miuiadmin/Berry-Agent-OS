@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { Type } from 'typebox';
-import type { ExecEnvTable, ExecOptions, ExecResult, ExecService } from '../contracts/exec.js';
+import type { ExecResult, ExecService } from '../contracts/exec.js';
 import type { AgentToolResult, ToolDefinition } from '../contracts/tools.js';
 import type { Context } from '../context/types.js';
 import { chainCallers } from '../context/chain.js';

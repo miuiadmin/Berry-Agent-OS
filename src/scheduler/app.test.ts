@@ -19,14 +19,11 @@ let jobs: JobsStore;
 let face: GoalJobsFace;
 /** mountGoalJobs 收到的面（迟到注入回填观测） */
 let mounted: GoalJobsFace | undefined;
-/** dispose 摘面观测 */
-let disposed = false;
 
 beforeEach(async () => {
   store = openStore({ path: ':memory:', migrations });
   jobs = new JobsStore(store.connection);
   mounted = undefined;
-  disposed = false;
   // 真 Context + 两服务薄壳（compaction 测试同款形态）——apply 内构造面并回填
   const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
   ctx.provide('ui', { notify: () => undefined } as never);
@@ -38,9 +35,7 @@ beforeEach(async () => {
     backgroundAffordable: () => true,
     mountGoalJobs: (f) => {
       mounted = f;
-      return () => {
-        disposed = true;
-      };
+      return () => {};
     },
   });
   await plugin.apply(ctx as never, ctx.config);

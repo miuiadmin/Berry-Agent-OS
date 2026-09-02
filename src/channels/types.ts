@@ -7,7 +7,7 @@
  */
 
 import type { AgentMessage } from '../contracts/messages.js';
-import type { CommandCompletionItem, CommandDefinition } from '../contracts/channels.js';
+import type { CommandDefinition } from '../contracts/channels.js';
 import type { Disposer } from '../context/types.js';
 
 // 再导出下沉两符号（2026-08-27 第三十三批 P2-1 M4：类型面迁 contracts，

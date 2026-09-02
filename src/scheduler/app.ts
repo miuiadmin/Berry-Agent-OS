@@ -242,7 +242,7 @@ const TICK_USAGE =
 
 /** /tick 命令体（args 子命令分派；async——enable/disable/list 含注册器往返） */
 async function handleTickCommand(args: string, opts: TickCommandOpts): Promise<void> {
-  const { store, deps, ui } = opts;
+  const { ui } = opts;
   // 子命令分词：首词子命令，余量整体传子命令（add 的 prompt 取余量含空格）
   const spaceAt = args.indexOf(' ');
   const sub = spaceAt === -1 ? args : args.slice(0, spaceAt);

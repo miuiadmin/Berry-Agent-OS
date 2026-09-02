@@ -11,7 +11,6 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AppError } from '../contracts/errors.js';
 import type { EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import { Session } from '../session/session.js';
 import type { SessionOptions } from '../session/session.js';

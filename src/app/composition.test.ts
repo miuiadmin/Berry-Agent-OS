@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
-import type { AppLoadResult, AppPlanRow } from '../contracts/app.js';
+import type { AppPlanRow } from '../contracts/app.js';
 import {
   assertRing1Required,
   diffRing1Rows,

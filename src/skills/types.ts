@@ -9,7 +9,7 @@
  */
 
 import type { Disposer } from '../context/types.js';
-import type { Skill, SkillDiagnostic, SkillProvenance, SkillSourceLevel, SkillsProvider } from '../contracts/skills.js';
+import type { Skill, SkillDiagnostic, SkillSourceLevel, SkillsProvider } from '../contracts/skills.js';
 
 // 再导出下沉符号（旧消费面 import 路径不变；第四十二批增 SkillProvenance——晋升溯源）
 export type {

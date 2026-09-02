@@ -73,15 +73,6 @@ export interface InProcessProviderOptions {
   readonly mergeRequest?: (request: SubagentStart) => SubagentStart;
 }
 
-/** 空用量基线（onUsage 从未上报时结算省略 usage 段——外部报不上则省的同形） */
-const EMPTY_USAGE: Usage = {
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 0,
-};
-
 /** 用量累加（字段级求和；可选段有则累、无则保持缺省） */
 function addUsage(acc: Usage, delta: Usage): Usage {
   return {

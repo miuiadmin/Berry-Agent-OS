@@ -59,7 +59,7 @@
 import { AppError, AGENT_SESSION_INACTIVE, describeError } from '../contracts/errors.js';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
-import type { Context, Disposer } from '../context/types.js';
+import type { Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
 // session 边（2026-09-01 复盘 R-1「先看见的边」纪律）：llm/usage callId 判别式
 // 同源收口——与 durable.ts 前台腿 / notify.ts 折叠腿两写点共用 event-types 三函数

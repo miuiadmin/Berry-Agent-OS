@@ -12,7 +12,7 @@
  */
 
 import { PendingMessageQueue } from '../agent/queue.js';
-import type { AgentEvent, AgentEventSink, RunStatus } from '../agent/events.js';
+import type { AgentEventSink, RunStatus } from '../agent/events.js';
 import type { AgentContext, AgentLoopConfig, PreStepDecision, RunResult } from '../agent/loop.js';
 import { startRun } from '../agent/loop.js';
 import type { AgentMessage } from '../contracts/messages.js';

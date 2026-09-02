@@ -15,7 +15,6 @@ import type {
   AuthOperationOptions,
   CredentialStore,
   Model,
-  Models,
   ModelsRefreshOptions,
   ModelsRefreshResult,
   ModelsStore,

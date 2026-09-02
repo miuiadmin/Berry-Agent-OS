@@ -193,7 +193,7 @@ describe('事件四模式', () => {
   it('waterfall：监听器不调 next 即短路，其返回值为最终值', async () => {
     const scope = scopedRoot([{ name: 'evt/w', mode: 'waterfall' }]);
     const downstream = vi.fn();
-    scope.on('evt/w', (value: number, next: () => unknown) => `intercepted:${value}`);
+    scope.on('evt/w', (value: number, _next: () => unknown) => `intercepted:${value}`);
     scope.on('evt/w', downstream);
     const result = await scope.waterfall<string>('evt/w', 7, () => 'tail');
     expect(result).toBe('intercepted:7');
@@ -202,11 +202,11 @@ describe('事件四模式', () => {
 
   it('waterfall：prepend 拦截器先执行（工具管道守门段依赖）', async () => {
     const scope = scopedRoot([{ name: 'evt/w', mode: 'waterfall' }]);
-    scope.on('evt/w', (v: string, next: () => unknown) => `${v}-normal`);
+    scope.on('evt/w', (v: string, _next: () => unknown) => `${v}-normal`);
     scope.on(
       'evt/w',
       // next() 返回 Promise（链是异步的）——拦截器须 await 才能拿到下游结果
-      async (v: string, next: () => Promise<unknown>) => `gate(${await next()})`,
+      async (_v: string, next: () => Promise<unknown>) => `gate(${await next()})`,
       { prepend: true },
     );
     const result = await scope.waterfall<string>('evt/w', 'x', () => 'tail');
@@ -235,8 +235,8 @@ describe('事件四模式', () => {
 
   it('waterfall：无参 next() 沿用当前参数（短路外的零变换直通语义不回归）', async () => {
     const scope = scopedRoot([{ name: 'evt/w', mode: 'waterfall' }]);
-    scope.on('evt/w', (v: string, next: () => Promise<string>) => next());
-    scope.on('evt/w', (v: string, next: () => Promise<string>) => next());
+    scope.on('evt/w', (_v: string, next: () => Promise<string>) => next());
+    scope.on('evt/w', (_v: string, next: () => Promise<string>) => next());
     const result = await scope.waterfall<string>('evt/w', 'kept', (final: string) => `tail:${final}`);
     expect(result).toBe('tail:kept'); // 两层无参 next 后参数原样到达链尾
   });

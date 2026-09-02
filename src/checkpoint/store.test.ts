@@ -209,8 +209,7 @@ describe('sweepOrphanBlobs 引用计数清孤', () => {
       // 两份 manifest 都引用 hash（blob 共享是常态——未变文件引用既有 blob）
       const entry = { rel: 'a.txt', hash, size: content.length, mtimeMs: 1, mode: 0o644 };
       const m1 = makeManifest({ id: 'cp-11111111', sessionId: 'sess-s1', files: [entry] });
-      const m2 = makeManifest({ id: 'cp-22222222', sessionId: 'sess-s2', files: [entry] });
-      // 幸存集 = [m1]：共享 blob 保留（m2 也引用但已被 prune 删——引用计数只看幸存者）、孤儿清
+      // 幸存集 = [m1]：共享 blob 保留（引用计数只看幸存者）、孤儿清
       const removedFirst = await sweepOrphanBlobs(root, [m1]);
       expect(removedFirst).toBe(1); // 只清了 loneHash
       await expect(readBlob(root, hash)).resolves.toBeTruthy(); // 共享 blob 在

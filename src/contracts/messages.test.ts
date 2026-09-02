@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { AGENT_ROLE_EXISTS, AGENT_ROLE_INVALID, AppError } from './errors.js';
+import { AppError } from './errors.js';
 import {
   getMessageRoleDefinition,
   isStandardMessage,

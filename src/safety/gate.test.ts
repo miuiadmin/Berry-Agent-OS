@@ -142,7 +142,7 @@ describe('守门行 × carve-out（workspace-write 档）', () => {
   it('glob 条目遮罩真实存在的敏感文件（*.env 先展开再遮罩）', async () => {
     // prod.env 必须在守门行安装前就存在——glob 展开时刻在装配期（诚实语义：
     // 展开后新建的文件不追溯遮罩，见 buildCarveOutTable 注释）
-    const { ws, run, asked } = rig({
+    const { run, asked } = rig({
       mode: 'workspace-write',
       answer: 'reject',
       pre: (w) => writeFileSync(join(w, 'prod.env'), 'OLD=0'),

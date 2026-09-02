@@ -188,7 +188,7 @@ describe('bridgeApprovalSignal — run 信号桥进 answerer（interrupt 小刀�
   it('活 signal abort → 控制器同 reason abort；detach 后迟到 abort 不传导', () => {
     const run = new AbortController();
     const controller = new AbortController();
-    const detach = bridgeApprovalSignal({ summary: '桥接', signal: run.signal }, controller);
+    bridgeApprovalSignal({ summary: '桥接', signal: run.signal }, controller);
     run.abort('该运行已被打断');
     expect(controller.signal.aborted).toBe(true); // 传导
     expect(String(controller.signal.reason)).toContain('该运行已被打断'); // 同 reason（撤销说明文案源）

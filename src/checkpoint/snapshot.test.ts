@@ -320,7 +320,7 @@ describe('executePrune：删 manifest + 引用计数清孤 blob', () => {
         );
       // 两连拍：v1 → v2（v1 blob 只被旧 manifest 独占引用）
       writeFileSync(join(ws, 'a.txt'), 'prot-v1', 'utf8');
-      const m1 = await snap('sess-prot');
+      await snap('sess-prot');
       await tick();
       writeFileSync(join(ws, 'a.txt'), 'prot-v2-longer', 'utf8');
       await snap('sess-prot');

@@ -13,7 +13,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { Context, Disposer } from '../context/types.js';
+import type { Context } from '../context/types.js';
 import { chainBackground } from '../context/chain.js';
 import type { ApprovalOutcome, ApprovalPolicyMode, ApprovalRequest, AllowlistDraft } from './types.js';
 

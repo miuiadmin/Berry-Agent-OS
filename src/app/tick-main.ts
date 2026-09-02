@@ -24,7 +24,6 @@ import { openStore, openTurnDepth } from '../persist/index.js';
 import type { Store } from '../persist/index.js';
 import type { LlmService } from '../llm/index.js';
 import { JobsStore, parseSchedule, evaluateDue, discoveryGates, GOAL_JOB_OWNER } from '../scheduler/index.js';
-import type { JobRecord } from '../scheduler/index.js';
 import { GoalStore, newWakeId, wakeGate, renderContinuationPrompt, wakeToolFilter } from '../goal/index.js';
 import type { ToolsService } from '../contracts/tools.js';
 import type { RunResult } from '../agent/loop.js';

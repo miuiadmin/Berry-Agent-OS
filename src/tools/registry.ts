@@ -40,12 +40,11 @@ import {
   TOOL_REGISTRY_RATE,
   TOOL_TIMEOUT_INVALID,
 } from '../contracts/errors.js';
-import type { AgentTool, ToolDefinition, ToolsService } from '../contracts/tools.js';
+import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import type { RowAppProbe } from '../contracts/app.js';
 import { RateLimiter } from '../context/rate-limit.js';
 import { chainCaller } from '../context/chain.js';
-import type { Disposer } from '../context/types.js';
 import type { Context } from '../context/types.js';
 import type { ToolPipelineExecutor } from './pipeline.js';
 

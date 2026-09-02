@@ -291,7 +291,7 @@ describe('访问流水（recordAccess + markUsed cite + 查询聚合）', () => 
   it('topByUsage：usage 降序、次键最近引用；只含可见行', () => {
     const idA = seed({ summary: '高频条' });
     const idB = seed({ summary: '低频条' });
-    const idDead = seed({ ttlDays: 1, summary: '过期不计条' });
+    seed({ ttlDays: 1, summary: '过期不计条' });
     for (let i = 0; i < 3; i += 1) db.markUsed([idA], T0 + i * DAY, 's1');
     db.markUsed([idB], T0, 's1');
     db.sweepExpired(T0 + 2 * DAY); // idDead 物化

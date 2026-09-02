@@ -18,7 +18,7 @@ import type { RuntimeOptions } from './assembly.js';
 import { createLspAssemblyDeps, createBrowserAssemblyDeps } from './builtin-deps.js';
 import { InflightGates } from '../web/index.js'; // 诊断形态限流占位（构造零副作用——apply 永不跑）
 import { loadComposition, OVERLAY_FILENAME, safeModeComposition, type CompositionReport } from './composition.js';
-import { loadOfficialApps, assertAppComponents, resolveDefaultApp } from './app-registry.js';
+import { loadOfficialApps, assertAppComponents } from './app-registry.js';
 import { createBuiltinRegistry } from './builtins.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { createMcpSpawner } from './mcp-spawn.js';

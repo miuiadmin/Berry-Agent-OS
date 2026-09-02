@@ -13,17 +13,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-  chmodSync,
-  mkdirSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -255,7 +245,7 @@ function bootingProbe(root: string, pid: number) {
 /** stdout 捕获（命令面输出 = 产品契约，断言其词面） */
 function captureStdout(): string[] {
   const chunks: string[] = [];
-  const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+  vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
     chunks.push(String(chunk));
     return true;
   }) as typeof process.stdout.write);

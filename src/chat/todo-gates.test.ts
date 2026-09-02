@@ -40,9 +40,6 @@ import type { TodoItem } from './todo.js';
 
 /** goal 段视野桩（activatedSeq 本文件不触达 gates——只有 fold 消费锚） */
 const SCOPE: TodoGoalScope = { active: true, activatedSeq: 5, needsWrite: true };
-/** 只读档（command gate 准入判据用） */
-const SCOPE_READ_ONLY: TodoGoalScope = { active: true, activatedSeq: 5, needsWrite: false };
-
 /** 造临时工作区根（files gate 的 fence 锚——真 stat 非 mock） */
 const root = mkdtempSync(join(tmpdir(), 'todo-gates-'));
 afterAll(() => {

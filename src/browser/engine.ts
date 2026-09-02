@@ -136,8 +136,6 @@ export class BrowserEngine {
   private connection: CdpConnection | undefined;
   /** spawn 产物（attach 形态恒空） */
   private child: EngineChild | undefined;
-  /** spawn 引擎路径（attach 形态记 '(attach)'） */
-  private enginePath: string | undefined;
   /** 发现序产物（fallbackWarning 披露源） */
   private discovered: DiscoveredEngine | undefined;
   /** per-session 隔离态表（路由键 = sessionId；匿名兜底 '_default'） */
@@ -362,7 +360,6 @@ export class BrowserEngine {
     this.status = { state: 'starting' };
     const child = this.deps.spawnEngine({ command: discovered.path, args });
     this.child = child;
-    this.enginePath = discovered.path;
     this.deps.registry.add({
       hostPid: process.pid,
       childPid: child.pid,
@@ -475,13 +472,12 @@ export class BrowserEngine {
     }
     // 共享引用护栏：仍指向本代产物才清（换代 = 新代引用原位不动）。三判据分立
     // （#23）：conn/child/status 各按自判据清算不嵌套——起链失败腿 conn=undefined
-    // （本代从未收养）不清别代 connection，但仍清本代 child/enginePath（判据 =
+    // （本代从未收养）不清别代 connection，但仍清本代 child（判据 =
     // this.child === 本代 child），并在 connection 与 child 均不再在位时复位
     // status 为 closed（判据缺席不清算 = 旧回归面：this.child 残壳 + starting 谎报）
     if (this.connection === atClose.conn) this.connection = undefined;
     if (this.child === atClose.child) {
       this.child = undefined;
-      this.enginePath = undefined;
     }
     if (this.connection === undefined && this.child === undefined) {
       this.status = { state: 'closed' };

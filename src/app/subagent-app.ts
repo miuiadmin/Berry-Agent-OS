@@ -16,7 +16,6 @@ import { Type } from '../contracts/typebox.js';
 import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { PromptsService } from '../contracts/app.js';
-import type { Context } from '../context/types.js';
 import type { SubagentsServiceFace, SubagentRun } from '../contracts/subagent.js';
 import { createInProcessProvider } from '../subagent/inprocess.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';

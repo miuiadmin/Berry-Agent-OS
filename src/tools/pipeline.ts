@@ -26,11 +26,9 @@ import type {
   ExecuteInput,
   GateAction,
   GateInput,
-  GateDecisionPayload,
   GateDecisionSink,
   TextContent,
   ToolCtx,
-  ToolDefinition,
   ToolPipelineExecutor,
   ToolUpdateCallback,
 } from '../contracts/tools.js';

@@ -19,7 +19,6 @@ import type {
   AssistantMessage,
   AssistantStream,
   AssistantStreamEvent,
-  LlmContext,
   Message,
   StreamFn,
   Usage,
@@ -216,7 +215,7 @@ const replaySide: ConformanceSide = (script) => ({
 
 /* ---------------- 共享断言族（两实现同跑同一份代码） ---------------- */
 
-function runStreamFnConformance(sideName: string, side: ConformanceSide) {
+function runStreamFnConformance(_sideName: string, side: ConformanceSide) {
   it('text 主链：start 先行 + 收尾恰一 done；终文本可由流内事件重组；partial 累计=前缀', async () => {
     const { streamFn, model } = side({ kind: 'text', text: '一致性证词' });
     const stream = await streamFn({ messages: [userMsg('hi')] }, { model });

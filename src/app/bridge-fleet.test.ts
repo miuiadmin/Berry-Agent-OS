@@ -163,7 +163,6 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       await fleet.loader.apply(row, scope);
     }
     expect(fleet.stats()).toMatchObject({ spawned: 3, live: 3 });
-    const solo = root.get<Record<string, () => Promise<string>>>('fleet/taps-solo');
     const shared = root.get<Record<string, () => Promise<string>>>('fleet/taps-shared');
     const sysrow = root.get<Record<string, () => Promise<string>>>('fleet/taps-sysrow');
 

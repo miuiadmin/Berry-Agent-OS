@@ -37,7 +37,6 @@ import {
   foldCurrentTodo,
   registerTodoInjection,
   renderTodoTable,
-  type TodoEnforcement,
   type TodoItem,
   type TodoRegistryFace,
 } from './todo.js';

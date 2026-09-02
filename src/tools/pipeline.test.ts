@@ -4,7 +4,7 @@
  * 输出护栏（64KiB 保尾截断 + spill——契约篇 §3.1，随 mcp 第一刀兑现，全部工具受益）。
  */
 
-import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { Type } from 'typebox';
@@ -234,7 +234,7 @@ describe('createToolPipeline — 执行段（tools_execute）', () => {
 
   it('执行段拦截者调 next：包裹原执行（指标/重试挂点形态）', async () => {
     const ctx = createContext({ name: 'test' });
-    ctx.on('tools_execute', async (input, next) => {
+    ctx.on('tools_execute', async (_input, next) => {
       const inner = await next();
       inner.content = [{ type: 'text', text: `包裹[${inner.content[0]!.type}]` }];
       return inner;

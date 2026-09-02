@@ -39,8 +39,6 @@ export interface StdioBridgePortOptions {
 export class StdioBridgePort implements BridgePort {
   /** 出站写手（宿主侧 = child.stdin；域入口侧 = process.stdout） */
   private readonly out: NodeJS.WritableStream;
-  /** 入站流（宿主侧 = child.stdout；域入口侧 = process.stdin） */
-  private readonly input: NodeJS.ReadableStream;
   /** 坏行观测回调（缺省静默跳过） */
   private readonly onBadLine?: (line: string, err: unknown) => void;
   /** 'message' 监听器组（readline 'line' 逐条派发——BridgePort 契约面） */
@@ -52,7 +50,6 @@ export class StdioBridgePort implements BridgePort {
    * @param options 坏行观测等可选项
    */
   constructor(input: NodeJS.ReadableStream, out: NodeJS.WritableStream, options: StdioBridgePortOptions = {}) {
-    this.input = input;
     this.out = out;
     this.onBadLine = options.onBadLine;
     // 入站流端到端接 readline（行边界协议自扛字节流切分；无行长上限——

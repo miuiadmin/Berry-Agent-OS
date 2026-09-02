@@ -44,7 +44,7 @@ import {
 } from '../contracts/errors.js';
 import type { AssistantMessage, UserMessage, MessageSource, Message, StreamFn } from '../contracts/llm.js';
 import type { AgentMessage } from '../contracts/messages.js';
-import type { AgentEvent, AgentEventSink } from '../agent/events.js';
+import type { AgentEvent } from '../agent/events.js';
 import type { PreStepDecision } from '../agent/loop.js';
 import type { AgentTool } from '../contracts/tools.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';

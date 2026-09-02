@@ -593,7 +593,6 @@ describe('goal 刀二全栈：计划态跨轮 + gates 执法 + open 项否决', 
       writeFileSync(join(workspace, 'artifact.txt'), '落码产物\n');
       const { streamFn, contexts } = scriptedStream([textMessage('答'), textMessage('答二')]);
       const runtime = await assemble({ streamFn, workspace });
-      const sessionId = runtime.session!.header.sessionId;
 
       /* ---- ① goal_set：激活锚 = 设定时点日志长度（其后 todo 表属 goal 段） ---- */
       await callTool(runtime, 'goal_set', { objective: '完成重构目标', tokenBudget: 100000 });

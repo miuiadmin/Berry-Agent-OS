@@ -277,8 +277,6 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
     decide: (approvalId, decision) => decideApproval(port, token, approvalId, decision),
     isQuitting: () => quitting,
   });
-  /** 审批卡入身（应答器转发——语义见 createApprovalAnswerer 注释） */
-  const askApproval = answerer.ask;
   /** decided 镜像收场（应答器转发） */
   const settleApproval = answerer.settle;
   /** approvals 清单 → 增量建卡（应答器转发） */

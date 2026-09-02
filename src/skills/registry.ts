@@ -12,7 +12,6 @@ import type { Context, Disposer } from '../context/types.js';
 import { chainCaller } from '../context/chain.js';
 import { AppError, COMPOSITION_ROW_INVALID, SKILLS_PROVIDER_INVALID } from '../contracts/errors.js';
 import type { RowAppProbe } from '../contracts/app.js';
-import { SKILLS_CHANGE_EVENT } from './types.js';
 import type { Skill, SkillDiagnostic, SkillsProvider, SkillsService } from './types.js';
 
 /** 安全 realpath（失败原样返回——去重尽力而为，不因怪路径断流） */

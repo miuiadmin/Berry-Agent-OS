@@ -594,7 +594,7 @@ describe('S3 退出扇出（requestQuit 从聚焦单路扩为全部活驱动 abo
 describe('S6 Ctrl+C 分档（FrontHost.interrupt 多驱动打断 / 单驱动维持 requestQuit）', () => {
   it('双驱动在飞 interrupt：聚焦被打断 aborted、兄弟不受扰照常完成、quit 不 resolve', async () => {
     const { streamFn, release } = pendingStream();
-    const { runtime, agent } = await assemble({ streamFn });
+    const { runtime } = await assemble({ streamFn });
     const registry = runtime.drivers;
     const a = registry.focused()!;
     const b = registry.open()!; // focus=B

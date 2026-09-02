@@ -30,7 +30,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, mkdirSync, openSync, renameSync, rmSync, statSync } from 'node:fs';
-import { get as httpGet, request as httpRequest, type RequestOptions } from 'node:http';
+import { get as httpGet, type RequestOptions } from 'node:http';
 import { connect as netConnect } from 'node:net';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';

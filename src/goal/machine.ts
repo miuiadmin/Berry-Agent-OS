@@ -51,9 +51,6 @@ export interface GoalRecord {
 /** 状态五值（§6.8 状态机词汇——与 goals.status 列同源） */
 export type GoalStatus = 'active' | 'needs-resume' | 'completed' | 'blocked' | 'stopped';
 
-/** 终态三值（释放 active 位——同会话新 goal_set 可入） */
-const SETTLED_STATUSES: readonly GoalStatus[] = ['completed', 'blocked', 'stopped'];
-
 /**
  * 轮结算申报四值（第三十九批 T4-A——goal_update 轮结算分支的 outcome 词汇）：
  * - surface_only：只完成了表面动作（改了展示面/打印了信息），离目标无实质推进；

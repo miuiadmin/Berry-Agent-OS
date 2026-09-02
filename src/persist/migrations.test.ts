@@ -10,11 +10,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { openStore } from './index.js';
 import { normalizeMigrations, type MigrationSpec } from './migrations.js';
-import {
-  SESSION_APP_COLUMN_MIGRATION,
-  SESSION_IMPORTER_COLUMN_MIGRATION,
-  DROP_PROJECTION_CHECKPOINTS_MIGRATION,
-} from './schema.js';
+import { SESSION_APP_COLUMN_MIGRATION, DROP_PROJECTION_CHECKPOINTS_MIGRATION } from './schema.js';
 
 /** 临时库目录（全文件共享，结束后整体清除） */
 let dir: string;

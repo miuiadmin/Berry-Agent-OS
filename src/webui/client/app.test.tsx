@@ -12,16 +12,9 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  ApiError,
-  authBootstrap,
-  decideApproval,
-  fetchApprovals,
-  fetchMessages,
-  fetchSessions,
-  fetchTodo,
-  submitMessage,
-} from './api';
+// 仅 ApiError 值导入（:204 构造用——vi.mock 工厂同源类；其余七件只在 mock 工厂内
+// 出现，测试体零直接引用，不导入——noUnusedLocals 绿）
+import { ApiError } from './api';
 import { App, previewOf, relTime } from './app';
 import type { ProjectedMessage, SessionSummary } from './types';
 

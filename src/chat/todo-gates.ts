@@ -26,14 +26,7 @@
 
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import {
-  AppError,
-  GOAL_GATE_FAILED,
-  GOAL_TODO_SCOPE,
-  TOOL_BLOCKED,
-  TOOL_TIMEOUT,
-  describeError,
-} from '../contracts/errors.js';
+import { AppError, GOAL_TODO_SCOPE, TOOL_BLOCKED, TOOL_TIMEOUT, describeError } from '../contracts/errors.js';
 import { canonicalPath, isInsideRoot } from '../safety/roots.js';
 import type { TodoItem, TodoGate } from './todo.js';
 

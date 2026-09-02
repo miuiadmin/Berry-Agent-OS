@@ -17,7 +17,9 @@
     "rootDir": "src",
     "paths": {
       "berryagent": ["./src/contracts/index.ts"]
-    }
+    },
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
   "include": ["src"],
   "exclude": ["src/webui/client"]

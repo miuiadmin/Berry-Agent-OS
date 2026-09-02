@@ -26,7 +26,6 @@ import type { CdpRpc } from './cdp.js';
 import { renderAccessibilitySnapshot, type FlatDocNode } from './a11y.js';
 import type { SnapshotRefEntry } from './capture.js';
 import { saveScreenshot } from './screenshots.js';
-import type { SessionBrowserState } from './types.js';
 
 /** 工具注册依赖束（app.ts apply 接线——register = ctx.tools.register 直投） */
 export interface BrowserToolsDeps {

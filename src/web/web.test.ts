@@ -285,7 +285,7 @@ describe('InflightGates', () => {
     const front = gates.acquire('a.example').then(() => {
       frontGranted = true;
     });
-    const rear = gates.acquire('other0.example').then(() => {
+    gates.acquire('other0.example').then(() => {
       rearGranted = true;
     });
     gates.release('other1.example'); // 释放他主机槽 → 全局 7

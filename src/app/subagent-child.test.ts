@@ -43,7 +43,7 @@ function childScope() {
 describe('createChildSessionDisposer（§6.2 三步定序）', () => {
   it('flush(sessionId) → session_shutdown 载荷 → effect LIFO 回卷——顺序即此不动摇', async () => {
     const { barrier, flushes } = recordingBarrier();
-    const { ctx, unwindLog } = childScope();
+    const { ctx } = childScope();
     /** 全局步骤序（跨三个观测面的统一时间线） */
     const timeline: string[] = [];
     const originalFlush = barrier.flush.bind(barrier);

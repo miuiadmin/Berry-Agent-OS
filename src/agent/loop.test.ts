@@ -5,7 +5,7 @@
  * 零真实 LLM 依赖。事件序断言采用精确全序列（start → update* → end 严格序）。
  */
 import { describe, expect, it } from 'vitest';
-import { AGENT_CONTINUE_INVALID, AGENT_ROLE_EXISTS, AppError } from '../contracts/errors.js';
+import { AGENT_CONTINUE_INVALID, AppError } from '../contracts/errors.js';
 import type {
   AssistantMessage,
   AssistantStream,

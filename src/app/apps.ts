@@ -48,7 +48,7 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs';
-import { basename, dirname, join, parse, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID, APP_CONFIG_INVALID, APP_INSTALL_FAILED } from '../contracts/errors.js';
 import { Value as typeboxValue, type TSchema } from '../contracts/typebox.js';

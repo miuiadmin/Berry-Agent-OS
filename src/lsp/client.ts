@@ -164,7 +164,6 @@ export async function connectLspServer(
     );
   }
   const startupTimeoutMs = (config.startup_timeout_sec ?? DEFAULT_STARTUP_TIMEOUT_MS / 1000) * 1000;
-  const requestTimeoutMs = (config.request_timeout_sec ?? DEFAULT_REQUEST_TIMEOUT_MS / 1000) * 1000;
   let child: SpawnedProcess;
   try {
     child = await deps.spawnServer(config);

@@ -11,7 +11,7 @@
  * svc.invoke 服务分派与信封保码 / evt 回投 / tool-invoke / unload LIFO
  * 回卷 / apply 失败回卷 / 收窄面 / 取消传播与迟到纪律。
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';

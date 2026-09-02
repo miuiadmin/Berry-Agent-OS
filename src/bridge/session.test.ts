@@ -8,13 +8,7 @@
  */
 import { MessageChannel, type MessagePort } from 'node:worker_threads';
 import { PassThrough } from 'node:stream';
-import {
-  AppError,
-  APP_CONFIG_INVALID,
-  BRIDGE_ENCODE_FAILED,
-  BRIDGE_HANDLER_FAILED,
-  BRIDGE_WORKER_EXITED,
-} from '../contracts/errors.js';
+import { AppError, APP_CONFIG_INVALID, BRIDGE_HANDLER_FAILED, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeEndpoint, type BridgeEndpointOptions, type BridgePort } from './session.js';
 import { StdioBridgePort } from './port-stdio.js';
@@ -150,7 +144,7 @@ describe('BridgeEndpoint：取消消息化（PoC ④ 桩语义回归锁）', () 
     const dropped: string[] = [];
     const { port1, port2 } = new MessageChannel();
     openPorts.push(port1, port2);
-    const a = new BridgeEndpoint(toBridgePort(port1), { onDropped: (m) => dropped.push(m.kind) });
+    new BridgeEndpoint(toBridgePort(port1), { onDropped: (m) => dropped.push(m.kind) });
     // 直接从对端裸发 cancel——a 侧无该入站条目
     port2.postMessage({ kind: 'cancel', callId: 999 });
     await vi.waitFor(() => expect(dropped).toContain('cancel'));
@@ -303,7 +297,7 @@ describe('BridgeEndpoint：载荷不可编码的失败分桶（20260901-c #4）'
   it('tell 载荷不可编码 → 单消息丢弃（onDropped 可观测）不 dispose；后续 tell 照达', async () => {
     const dropped: unknown[] = [];
     const tells: unknown[] = [];
-    const { a, b } = makeJsonPair({ onDropped: (m) => dropped.push(m) }, { onTell: (_e, p) => tells.push(p) });
+    const { a } = makeJsonPair({ onDropped: (m) => dropped.push(m) }, { onTell: (_e, p) => tells.push(p) });
     a.tell('log', { v: 1n }); // fire-and-forget：丢单是正确语义
     a.tell('log', { v: 'good' });
     await new Promise((r) => setTimeout(r, 30)); // 流异步面到达

@@ -14,13 +14,7 @@
  * isError 结果面——两者永不立码；URL/私网/超跳/网络层失败才 throw AppError。
  */
 
-import {
-  AppError,
-  WEB_FETCH_FAILED,
-  WEB_PRIVATE_TARGET,
-  WEB_REDIRECT_LIMIT,
-  WEB_URL_INVALID,
-} from '../contracts/errors.js';
+import { AppError, WEB_FETCH_FAILED, WEB_REDIRECT_LIMIT, WEB_URL_INVALID } from '../contracts/errors.js';
 import type { AgentToolResult } from '../contracts/tools.js';
 import { htmlToText } from './html.js';
 import { assertPublicHost, InflightGates, type HostLookup } from './hygiene.js';

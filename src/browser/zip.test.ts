@@ -152,7 +152,6 @@ async function writeZip(label: string, bytes: Buffer): Promise<{ zipPath: string
 
 describe('extractZip 解包', () => {
   it('混合档案：目录/store/deflate/symlink/权限恢复 + 回执计数', async () => {
-    const deflatable = Buffer.from('chrome payload 行文本。'.repeat(200), 'utf8'); // 可压缩体
     const bytes = buildZip([
       { name: 'chrome-mac-arm64/', externalAttr: attrOf(0o040755) }, // 目录条目（名以 / 结尾）
       { name: 'chrome-mac-arm64/README', data: Buffer.from('readme', 'utf8'), externalAttr: attrOf(0o100644) },
@@ -322,7 +321,6 @@ describe('extractZip symlink 逃逸拒载', () => {
   });
 
   it('正路径回归：linkTarget 指向 destDir 内（合法相对形/绝对形）→ 放行不误伤', async () => {
-    const destName = 'sympass-out';
     const bytes = buildZip([
       { name: 'target.txt', data: Buffer.from('t', 'utf8') },
       { name: 'rel-link', data: Buffer.from('target.txt', 'utf8'), externalAttr: attrOf(0o120777) },

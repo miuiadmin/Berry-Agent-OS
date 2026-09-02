@@ -26,7 +26,7 @@
  */
 
 import { createReadStream, createWriteStream } from 'node:fs';
-import { chmod, lstat, mkdir, open, readFile, rm, symlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, rm, symlink } from 'node:fs/promises';
 import { isAbsolute, dirname, join, relative, resolve } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';

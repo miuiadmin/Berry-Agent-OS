@@ -15,10 +15,9 @@
 import { Type } from '../contracts/typebox.js';
 import { describeError } from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
-import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
+import type { ToolsService } from '../contracts/tools.js';
 import type { UserMessage } from '../contracts/llm.js';
 import type { PromptsService } from '../contracts/app.js';
-import type { Context } from '../context/types.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { DatabaseConnection } from '../persist/index.js';
 import { MemoryStore, projectOwnerKey } from './store.js';

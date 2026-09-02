@@ -17,7 +17,6 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { SpawnedChild } from '../mcp/index.js';
 import type { SandboxBackend, SandboxPolicy, SandboxService } from '../safety/index.js';
 import { createSandboxService } from '../safety/index.js';
 import { SANDBOX_UNAVAILABLE } from '../contracts/errors.js';
@@ -122,7 +121,7 @@ describe('createMcpSpawner — OS 沙箱升格接线', () => {
         calls,
       });
       const spawnServer = createMcpSpawner(dataDir, sandbox, workspace);
-      const child = await spawnServer({
+      await spawnServer({
         command: '/nonexistent/mcp-server-binary',
         args: ['--flag', 'value'],
         env: { FX_MCP_ENV_KEY: 'set-layer' },
@@ -199,8 +198,8 @@ describe('createMcpSpawner — OS 沙箱升格接线', () => {
       backends: [{ id: 'fake', probe: () => (probes++, true) }],
     });
     const spawnServer = createMcpSpawner(dataDir, sandbox, workspace);
-    const child1 = await spawnServer({ command: '/nonexistent/a' });
-    const child2 = await spawnServer({ command: '/nonexistent/b' });
+    await spawnServer({ command: '/nonexistent/a' });
+    await spawnServer({ command: '/nonexistent/b' });
     // probe 在每次 spawn 前同步发生——两连 spawn 后即完备（子进程短命自退）
     expect(probes).toBe(1); // 两次 spawn、一次探测——probe-once 语义
   });
@@ -221,7 +220,7 @@ describe('createMcpSpawner — OS 沙箱升格接线', () => {
         // 内写腿：dataDir 内 marker——seatbelt subpath 放行
         const insideMarker = join(dataDir, 'seatbelt-inside.json');
         const insideTarget = join(dataDir, 'inside-target.txt');
-        const childIn = await spawnServer({
+        await spawnServer({
           command: process.execPath,
           args: ['-e', probeScript(insideMarker, insideTarget)],
         });
@@ -233,7 +232,7 @@ describe('createMcpSpawner — OS 沙箱升格接线', () => {
         // 外写腿：outside 靶——seatbelt file-write* 全拒（EPERM 直证）
         const outsideMarker = join(dataDir, 'seatbelt-outside.json');
         const outsideTarget = join(outside, 'must-not-exist.txt');
-        const childOut = await spawnServer({
+        await spawnServer({
           command: process.execPath,
           args: ['-e', probeScript(outsideMarker, outsideTarget)],
         });

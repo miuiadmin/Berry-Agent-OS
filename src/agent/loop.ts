@@ -20,7 +20,6 @@ import type {
   Message,
   StopReason,
   StreamFn,
-  StreamFnOptions,
   TextContent,
   ThinkingLevel,
   ToolResultMessage,

@@ -338,7 +338,7 @@ describe('lsp 件 — 四工具', () => {
   it('lsp_diagnostics：spawn + 握手 + didOpen + 诊断回流（1-based 行号/severity/码）', async () => {
     const env = makeEnv();
     const harness = makeHarness({
-      diagnosticsFor: (uri) => [{ message: `类型不匹配`, severity: 1, line: 3, code: 2322 }],
+      diagnosticsFor: (_uri) => [{ message: `类型不匹配`, severity: 1, line: 3, code: 2322 }],
     });
     await applyLsp(env, harness, { servers: serversConfig() });
     writeFileSync(join(harness.workspace, 'a.ts'), 'const x: number = "s";\n', 'utf8');
@@ -513,7 +513,7 @@ describe('lsp 件 — write/edit 后诊断注入', () => {
       description: '假 edit（双写路径——混合态测试）',
       parameters: Type.Object({ path: Type.String() }),
       effect: 'write',
-      execute: async (args: Record<string, unknown>) => {
+      execute: async (_args: Record<string, unknown>) => {
         const clean = resolve(harness.workspace, 'clean.ts');
         const slow = resolve(harness.workspace, 'slow.ts');
         return {

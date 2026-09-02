@@ -708,7 +708,7 @@ describe('loadApps apply 失败回卷与生命周期事件', () => {
         'export default async function apply(ctx) { ctx.provide("fx/ok-svc", true); }',
       ].join('\n'),
     );
-    const offEntry = writeApp(dir, 'off.ts', 'export const name = "off";\nexport default async function apply() {}\n');
+    writeApp(dir, 'off.ts', 'export const name = "off";\nexport default async function apply() {}\n');
     const root = makeRoot();
     const events = recordLifecycle(root);
     const rows: AppPlanRow[] = [

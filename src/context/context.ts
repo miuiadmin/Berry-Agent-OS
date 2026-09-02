@@ -30,7 +30,7 @@ import type { SessionEventTypeDefinition } from '../contracts/session-events.js'
 import { createLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import { RateLimiter } from './rate-limit.js';
-import type { Context, ContextOptions, ContextScope, Disposer, EventHandler } from './types.js';
+import type { ContextOptions, ContextScope, Disposer, EventHandler } from './types.js';
 
 /** 监听器登记项：handler + 注册方作用域名（失败归因——记「谁注册的」而非「谁触发的」）。
  * 第三十一批随守门行传导导出（宿主侧专用：snapshotHandlers/appendHandlers 两出口的载荷型）。

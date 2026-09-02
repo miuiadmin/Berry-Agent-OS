@@ -16,7 +16,6 @@
 import type { Disposer } from '../context/types.js';
 import type { CommandRegistry } from '../channels/commands.js';
 import type { UiService } from '../channels/types.js';
-import { describeError } from '../contracts/errors.js';
 import { runUpgradeCheck, entryRealPath } from './upgrade.js';
 import { VERSION, CODENAME } from './version.js';
 import { formatSkillInvocation } from '../skills/index.js';

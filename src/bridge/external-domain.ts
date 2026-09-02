@@ -36,7 +36,7 @@ import { AppError, APP_LOAD_FAILED } from '../contracts/errors.js';
 import type { AppPlanRow } from '../contracts/app.js';
 import type { ToolsService } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
-import type { WorkerModuleMeta, WorkerRowLoader } from '../context/loader.js';
+import type { WorkerModuleMeta } from '../context/loader.js';
 import { BridgeEndpoint } from './session.js';
 import { StdioBridgePort } from './port-stdio.js';
 import { registerHostHandlers, type RowBinding } from './bootstrap.js';
