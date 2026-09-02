@@ -485,3 +485,34 @@ describe('投影回读 round-trip（append → derive → projectedToAgentMessag
     expect(back.errorMessage).toBe('Provider is not configured: anthropic');
   });
 });
+
+/* ---------------- error 腿预算帽（定向复扫 20260902 第七轮 H-2） ---------------- */
+
+describe('durable error 腿预算帽（第七轮 H-2——同源双载不破护栏）', () => {
+  it('isError 大首文本（40KiB）不炸 64KiB 事件护栏——error.message 保头截断', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    const big: ToolResultMessage = {
+      ...toolResult(true),
+      content: [{ type: 'text', text: 'E'.repeat(40 * 1024) }],
+    };
+    // 修前：error.message 原文 40KiB + content 腿 40KiB（≤60KiB 内容预算不截）
+    // ≈ 80KiB > 64KiB 护栏 → SESSION_EVENT_TOO_LARGE 上抛炸整个 run + 审计丢失
+    expect(() => sinks.handle({ type: 'message_end', message: big })).not.toThrow();
+    const ev = session.events.find((e) => e.type === 'tool/result')!;
+    const serialized = Buffer.byteLength(JSON.stringify(ev.data), 'utf8');
+    expect(serialized).toBeLessThanOrEqual(64 * 1024);
+    const data = ev.data as { error?: { message?: string } };
+    // 保头 2KiB + 截断标记（归因线索足够——错误说明非全文）
+    expect(Buffer.byteLength(data.error?.message ?? '', 'utf8')).toBeLessThanOrEqual(2 * 1024 + 64);
+    expect(data.error?.message).toContain('truncated for durable log');
+  });
+
+  it('小文本原样透传（≤ 帽不加截断标记——既有语义不破）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    sinks.handle({ type: 'message_end', message: toolResult(true) });
+    const data = session.events[0]!.data as { error?: { message?: string } };
+    expect(data.error?.message).toBe('失败：被遮罩'); // 小文本零成本快路径
+  });
+});

@@ -70,6 +70,16 @@ function firstText(content: readonly (TextContent | ImageContent)[]): string | u
  */
 const DURABLE_CONTENT_BUDGET_BYTES = 60 * 1024;
 
+/**
+ * error 腿错误说明预算（字节）：定向复扫 20260902 第七轮 H-2 修死。error.message
+ * 与 content 腿同源（首文本块）但**独立小帽**——不帽则同源双载重复计入事件体积
+ * （append 量的是整个 data JSON），首文本 > ~32.6KiB 时 content 腿（60KiB 预算内
+ * 不截）+ error 腿原文 ≈ 2×文本，破 64KiB 护栏 → SESSION_EVENT_TOO_LARGE 上抛
+ * 炸整个 run 且该 tool/result 及其后审计全丢（exec/pipeline 的 60-64KiB 输出预算
+ * 都不拦错误文本）。错误说明是归因线索非全文：保头 2KiB + 截断标记足够。
+ */
+const DURABLE_ERROR_MESSAGE_BUDGET_BYTES = 2 * 1024;
+
 /** 截断尾标记（读侧可识别「内容被 durable 预算裁过」——投影/模型侧语义损失显式化） */
 const TRUNCATED_MARKER = '\n…[truncated for durable log]';
 
@@ -95,13 +105,14 @@ function blockBytes(block: DurableBlock): number {
 
 /**
  * 字符串按字节预算截断（超预算加尾标记；不超原样返回）。
- * user 纯文本整串与 tool/call 的 arguments 字符串共用这一把刀。
+ * user 纯文本整串、tool/call 的 arguments 字符串与 error 腿错误说明共用这一把刀
+ * ——预算各别传入（content/arguments = 60KiB 内容预算；error 说明 = 2KiB 小帽）。
  */
-function budgetString(text: string): string {
+function budgetString(text: string, budget: number = DURABLE_CONTENT_BUDGET_BYTES): string {
   const size = Buffer.byteLength(text, 'utf8');
-  if (size <= DURABLE_CONTENT_BUDGET_BYTES) return text;
+  if (size <= budget) return text;
   // 按字节截（subarray 可能切在多字节字符中间，toString 对坏尾替换 U+FFFD——可接受）
-  const sliced = Buffer.from(text, 'utf8').subarray(0, DURABLE_CONTENT_BUDGET_BYTES).toString('utf8');
+  const sliced = Buffer.from(text, 'utf8').subarray(0, budget).toString('utf8');
   return sliced + TRUNCATED_MARKER;
 }
 
@@ -261,11 +272,22 @@ export function createDurableSinks(
           }
           return;
         }
-        // toolResult：isError 携带通用错误码 + 首段文本说明（durable 写码不写长文）
+        // toolResult：isError 携带通用错误码 + 首段文本说明（durable 写码不写长文）。
+        // error.message 独立小帽（第七轮 H-2）：与 content 腿同源双载不帽即破 64KiB
+        // 护栏；无文本块时 message 维持缺席（原语义——缺省键不落）
         session.append('tool/result', {
           toolCallId: message.toolCallId,
           content: truncateForDurable(message.content),
-          ...(message.isError ? { error: { code: TOOL_ERROR_CODE, message: firstText(message.content) } } : {}),
+          ...(message.isError
+            ? {
+                error: {
+                  code: TOOL_ERROR_CODE,
+                  ...(firstText(message.content) !== undefined
+                    ? { message: budgetString(firstText(message.content)!, DURABLE_ERROR_MESSAGE_BUDGET_BYTES) }
+                    : {}),
+                },
+              }
+            : {}),
         });
         return;
       }
