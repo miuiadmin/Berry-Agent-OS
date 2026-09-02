@@ -8,6 +8,7 @@
 
 export { createCheckpointApp, checkpointConfig, type CheckpointAppDeps } from './app.js';
 export { CHECKPOINT_EVENT_TYPES } from './events.js';
+export { createGitAnchorTracker, type GitProbeFace, type GitProbeState, type GitProbeDelta } from './git-anchor.js';
 export {
   MAX_SNAPSHOT_FILE_BYTES,
   type CheckpointManifest,

@@ -12,6 +12,7 @@
  * assembly（AppRuntime.symbolsFor 第三消费点直读闭包）。
  */
 import { mkdirSync, realpathSync } from 'node:fs';
+import { createGitProbe } from './git-probe.js';
 import { isAbsolute, join, resolve } from 'node:path';
 import { openTurnDepth, type Persistence } from '../persist/index.js';
 import type { LlmService } from '../llm/index.js';
@@ -220,7 +221,7 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
     goalChannel: host.goalChannel,
     // 进程形态（刀三）：goal 件 boot 降级判据第四条件透传（undefined = 诊断
     // 装配保守降级——缺键不传维持 GoalAppDeps 可选语义）
-    ...(host.processKind !== undefined ? { processKind: host.processKind } : {}),
+    ...(host.processKind === undefined ? {} : { processKind: host.processKind }),
     schedulerDeps: {
       runJob: host.tickRunner,
       osRegistrar: host.osTickRegistrar,
@@ -307,6 +308,11 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
     checkpointDeps: {
       activeSessions: () =>
         new Set([...host.registry.entries.values()].filter((e) => !e.retired).map((e) => e.session.header.sessionId)),
+      // git/range Output 锚探测闭包（第六十一批，会话篇 §5.3 git 锚条款）：宿主侧
+      // execFile 只读三探（rev-parse HEAD / status --porcelain 计数 / rev-list +
+      // diff --name-only 区间增量）；git 缺席（ENOENT）/ 非 git 仓（exit 128）=
+      // undefined 诚实缺席——整锚 no-op（browser spawn 闭包同款纪律：件不见 child_process）
+      gitProbe: createGitProbe(),
     },
     // channels 件闭包（Ring 1 第十三行树化，契约篇 §6.8）：本体 = ② 段原装配
     // 参数平移（onUiError 广播异常诊断 + rowApp = D1 命令拒载探针）。恒传

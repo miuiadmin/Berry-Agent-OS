@@ -38,6 +38,7 @@ import './events.js';
 import { ensureLayout, listAllManifests, listSessionManifests, type CheckpointManifest } from './store.js';
 import { captureSnapshot, executePrune, prunePlan, type CaptureContext } from './snapshot.js';
 import { restoreWorkspace } from './restore.js';
+import { createGitAnchorTracker, type GitProbeFace } from './git-anchor.js';
 
 /* ---------------------------------------------------------------------------------- */
 /* 服务最小面（结构类型窄化——checkpoint 模块不 import app/chat 实现，拓扑边不越界）。  */
@@ -127,6 +128,12 @@ export interface CheckpointAppDeps {
    * ——registry 装配序晚于本构造，运行期才调用）。
    */
   readonly activeSessions: () => ReadonlySet<string>;
+  /**
+   * git 探测闭包（第六十一批 git/range Output 锚——§5.3 git 锚条款）：组合根
+   * 经 execFile 构建（宿主侧只读探测 rev-parse/status/diff）；缺省 undefined =
+   * 整锚静默 no-op（诚实缺席）。
+   */
+  readonly gitProbe?: GitProbeFace;
 }
 
 /** 从 user/message content 提取纯文本（string 直取；blocks 拼 text 块——compaction 同款） */
@@ -216,9 +223,9 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
         const forkSeq = sessions.lastClosedBoundary() ?? 0;
         const users = sessions.eventsOfType('user/message');
         const last = users.at(-1);
-        const text = last !== undefined ? extractText((last.data as { content?: unknown }).content) : '';
+        const text = last === undefined ? '' : extractText((last.data as { content?: unknown }).content);
         // 回执原文截 120 字（manifest 轻量；清单展示再截 40）
-        return { forkSeq, triggerText: text !== '' ? text.slice(0, 120) : null };
+        return { forkSeq, triggerText: text === '' ? null : text.slice(0, 120) };
       };
 
       /**
@@ -259,6 +266,17 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
         return manifest;
       };
 
+      /* ---- ⓪ git/range Output 锚追踪器（第六十一批，§5.3 git 锚条款）----
+       * 键 = 路由会话（routed 语义）；headBefore 首变更工具前 await 落定（与快照
+       * 同 pre-mutation 语义）；结算复探 fire-and-forget + routed 匹配门。 */
+      const gitAnchor = createGitAnchorTracker({
+        routedSessionId: () => sessions.currentSessionId(),
+        appendEvent: (type, data) => sessions.appendEvent(type, data),
+        workspaceRoot: () => paths.workspaceRoot(),
+        probe: deps.gitProbe,
+        logger: ctx.logger,
+      });
+
       /* ---- ① 捕获监听（tools_pre_execute 应用行注册序末位——无 prepend，位序是行序涌现，§5.3 CR-9） ---- */
       ctx.effect(() =>
         ctx.on(TOOL_PRE_EXECUTE_EVENT, async (input: GateInput, next: () => unknown) => {
@@ -280,6 +298,9 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
             const parentSessionId = chained !== undefined && chained !== routedId ? (routedId ?? null) : null;
             // 旗先置（同步段）——同 run 后续变更免重；捕获失败不重试（每 run 一次尝试，成本有界）
             captured.set(identity, parentSessionId);
+            // git 锚首探测与快照并行（同 pre-mutation await 语义——headBefore
+            // 必须先于工具执行落定，防「bash 首刀即 commit」竞态）
+            const gitP = gitAnchor.onFirstMutation();
             const p = (async () => {
               await doCapture(identity, input.tool.name, false);
             })()
@@ -295,7 +316,7 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
                 inflight.delete(identity);
               });
             inflight.set(identity, p);
-            await p; // pre-mutation 语义：捕获完成才放行工具
+            await Promise.all([p, gitP]); // pre-mutation 语义：快照与 git head 探测都完成才放行工具
           } catch (err) {
             // 外层兜底（内层已尽）：监听器绝不因自身异常挡工具
             ctx.logger.error('checkpoint 监听器异常（contained）', { error: String(err) });
@@ -310,6 +331,7 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
         ctx.effect(() =>
           agent.onRunSettled((settled) => {
             captured.delete(settled.sessionId); // 注册表会话自己的旗
+            gitAnchor.onRunSettled(settled.sessionId); // git 锚复探（fire-and-forget）
             // 子代理旗：捕获时记的父会话键在此一并复位（§5.3——子 run 无独立 RunSettled）
             for (const [sid, parent] of captured) {
               if (parent === settled.sessionId) captured.delete(sid);
@@ -338,7 +360,7 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
         }
         const lines = list.map((m, i) => {
           const guardMark = m.guard ? '◆guard ' : '';
-          const trigger = m.triggerText !== null ? ` · 回退到「${m.triggerText.slice(0, 40)}」之前` : '';
+          const trigger = m.triggerText === null ? '' : ` · 回退到「${m.triggerText.slice(0, 40)}」之前`;
           return `  ${i + 1}. ${m.id} ${guardMark}${clockOf(m.time)} · ${m.files.length} 文件 · ${humanBytes(m.totalBytes)} · 触发 ${m.triggerTool}${trigger}`;
         });
         return [

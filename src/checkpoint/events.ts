@@ -2,7 +2,7 @@
  * L3 checkpoint — durable 会话事件词汇宿主面注册（会话篇 §5.3 账的分居条，
  * 2026-08-30 纵切落码；冷读 CR-1 blocker 改向的落点）。
  *
- * 两词出生纪律：
+ * 三词出生纪律（git/range 见下方数组注）：
  * - checkpoint/snapshot：捕获审计（log-only——不进表面推导；data 只载
  *   {id, triggerTool, files 件数, bytes}，不含路径清单——64KiB 护栏纪律；
  *   guard 捕获照记、data 标 guard: true——「回退本身可回退」的审计账，CR-11）
@@ -24,10 +24,16 @@
 import { registerSessionEventType } from '../contracts/session-events.js';
 import type { SessionEventTypeDefinition } from '../contracts/session-events.js';
 
-/** checkpoint 两词定义（快照审计 log-only + 回退叙事 surface 不折叠） */
+/**
+ * checkpoint 三词定义。git/range（第六十一批，§5.3 git 锚条款）= 交付链 Output
+ * 锚：{before, after, commits, files(≤50), dirtyBefore, dirtyAfter}——run 级
+ * 「这次交付产出了哪些 commit」的 durable 事实（头未动且 dirty 未变不落账）。
+ * log-only（不进投影）：消费面是 SKILL 沉淀证据链与审计，非模型上下文。
+ */
 export const CHECKPOINT_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
   { type: 'checkpoint/snapshot', category: 'log-only' },
   { type: 'checkpoint/rewind', category: 'surface' },
+  { type: 'git/range', category: 'log-only' },
 ];
 
 // 模块加载即注册（官方件随包代码存在、组合无关）

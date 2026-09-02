@@ -29,7 +29,7 @@ Ce n'est pas de la science-fiction. C'est l'objectif de conception de Berry : **
 
 Le noyau minimal de Berry fait exactement **installer, exécuter, protéger, stocker** ; tout le reste — conversation, agent de code, mémoire, objectifs longs, tâches planifiées, MCP, LSP, observabilité, interface web — se charge comme **application** sur l'arbre de composition. **Installable, déchargeable, remplaçable** — tandis que les cinq lignes de vie de votre Agent (identifiants, mémoire, historique de confiance, budgets, registres) ne s'accumulent qu'une seule fois. **Nouveau cerveau, même corps.**
 
-**27** modules (tous implémentés) · **27** crochets de cycle de vie · **25** types d'événements durables · **15** pièces officielles (14 Ring 2 + l'application par défaut berrycode, chacune déchargeable) · **2 700+** tests · **0** télémétrie.
+**27** modules (tous implémentés) · **27** crochets de cycle de vie · **26** types d'événements durables · **15** pièces officielles (14 Ring 2 + l'application par défaut berrycode, chacune déchargeable) · **2 700+** tests · **0** télémétrie.
 
 **Objectif plancher : la couche par défaut d'usine atteint le niveau d'usage quotidien de Codex / Claude Code.**
 
