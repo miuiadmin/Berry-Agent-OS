@@ -704,6 +704,11 @@ let migrationMax = 0;
     }
     const needle = `v${[...bucket].sort((a, b) => a - b).join('/')}`;
     for (const relPath of ['AGENTS.md', 'docs/架构总览.md']) {
+      // AGENTS.md 治理文档本地自持、不入公开库（2026-09-03 公开仓历史洗净批）：
+      // 真仓形态缺席 = 合规态（CI fresh clone 无此文件——readMirrorFile「缺席
+      // 抛错」的 fail-loud 契约对它不适用，与 CHECK_ROOT 夹具缝同语义跳过）；
+      // docs/架构总览.md 缺席仍红（公开镜像改名漂移照执法）。
+      if (relPath === 'AGENTS.md' && !existsSync(join(MIRROR_ROOT, relPath))) continue;
       const source = readMirrorFile(relPath);
       if (source === undefined) continue; // 镜像根缝：夹具缺席跳过（两态同构）
       const line = new RegExp(`^${mod}\\s.*$`, 'm').exec(source);
