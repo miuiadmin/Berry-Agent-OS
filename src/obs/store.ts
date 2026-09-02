@@ -7,13 +7,14 @@
  * normalizeMigrations 校验框架（目标库 = rollup.db，user_version 链独立）。
  *
  * 开库（冷读 M7）：复用 createAppSqliteFace 的官方件直连形态（缺省无拒开基准
- * ——编译期信任边界；文件库 0600 追打在 face 内）。
+ * ——编译期信任边界；文件库 0600 追打在 face 内〔主文件〕，-wal/-shm 边车
+ * 存在性追打在 openRollupStore 尾段——遗漏大扫 20260902 #2，零锁姿势）。
  *
  * 落账：增量 upsert（列白名单收窄——dur_ms_max 走 MAX 合并的单调水印，其余
  * 列 += 增量，负值即回退）；查询：表白名单 + groupBy 维度校验 + 有界 limit。
  */
 
-import { mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createAppSqliteFace, prepareWalConnection, type DatabaseConnection } from '../persist/index.js';
 import { normalizeMigrations, type MigrationSpec } from '../persist/index.js';
@@ -323,6 +324,20 @@ export function openRollupStore(dbPath: string, options?: { busyTimeoutMs?: numb
       db.pragma(`user_version = ${migration.version}`);
     })();
   }
+  // ---- 边车 0600 存在性追打（遗漏大扫 20260902 #2，镜像主库三件模式）----
+  // 零锁姿势（T-2 开库编舞不变式：他进程持写锁时开库读侧零锁——不得引入写
+  // 需求）：不作物化写事务。边车在场性由两条既有路径自然保证——首开形态迁移
+  // 事务已物化；重开形态 WAL 旗标库的读者（user_version 读）即物化 -wal/-shm。
+  // chmod 按存在性追打兜平台差异（persist 同款注释：SQLite open(0644) 吃 umask
+  // 且不暴露 fd，路径追打是唯一可靠姿势；face 内只 chmod 主文件——边车归此点）。
+  // ':memory:' 零文件身份（face 内同款早退口径）——跳过
+  if (dbPath !== ':memory:') {
+    chmodSync(dbPath, 0o600);
+    for (const suffix of ['-wal', '-shm']) {
+      const side = `${dbPath}${suffix}`;
+      if (existsSync(side)) chmodSync(side, 0o600);
+    }
+  }
   // upsert 语句缓存（表 → 预编译 insert-or-update）
   const upserts = new Map<RollupTable, UpsertStatement>();
   for (const table of Object.keys(TABLE_COLUMNS) as RollupTable[]) {
@@ -364,6 +379,13 @@ export function openRollupStore(dbPath: string, options?: { busyTimeoutMs?: numb
     apply(deltas: readonly BucketDelta[], onAlert?: (fire: AlertFire) => void, canFire?: () => boolean): void {
       // 本批触达的表（内联执法只查触达表上的规则——未触达的窗口值未变不重评）
       const touched = new Set(deltas.map((d) => d.table));
+      // 触发集先收集、事务提交后出膛（遗漏大扫 20260902 #1）：事务内只做窗口读与
+      // last_fired_at 回写；onAlert 三件副作用（emit/notify/alerts.jsonl 留账）移到
+      // 提交后——修前回调在事务内出膛，同事务后续语句盘级错误（SQLITE_FULL/
+      // IOERR）回滚时通知与留账已发生且无补偿，重启后同窗重复通知+重复留账。
+      // 语义换挡：at-least-once（回滚重发）→ at-most-once（提交后崩溃丢单次通知）
+      // ——后者与停摄取纪律一致（观测可用性优先，宁漏一次通知不重复打扰）。
+      const fired: AlertFire[] = [];
       db.transaction(() => {
         for (const delta of deltas) {
           const columns = TABLE_COLUMNS[delta.table];
@@ -396,9 +418,13 @@ export function openRollupStore(dbPath: string, options?: { busyTimeoutMs?: numb
           // 下次 flush 对同窗口重评重发（阈值还在，观众在场即触发）
           if (canFire !== undefined && !canFire()) continue;
           db.prepare('UPDATE alerts SET last_fired_at = ? WHERE id = ?').run(now, rule.id);
-          onAlert({ rule: { ...rule, lastFiredAt: now }, value });
+          fired.push({ rule: { ...rule, lastFiredAt: now }, value });
         }
       })();
+      // 提交后出膛（#1）：此刻 last_fired_at 已落盘可见——回调内观察者（他连接/
+      // 重启恢复形态）读到的冷却基准与通知语义一致。fired 空集（无规则过阈/
+      // 无观众整笔跳过）时零回调
+      if (onAlert !== undefined) for (const fire of fired) onAlert(fire);
     },
     listAlerts(): readonly AlertRule[] {
       return listAlertRows();

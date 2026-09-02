@@ -1,8 +1,13 @@
 /**
  * L3 obs — 刀二告警面回归锁（契约篇 §6.9：阈值/冷却/恢复三态 + CRUD + metric
- * 闭集 + 内联执法同事务语义；:memory: 库）。
+ * 闭集 + 内联执法同事务语义；:memory: 库）。末段两测是文件库形态（#1 第二连接
+ * 读提交可见性 / #2 边车 0600 物化）——遗漏大扫 20260902。
  */
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { createAppSqliteFace } from '../persist/index.js';
 import { openRollupStore, parseAlertMetric } from './store.js';
 import type { BucketDelta } from './rollup.js';
 
@@ -163,5 +168,78 @@ describe('obs 告警面：内联执法三态（阈值 / 冷却 / 恢复）', () 
     store.apply([t1, t2], (fire) => fired.push(fire.value));
     expect(fired).toHaveLength(0); // max=2 < 3
     store.close();
+  });
+});
+
+describe('obs 告警面：开库卫生与回调时点（遗漏大扫 20260902 #1/#2）', () => {
+  it('#1 回调在事务提交后出膛：onAlert 内第二连接已可见 last_fired_at（WAL 隔离反证）', () => {
+    // 修前形态：onAlert 在 store 事务内执行——同事务后续语句盘级错误回滚时，
+    // 通知/留账已发生且无补偿（重复通知+重复留账）。本锁以 WAL 快照隔离做
+    // 机器反证：回调若仍在事务内，第二连接读到的是提交前快照（last_fired_at
+    // 为 null）；回调已在提交后，读到非 null。修前必红、修后恒绿。
+    const dir = mkdtempSync(join(tmpdir(), 'obs-alert-timing-'));
+    const dbPath = join(dir, 'rollup.db');
+    const store = openRollupStore(dbPath);
+    try {
+      const rule = store.addAlert({
+        metric: 'llm.tokens_in',
+        agg: 'sum',
+        op: '>=',
+        threshold: 100,
+        windowHours: 24,
+        cooldownMin: 60,
+      });
+      let seenByOtherConn: number | null | undefined;
+      store.apply([llmDelta(150)], () => {
+        // 第二连接（官方件直连形态——与宿主 daemon 双开同面）读触发规则行
+        const other = createAppSqliteFace().openDatabase(dbPath);
+        try {
+          const row = other.prepare('SELECT last_fired_at FROM alerts WHERE id = ?').get(rule.id) as
+            | {
+                last_fired_at: number | null;
+              }
+            | undefined;
+          seenByOtherConn = row?.last_fired_at ?? null;
+        } finally {
+          other.close();
+        }
+      });
+      // 回调确实出膛（不被本测试的探针吞掉），且第二连接读到已提交的冷却基准
+      expect(typeof seenByOtherConn).toBe('number'); // null = 快照隔离下未提交（修前形态）
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('#2 边车三件 0600 形状锁：首开与净关重开两形态（零写锁开库不变式另由 T-2 承担）', () => {
+    // 形状锁（非红前回归锁——修前实测两形态边车已在场且 0600：首开由迁移写物化
+    // + face 先 chmod 主文件、SQLite 建边车继承主文件权限；重开由 WAL 旗标库的
+    // 读者〔user_version 读〕物化。#2 的暴露声称在接线路上不成立，落码是主库
+    // 同款存在性 chmod 的平台差异兜底）。本锁钉住不变式防退化：两形态三件全在
+    // 场全 0600；「开库不拿写锁」的行为差分由 store.test.ts T-2 锁承担（首版
+    // 物化写事务方案即被 T-2 击退）。
+    const dir = mkdtempSync(join(tmpdir(), 'obs-rollup-mode-'));
+    const dbPath = join(dir, 'rollup.db');
+    const assertThreeFiles = (phase: string) => {
+      for (const p of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+        expect(existsSync(p), `${phase}：${p} 应在开库时刻在场`).toBe(true);
+        expect(statSync(p).mode & 0o777, `${phase}：${p} 须 0600（缺省 umask 暴露窗）`).toBe(0o600);
+      }
+    };
+    const store = openRollupStore(dbPath);
+    try {
+      assertThreeFiles('首开（迁移写已物化）');
+    } finally {
+      store.close();
+    }
+    // 净关即删边车（SQLite WAL 语义）——重开腿锁「读者物化」不退化
+    const reopened = openRollupStore(dbPath);
+    try {
+      assertThreeFiles('净关重开（零写事务）');
+    } finally {
+      reopened.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

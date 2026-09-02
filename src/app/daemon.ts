@@ -735,8 +735,13 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
           ? ''
           : `、cordon 降级（${degradedFlag}——持久层闩死拒新写，处置：\`berry daemon stop\` 后 start；原因查 daemon.log 的 cordon error 行）`;
       // obs 停摄取处置文案（P1-11）：与 warn 同源（快赢#3——指现存库文件不引
-      // 用挂账命令）；rollup.db 纯派生可整库删除重建（运维手册 §1 同源）
-      const obsText = obsStopped ? '、obs 摄取已停（纯派生库损失——处置：删除 rollup.db 后 /reload 或重启重建）' : '';
+      // 用挂账命令）；rollup.db 纯派生可整库删除重建（运维手册 §1 同源）。
+      // 全路径给足（遗漏大扫 20260902 U2）：examRoot 按体检对象记录值（③⑤ 同
+      // 源），env 分叉形态下 operator 拿到的是 daemon 实际持有物的路径而非
+      // doctor 当场解析物——处置一步可达
+      const obsText = obsStopped
+        ? `、obs 摄取已停（纯派生库损失——处置：删除 ${join(examRoot, 'apps', 'obs', 'rollup.db')} 后 /reload 或重启重建）`
+        : '';
       return `② 服务面：${healthText}、${handshakeText}、${eventsText}${degradedText}${obsText}`;
     })(),
   });

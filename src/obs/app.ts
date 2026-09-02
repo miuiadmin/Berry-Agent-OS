@@ -323,16 +323,18 @@ export function createObsApp(): BuiltinAppModule {
       /**
        * 告警触发四件（契约篇 §6.9 刀二——store 内联执法的回调侧）：①obs/alert 总线
        * 词汇（他应用可订阅联动）②ui.notify（到人性依赖 daemon 常驻——TUI 进程
-       * 内形态只到前台）③last_fired_at 回写在 store 事务内（回调前完成）
-       * ④alerts.jsonl 留账追写（P1-12——一行 JSON：信封负载 + firedAt + op）。
-       * 红线：只通知不执法——本回调零宿主护栏读写。
+       * 内形态只到前台）③last_fired_at 回写在 store 事务内（④之前完成——提交后
+       * 出膛序，见下）④alerts.jsonl 留账追写（P1-12——一行 JSON：信封负载 +
+       * firedAt + op）。红线：只通知不执法——本回调零宿主护栏读写。
        */
       const fireAlert = (fire: { rule: AlertRule; value: number }): void => {
         const { rule, value } = fire;
-        // 异常隔离（刀二复盘补）：回调在 store 事务内执行——通知面（通道实现）
-        // 抛错若冒泡会回滚事务（含 last_fired_at）并误触停摄取；观测摄取的可用性
-        // 高于单次通知送达，吞异常留痕（emit 自身 fireIsolated 已隔离，此层兜
-        // ui.notify 通道面）
+        // 异常隔离（刀二复盘补）：回调在 store 事务提交后出膛（遗漏大扫
+        // 20260902 #1——修前在事务内，通知面抛错冒泡会回滚含 last_fired_at 的
+        // 整笔触发）。出膛后事务已定，此层隔离的守备对象换成：①通知/留账异常
+        // 不冒泡炸调用方（flush 编舞）②本条通知失败不吞后续 fired 条目——观测
+        // 摄取的可用性仍高于单次通知送达，吞异常留痕（emit 自身 fireIsolated
+        // 已隔离，此层兜 ui.notify 通道面）
         try {
           ctx.emit('obs/alert', {
             ruleId: rule.id,
@@ -346,7 +348,7 @@ export function createObsApp(): BuiltinAppModule {
             `⚠ 观测告警 [${rule.id}] ${rule.metric}：${rule.agg} ${rule.windowHours}h = ${value}（${rule.op} ${rule.threshold}）`,
           );
         } catch (err) {
-          ctx.logger.warn('obs 告警通知面异常（已隔离——不影响摄取与事务提交）', {
+          ctx.logger.warn('obs 告警通知面异常（已隔离——不影响摄取与后续通知条目）', {
             ruleId: rule.id,
             error: err instanceof Error ? err.stack : String(err),
           });
@@ -354,9 +356,12 @@ export function createObsApp(): BuiltinAppModule {
         // ④ 留账追写（P1-12）：独立隔离位——与通知面分立 try（warn 文案须能归因
         // 到「留账」面，测试断言据此判读）；机制同 crash-log.ts（同步小写 + 目录
         // 幂等建），失败策略异——写失败 warn 留痕不吞（观测路径非崩溃路径可承担
-        // warn），不炸事务（异常不冒泡进 store 回调外）不触停摄取
+        // warn），异常不冒泡炸调用方（flush 编舞）、不触停摄取
         try {
-          mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+          // 目录幂等建（首开防御——常态已由 paths.appDataDir 建好；不带 mode 位：
+          // mkdir 的 mode 只作用于新建段，目录已在时是死位，且权限已由 0700 数据
+          // 根罩住——遗漏大扫 20260902 U1 死位清理，防「权限已收紧」错觉）
+          mkdirSync(dataDir, { recursive: true });
           appendFileSync(
             alertsPath,
             // firedAt = 触发时点 ISO；op 取自规则行（不在 obs/alert 信封里——信封
