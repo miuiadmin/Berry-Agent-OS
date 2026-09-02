@@ -36,7 +36,7 @@
   "scripts": {
     "dev": "tsx src/app/main.ts --debug",
     "dev:webui": "vite dev -c src/webui/client/vite.config.ts",
-    "build": "tsc -p tsconfig.build.json && vite build -c src/webui/client/vite.config.ts && node tools/copy-app-assets.mjs",
+    "build": "tsc -p tsconfig.build.json && vite build -c src/webui/client/vite.config.ts && node tools/copy-app-assets.mjs && node tools/write-build-meta.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/webui/client",
     "test": "vitest run",
     "test:watch": "vitest",

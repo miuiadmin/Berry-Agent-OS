@@ -194,3 +194,43 @@ test('公开仓配套面三件在场（成熟度扫描 20260901 P0-2）', () => 
   assert.ok(template.includes('复现'), 'bug_report 模板须含复现步骤段');
   assert.ok(template.includes('doctor'), 'bug_report 模板须引导附 doctor 诊断输出');
 });
+
+test('build 链尾步写 dist/.build-meta.json：真跑两腿 + 接线形态锁（成熟度扫描 20260901 P1-13）', () => {
+  const script = join(repoRoot, 'tools', 'write-build-meta.mjs');
+  const distTmp = mkdtempSync(join(tmpdir(), 'build-meta-dist-'));
+  try {
+    // 场景一：真仓形态——DIST_ROOT 根缝注入临时目录，commit 位 = 本仓 HEAD 40 位哈希
+    const r1 = spawnSync(process.execPath, [script], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: { ...process.env, DIST_ROOT: distTmp },
+    });
+    assert.equal(r1.status, 0, `write-build-meta 应退出 0（stderr: ${r1.stderr}）`);
+    const meta = JSON.parse(readFileSync(join(distTmp, '.build-meta.json'), 'utf8'));
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+    assert.match(meta.commit, /^[0-9a-f]{40}$/, 'commit 位须为 40 位十六进制哈希');
+    assert.equal(meta.commit, head, 'commit 位须等于本仓 HEAD（build 溯源面失真即红）');
+    // 场景二：git 缺席形态（PATH 掏空）——写 null 不炸 build
+    const r2 = spawnSync(process.execPath, [script], {
+      cwd: distTmp, // 非 git 目录 + PATH 空——git 探针双重必败
+      encoding: 'utf8',
+      env: { ...process.env, PATH: '', DIST_ROOT: distTmp },
+    });
+    assert.equal(r2.status, 0, `git 缺席形态应退出 0 不炸 build（stderr: ${r2.stderr}）`);
+    const metaNull = JSON.parse(readFileSync(join(distTmp, '.build-meta.json'), 'utf8'));
+    assert.equal(metaNull.commit, null, 'git 缺席时 commit 位须为 null（best-effort 溯源）');
+  } finally {
+    rmSync(distTmp, { recursive: true, force: true });
+  }
+  // 接线形态锁：build 链含尾步 + 运行入口 boot 期接线——任一被「优化」掉即红
+  const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+  assert.ok(
+    String(pkg.scripts?.build ?? '').includes('node tools/write-build-meta.mjs'),
+    'package.json build 链缺 write-build-meta 尾步（dist 溯源面断供）',
+  );
+  const mainTs = readFileSync(join(repoRoot, 'src', 'app', 'main.ts'), 'utf8');
+  assert.ok(
+    mainTs.includes('warnIfStaleDist(import.meta.url)'),
+    'src/app/main.ts 缺 warnIfStaleDist(import.meta.url) boot 接线（陈旧告警断供）',
+  );
+});

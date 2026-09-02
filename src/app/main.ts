@@ -33,6 +33,7 @@ import { dumpConfigMain } from './dump-config.js';
 import { relaunchUnderHostSandbox } from './host-sandbox.js';
 import { daemonCommandMain, daemonDoctorMain, daemonForegroundMain, detectDaemonHandshake } from './daemon.js';
 import { attachMain } from './attach-main.js';
+import { warnIfStaleDist } from './build-meta.js';
 import { DEFAULT_WEBUI_PORT } from '../webui/index.js';
 
 /** 帮助文案（命令面 = 产品契约，输出保持稳定） */
@@ -302,6 +303,11 @@ function main(argv: string[]): number {
 
   // 未知 APP_ 变量提示（基建大扫 #31）：boot 期一次、全命令族统一
   warnUnknownAppEnvVars();
+
+  // dist 陈旧告警（成熟度扫描 20260901 P1-13）：入口跑在 /dist/ 下且包根即
+  // git 仓根且 build-meta 落后 HEAD 时 stderr 一行提示重跑 build——dev 便利件，
+  // 三前置任一失败静默跳过（src 直跑/装机形态零成本；build-meta.ts 头注）
+  warnIfStaleDist(import.meta.url);
 
   const run = async (): Promise<number> => {
     // 未识别 `--` 旗标闸（20260901-c #1，技术栈篇 §5「CLI 解析面执法四律」①）：
