@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureSnapshot, executePrune, prunePlan, type PruneOptions } from './snapshot.js';
+import { canonicalize, serializeWrites } from '../tools/fs.js';
 import { DEFAULT_EXCLUDE } from './app.js';
 import {
   hashContent,
@@ -125,6 +126,47 @@ describe('captureSnapshot：首拍与指纹', () => {
     expect(rels).not.toContain('dist/out.js'); // exclude 配置规则
     expect(rels).not.toContain('ignored.log'); // 祖先链 .gitignore（根目录规则）
     expect(rels).toContain('.gitignore'); // .gitignore 本身是普通文件（照拍）
+  });
+});
+
+describe('captureSnapshot：捕获读入写串行链（遗漏大扫 20260902-b #4）', () => {
+  it('兄弟写段进行中捕获——内容读排队到写段收尾，撕裂中间态不入 blob 仓', async () => {
+    // 修前形态：捕获的 readFile 在链外裸跑，读到 truncate-then-write 半途的
+    // 撕裂字节 → hashContent+writeBlob 把「从未作为已提交状态存在过的半截
+    // 内容」永固进 blob 仓（/rewind 恢复出半截文件——读侧 sha256 校验只验
+    // blob 自身完整，撕裂 hash 与撕裂内容自洽必通过，防不住源面撕裂）。
+    put('chain/target.txt', 'old-完整前态');
+    await capture('sess-chain'); // 基线 manifest（target.txt = hash(old)）
+
+    // 假兄弟写者：真 serializeWrites 段内先落撕裂半截、持链 150ms、再写完终态
+    // ——与工具 write 同一模块级链（多会话共享一块物理文件系统的互斥根基）。
+    const abs = join(workspace, 'chain/target.txt');
+    const gate = new Promise<void>((resolve) => setTimeout(resolve, 150)); // 撕裂窗持链
+    const writer = serializeWrites([await canonicalize(abs)], async () => {
+      writeFileSync(abs, 'torn-半截', 'utf8'); // truncate-then-write 的中间态落盘
+      await gate; // 大文件写的几十 ms 窗（测试放大到 150ms 保确定性）
+      writeFileSync(abs, 'final-完整终态', 'utf8');
+    });
+    await tick(); // 让写段进入（撕裂态已落盘、链已持有）
+
+    const capturing = capture('sess-chain'); // 兄弟写进行中触发捕获
+    await writer; // 写段收尾（撕裂窗关闭）
+    const m = await capturing;
+
+    // 关键回归锁：捕获到的必须是写段收尾后的完整终态——非撕裂中间态
+    const entry = m.files.find((f) => f.rel === 'chain/target.txt')!;
+    expect(entry.hash).toBe(hashContent(Buffer.from('final-完整终态', 'utf8')));
+    expect((await readBlob(dataRoot, entry.hash)).toString('utf8')).toBe('final-完整终态');
+    // 撕裂中间态绝不入 blob 仓（永固面为零）
+    expect(entry.hash).not.toBe(hashContent(Buffer.from('torn-半截', 'utf8')));
+  });
+
+  it('无写者在链：捕获照常完成（链开销不改变无争用路径语义）', async () => {
+    put('chain/quiet.txt', '静默文件');
+    await tick();
+    const m = await capture('sess-chain');
+    const entry = m.files.find((f) => f.rel === 'chain/quiet.txt')!;
+    expect((await readBlob(dataRoot, entry.hash)).toString('utf8')).toBe('静默文件');
   });
 });
 

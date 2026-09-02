@@ -5,7 +5,8 @@
  *   ① 遍历工作区产指纹集（gitignore-aware DFS——遍历语义与检索族同源；
  *      **语义同源不共享**〔CR-10 裁定〕：v1 各自实现，共享挂真实第三形态需求）；
  *   ② 与上一 manifest 逐路径比对：指纹未变 = 引用既有 blob 零读零写（stat 快径）；
- *      指纹变/新增 = 读内容 sha256 入 blob 仓（内容寻址天然跨快照去重）；
+ *      指纹变/新增 = 读内容 sha256 入 blob 仓（内容寻址天然跨快照去重；捕获读
+ *      逐路径入写串行链——防兄弟写撕裂中间态永固，遗漏大扫 20260902-b #4）；
  *   ③ 落 manifest + 顺手裁剪（单入口不设第二触发点）。
  *
  * prunePlan = 纯函数（可单测）：每会话 maxSnapshots oldest-first + 全局 blob
@@ -16,6 +17,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import ignore from 'ignore';
+import { canonicalize, serializeWrites } from '../tools/fs.js';
 import {
   MAX_SNAPSHOT_FILE_BYTES,
   hashContent,
@@ -179,7 +181,15 @@ export async function captureSnapshot(cx: CaptureContext, meta: CaptureMeta): Pr
       files.push({ rel: fp.rel, hash: prevEntry.hash, size: fp.size, mtimeMs: fp.mtimeMs, mode: fp.mode });
       continue;
     }
-    const content = await readFile(join(cx.workspaceRoot, fp.rel));
+    // 捕获读入写串行链（遗漏大扫 20260902-b #4，会话篇 §5.3 捕获读条款）：兄弟
+    // 会话的工具写正 truncate-then-write 到一半时，链外裸读会把撕裂中间态 hash
+    // 进 blob 仓永固——`/rewind` 恢复出从未存在过的半截文件（读侧 sha256 校验
+    // 只验 blob 自身完整，防不住源面撕裂）。逐路径短临界段与工具写/恢复写同键
+    // 同链互斥（canonical 化与工具写同源；不锁未变化路径——与「不设全工作区
+    // 互斥」立场一致）。
+    const content = await serializeWrites([await canonicalize(join(cx.workspaceRoot, fp.rel))], () =>
+      readFile(join(cx.workspaceRoot, fp.rel)),
+    );
     const hash = hashContent(content);
     if (await writeBlob(cx.dataRoot, hash, content)) {
       newBytes += fp.size; // 实际落盘才计新写（既有 blob 命中零新增）
