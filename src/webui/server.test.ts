@@ -37,7 +37,7 @@ function stubDeps(override?: Partial<WebuiAppDeps>): WebuiAppDeps {
     submitTo: (id) => id === 'live',
     historyFor: (id) => (id === 'live' ? [{ role: 'user', text: 'hi' }] : undefined),
     sessionsFor: () => [{ id: 'live', appId: 'chat', active: true }],
-    openSession: async () => ({ id: 'opened', appId: 'coder', active: true }),
+    openSession: async () => ({ id: 'opened', appId: 'berrycode', active: true }),
     todoFor: (id) =>
       id === 'live'
         ? [{ content: '做一件事', status: 'in_progress', activeForm: '正在做' }]
@@ -202,6 +202,40 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
     expect(JSON.parse(miss.text)).not.toHaveProperty('writeBehind');
   });
 
+  it('health obs 观测健康键（成熟度扫描 20260901 P1-11）：注入活取 → 应答携带 ingesting/lastFlushAt；未注入 → 键缺席', async () => {
+    // 独立小 server（文件级单例 deps 不带 obsHealth——键缺席正断言）
+    const obsPort = await grabPort();
+    const obsChannel = new WebuiChannel();
+    let stopped = false; // 闩态翻转后下一次 health 即新值（活取语义）
+    const { server: obsServer, close: obsClose } = createWebuiServer({
+      port: obsPort,
+      host: '127.0.0.1',
+      deps: stubDeps({
+        obsHealth: () => ({ ingesting: !stopped, lastFlushAt: 1_700_000_000_000 }),
+      }),
+      channel: obsChannel,
+      approvals: createPendingApprovals(),
+      staticRoot: import.meta.dirname,
+      version: 'test-1.0.0',
+      logger: stubLogger(),
+    });
+    try {
+      await new Promise<void>((resolve) => obsServer.listen(obsPort, '127.0.0.1', () => resolve()));
+      const okHit = await send(obsPort, { method: 'GET', path: '/api/health' });
+      expect(JSON.parse(okHit.text)).toMatchObject({ obs: { ingesting: true, lastFlushAt: 1_700_000_000_000 } });
+      stopped = true;
+      const stoppedHit = await send(obsPort, { method: 'GET', path: '/api/health' });
+      expect(JSON.parse(stoppedHit.text)).toMatchObject({ obs: { ingesting: false } });
+    } finally {
+      obsChannel.dispose();
+      await obsClose();
+    }
+    // 缺席形态：文件级单例（stubDeps 不带该键）→ 应答无 obs 键（obs 行未装/重装窗
+    // ——「无信息」不冒充「健康」也不冒充「停摆」，doctor 侧键缺席不报红）
+    const miss = await send(port, { method: 'GET', path: '/api/health' });
+    expect(JSON.parse(miss.text)).not.toHaveProperty('obs');
+  });
+
   it('/api/sessions → 200 清单载荷原样转发', async () => {
     const r = await send(port, { method: 'GET', path: '/api/sessions' });
     expect(r.status).toBe(200);
@@ -224,7 +258,7 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
       body: '{}',
     });
     expect(created.status).toBe(201);
-    expect(JSON.parse(created.text)).toEqual({ id: 'opened', appId: 'coder', active: true });
+    expect(JSON.parse(created.text)).toEqual({ id: 'opened', appId: 'berrycode', active: true });
     // 空 body（无 Content-Length 的裸 POST）——readBody 归一 '{}' 同 submit 管线
     const bare = await send(port, { method: 'POST', path: '/api/sessions' });
     expect(bare.status).toBe(201);
@@ -298,7 +332,7 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
     const promise = approvals.claim('srv-d1', {
       summary: 'bash 升权',
       reason: 'workspace-write',
-      ownership: { appId: 'coder', sessionId: 'sess-x' },
+      ownership: { appId: 'berrycode', sessionId: 'sess-x' },
     });
     expect(promise).toBeInstanceOf(Promise);
     const ok = await send(port, {

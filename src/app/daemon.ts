@@ -606,7 +606,9 @@ const defaultPortProbe = (port: number): Promise<boolean> =>
  * ① daemon.json 在场 + pid 判活（processStartId 匹配——防 pid 复用假阳）
  * ② 服务面：health 公开探活 + 活证真握手（**须 token 端点** 200；401 =
  *    盘上 token 与运行 daemon 持有不符——处置 = stop 后 start 重签发）
- *    + 顺手连一次 /api/events 即关（503 = 16 连接帽满）
+ *    + 顺手连一次 /api/events 即关（503 = 16 连接帽满）+ obs 判读
+ *    （P1-11：health 应答 obs.ingesting === false = 停摄取红项——纯派生
+ *    库损失非服务面危机，与 ②′ degraded 语义分立；键缺席不报红）
  * ③ token 文件在场且 0600（**判活时只读禁 ensure 写**——status 的复活/
  *    换发行为是诊断面自己制造不符态，doctor 钉死不做）
  * ④ 会话库 readonly 可开 + user_version 披露（零锁竞争——readonly 不触
@@ -674,13 +676,15 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
   );
   // events 即连即关：200 = 流面正常；503 = 16 连接帽满（SPA/attach/监控尾堆积）
   const eventsStatus = await statusProbe(`http://127.0.0.1:${state.port}/api/events`, bearer, HANDSHAKE_TIMEOUT_MS);
-  let health: { version?: unknown; degraded?: unknown; writeBehind?: unknown; memory?: unknown } | undefined;
+  let health:
+    { version?: unknown; degraded?: unknown; writeBehind?: unknown; obs?: unknown; memory?: unknown } | undefined;
   if (healthRes !== undefined && healthRes.status === 200) {
     try {
       health = JSON.parse(healthRes.body) as {
         version?: unknown;
         degraded?: unknown;
         writeBehind?: unknown;
+        obs?: unknown;
         memory?: unknown;
       };
     } catch {
@@ -691,6 +695,15 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
   // 失败闩（闩死不自愈）——daemon 拒新写意图的降级态，② 红项如实报出（旧形
   // parse 后只消费 version 的半截消费修正）
   const degradedFlag = typeof health?.degraded === 'string' && health.degraded !== '' ? health.degraded : undefined;
+  // obs 停摄取旗（成熟度扫描 20260901 P1-11）：health 应答 obs.ingesting ===
+  // false = 观测件停摄取纪律已触发（纯派生 rollup 数据损失，非服务面危机）
+  // ——② 红项 + 人话处置；键缺席（obs 行未装/旧版 daemon//reload 重装窗）
+  // 不报红。与 degraded 语义分立（执法性裁决）：degraded 钉死持久层 cordon
+  // 须优先处置，两者混载会误导处置优先级（详见契约篇 §6.9 观测健康面）
+  const obsStopped =
+    typeof health?.obs === 'object' &&
+    health.obs !== null &&
+    (health.obs as { ingesting?: unknown }).ingesting === false;
   findings.push({
     // events 503 计红（基建大扫 #9）：帽满时 attach/SPA 建不了流 = 服务面真实
     // 降级且需人工干预（关客户端），不再是「注记而全绿」的自相矛盾总结
@@ -699,7 +712,8 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
       healthRes.status === 200 &&
       handshakeStatus === 200 &&
       eventsStatus === 200 &&
-      degradedFlag === undefined,
+      degradedFlag === undefined &&
+      !obsStopped,
     text: (() => {
       const healthText = healthRes === undefined ? 'health 无响应' : `health HTTP ${healthRes.status}`;
       const handshakeText =
@@ -720,7 +734,10 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
         degradedFlag === undefined
           ? ''
           : `、cordon 降级（${degradedFlag}——持久层闩死拒新写，处置：\`berry daemon stop\` 后 start；原因查 daemon.log 的 cordon error 行）`;
-      return `② 服务面：${healthText}、${handshakeText}、${eventsText}${degradedText}`;
+      // obs 停摄取处置文案（P1-11）：与 warn 同源（快赢#3——指现存库文件不引
+      // 用挂账命令）；rollup.db 纯派生可整库删除重建（运维手册 §1 同源）
+      const obsText = obsStopped ? '、obs 摄取已停（纯派生库损失——处置：删除 rollup.db 后 /reload 或重启重建）' : '';
+      return `② 服务面：${healthText}、${handshakeText}、${eventsText}${degradedText}${obsText}`;
     })(),
   });
   // 僵尸态辨识（规范入查项）：pid 活 + HTTP 面无响应

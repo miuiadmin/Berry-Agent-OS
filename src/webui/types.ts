@@ -251,6 +251,16 @@ export interface WebuiAppDeps {
    */
   readonly writeBehindStats?: () => { paused: boolean; sessions: number; events: number };
   /**
+   * obs 观测健康面活取值（成熟度扫描 20260901 P1-11）：health 载荷 `obs` 键的
+   * 数据源——`{ingesting, lastFlushAt?}`（摄取在跑与否 + 最近成功 flush 时刻
+   * epoch 毫秒；未 flush 过 `lastFlushAt` = undefined，JSON 序列化键缺席）。
+   * 返回 `undefined` = obs 行未装或 /reload 重装窗（tryGet 缺席不推断）——
+   * health 不携带该键。与 degraded 语义分立（执法性裁决）：degraded 钉死持久
+   * 层 cordon 须优先处置；观测停摄取只损纯派生数据——独立键独立判读，防
+   * operator 按持久层危机的优先级误处置观测损失。
+   */
+  readonly obsHealth?: () => { ingesting: boolean; lastFlushAt?: number } | undefined;
+  /**
    * 鉴权物（daemon 刀一·P1 起为 daemon 形态注入位；复盘 S-1 勘正——结构不变式
    * 「监听 ⇒ 鉴权」升格为件本体保证）：组合根注入则用注入值（daemon 持久 token）；
    * **缺席时件本体 apply 期自足生成进程内一次性 token**（32 字节随机 hex、只存

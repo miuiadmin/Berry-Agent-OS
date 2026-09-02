@@ -884,6 +884,37 @@ describe('daemon doctor：十项体检', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('② obs.ingesting=false = 红项（成熟度扫描 20260901 P1-11）：观测停摄取判读 + 处置指引；键缺席不报红', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      // 观测健康键（独立于 degraded——语义分立裁决：纯派生数据损失 ≠ 持久层闩死）
+      ...httpFaces({
+        healthBody: JSON.stringify({ version: VERSION, obs: { ingesting: false, lastFlushAt: 1_700_000_000_000 } }),
+      }),
+    });
+    expect(code).toBe(1); // 修前红：旧形不消费 obs 键 → 全绿 0（daemon 常驻数日不察）
+    const text = out.join('');
+    expect(text).toContain('摄取已停'); // 停态判读
+    expect(text).toContain('纯派生库'); // 处置指引（删 rollup.db 重建——warn 文案同源）
+    rmSync(root, { recursive: true, force: true });
+    // 键缺席（obs 行未装/重装窗）≠ 停摆——不报红（「无信息」不冒充判读）
+    const out2 = captureStdout();
+    const { root: root2, dbFile: dbFile2, probe: probe2 } = healthyRoot();
+    const code2 = await daemonDoctorMain({
+      dataRoot: root2,
+      dbFile: dbFile2,
+      probe: probe2,
+      ...httpFaces(), // health 不带 obs 键
+    });
+    expect(code2).toBe(0);
+    expect(out2.join('')).not.toContain('摄取已停');
+    rmSync(root2, { recursive: true, force: true });
+  });
+
   it('⑩ 内存披露（基建大扫 #49）：health 携带 memory 键 → MB 取整披露 + 不转红', async () => {
     const { root, dbFile, probe } = healthyRoot();
     const out = captureStdout();

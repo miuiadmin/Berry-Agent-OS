@@ -1647,6 +1647,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
             events: persistence.writeBehind.pendingEventCount,
           })
         : undefined,
+      // obs 观测健康面（P1-11）：obs 行 provide 的函数面 → 值面投影。tryGet
+      // 晚绑——读链根表→系统区表（obs 行属默认层 = 系统区表）；obs 行未装或
+      // /reload 重装窗 = undefined（键缺席不推断）；函数面逐调用活取（探测
+      // 时刻读当前停摄取态，非装配期快照）
+      obsHealth: () => {
+        const face = ctx.tryGet<{ ingesting(): boolean; lastFlushAt(): number | undefined }>('obs-health');
+        return face === undefined ? undefined : { ingesting: face.ingesting(), lastFlushAt: face.lastFlushAt() };
+      },
       mountApprovalClaim: (mount) => {
         approvalFace = mount;
         return () => {

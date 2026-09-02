@@ -140,7 +140,7 @@ describe('obs 观测件：组合根全栈（默认层第十五行真装载）', 
     expect(session).toBeDefined(); // 会话照常（观测缺席不反噬）
   });
 
-  it('刀二告警全栈：/obs-alerts add → 事件摄取 → 内联执法 → obs/alert 总线 + ui 通知（规范触发三件）', async () => {
+  it('刀二告警全栈：/obs-alerts add → 事件摄取 → 内联执法 → obs/alert 总线 + ui 通知（规范触发四件）', async () => {
     const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-alert-e2e-')));
     const compositionDir = join(root, 'composition');
     mkdirSync(compositionDir, { recursive: true });
@@ -186,7 +186,7 @@ describe('obs 观测件：组合根全栈（默认层第十五行真装载）', 
     });
     await settle(300); // flush 窗 60ms + 内联执法 + 回调
 
-    // 触发三件断言：①obs/alert 总线载荷（metric/agg/value/threshold/window）②ui.notify
+    // 触发四件断言：①obs/alert 总线载荷（metric/agg/value/threshold/window）②ui.notify
     // 人读文案 ③last_fired_at 回写（经 /obs-alerts list 可见触发时刻非「未触发」）
     expect(busAlerts).toHaveLength(1);
     expect(busAlerts[0]).toMatchObject({ metric: 'llm.calls', agg: 'sum', value: 1, threshold: 1, windowHours: 24 });
@@ -455,7 +455,7 @@ describe('obs 观测件：复盘 20260901 批回归锁（畸形信封 / 通知�
     expect(await runtime.channels.commands.dispatch('/obs-alerts list')).toBe('ok');
     expect(notifies.at(-1) ?? '').toContain('未触发'); // last_fired_at 仍未写
 
-    // 再进一发（calls=2 仍过阈）→ 观众在场 → 正常触发三件
+    // 再进一发（calls=2 仍过阈）→ 观众在场 → 正常触发四件
     session!.append('llm/usage', {
       callId: 'c-audience',
       model: 'faux/m1',
@@ -466,4 +466,256 @@ describe('obs 观测件：复盘 20260901 批回归锁（畸形信封 / 通知�
     expect(busAlerts).toHaveLength(1);
     expect(notifies.some((n) => n.includes('观测告警'))).toBe(true);
   });
+});
+
+describe('obs 告警留账（成熟度扫描 20260901 P1-12）：触发第四件 alerts.jsonl', () => {
+  /** 递归定位 runtime 数据域里的 alerts.jsonl（findRollupDb 同款——文件面实证） */
+  const findAlertsJsonl = (dir: string): string => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const found = findAlertsJsonl(path);
+        if (found !== '') return found;
+      } else if (entry.name === 'alerts.jsonl') return path;
+    }
+    return '';
+  };
+
+  it('触发即追写一行 JSON：信封字段 + firedAt + op 齐备（观众在场形态）', async () => {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-ledger-')));
+    const compositionDir = join(root, 'composition');
+    mkdirSync(compositionDir, { recursive: true });
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: obs\n    config: { flushMs: 60 }\n');
+
+    const runtime = await createRuntime({ dbPath: ':memory:', workspace: root, compositionDir });
+    runtimes.push(runtime);
+    const notifies: string[] = [];
+    runtime.ui.attach({
+      id: 'rec',
+      notify: (text: string) => notifies.push(text),
+      setStatus: () => {},
+      confirm: async () => true,
+    });
+    expect(await runtime.channels.commands.dispatch('/obs-alerts add sum llm.calls >= 1 24 0')).toBe('ok');
+
+    const session = runtime.session;
+    expect(session).toBeDefined();
+    session!.append('request/header', {
+      config: {},
+      systemPrompt: 'x',
+      toolSchemas: [],
+      reason: 'initial',
+      app: 'chat',
+    });
+    session!.append('llm/usage', {
+      callId: 'c-ledger',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
+    await settle(300);
+
+    // 留账第四件：alerts.jsonl 一行 JSON——obs/alert 信封负载 + firedAt + op
+    const ledgerPath = findAlertsJsonl(root);
+    expect(ledgerPath).not.toBe('');
+    const { readFileSync } = await import('node:fs');
+    const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1); // 单触发单行
+    const record = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(record).toMatchObject({
+      metric: 'llm.calls',
+      agg: 'sum',
+      value: 1,
+      threshold: 1,
+      windowHours: 24,
+      op: '>=',
+    });
+    expect(typeof record.ruleId).toBe('number'); // 规则 id = 库生成整数（AlertRule.id）
+    expect(typeof record.firedAt).toBe('string'); // ISO 时刻——事后取证的锚
+  });
+
+  it('留账 best-effort：追写炸（路径被目录占位）→ warn 留痕 + 事务照常（emit 与 last_fired_at 不丢）', async () => {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-ledger-boom-')));
+    const compositionDir = join(root, 'composition');
+    mkdirSync(compositionDir, { recursive: true });
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: obs\n    config: { flushMs: 60 }\n');
+
+    const runtime = await createRuntime({ dbPath: ':memory:', workspace: root, compositionDir });
+    runtimes.push(runtime);
+    const busAlerts: unknown[] = [];
+    runtime.ctx.on('obs/alert', (payload: unknown) => busAlerts.push(payload));
+    const notifies: string[] = [];
+    runtime.ui.attach({
+      id: 'rec',
+      notify: (text: string) => notifies.push(text),
+      setStatus: () => {},
+      confirm: async () => true,
+    });
+    expect(await runtime.channels.commands.dispatch('/obs-alerts add sum llm.calls >= 1 24 0')).toBe('ok');
+
+    // 故障注入：alerts.jsonl 路径被目录占位——appendFileSync 必炸（写文件遇目录）
+    const ledgerDir = findRollupDb(root).replace(/rollup\.db$/, 'alerts.jsonl');
+    mkdirSync(ledgerDir, { recursive: true });
+    const captured = captureStderr();
+
+    const session = runtime.session;
+    expect(session).toBeDefined();
+    session!.append('request/header', {
+      config: {},
+      systemPrompt: 'x',
+      toolSchemas: [],
+      reason: 'initial',
+      app: 'chat',
+    });
+    session!.append('llm/usage', {
+      callId: 'c-ledger-boom',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
+    await settle(300);
+    captured.restore();
+
+    // best-effort 语义：留账炸不炸事务——①emit 照常 ②last_fired_at 照常（非「未触发」）③warn 留痕
+    expect(busAlerts).toHaveLength(1);
+    expect(await runtime.channels.commands.dispatch('/obs-alerts list')).toBe('ok');
+    expect(notifies.at(-1) ?? '').not.toContain('未触发');
+    expect(captured.lines.some((l) => l.includes('留账'))).toBe(true);
+  });
+
+  it('无头整笔跳过不写账（R-2 整笔一致——留账是第四件同生共死）', async () => {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-ledger-headless-')));
+    const compositionDir = join(root, 'composition');
+    mkdirSync(compositionDir, { recursive: true });
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: obs\n    config: { flushMs: 60 }\n');
+
+    const runtime = await createRuntime({ dbPath: ':memory:', workspace: root, compositionDir });
+    runtimes.push(runtime);
+    // 无 ui 后端（headless）——触发件整笔跳过
+    expect(await runtime.channels.commands.dispatch('/obs-alerts add sum llm.calls >= 1 24 0')).toBe('ok');
+
+    const session = runtime.session;
+    expect(session).toBeDefined();
+    session!.append('request/header', {
+      config: {},
+      systemPrompt: 'x',
+      toolSchemas: [],
+      reason: 'initial',
+      app: 'chat',
+    });
+    session!.append('llm/usage', {
+      callId: 'c-ledger-headless',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
+    await settle(300);
+
+    // 无观众：零留账文件（整笔跳过含第四件——operator 回屏后重发时补账）
+    expect(findAlertsJsonl(root)).toBe('');
+  });
+});
+
+describe('obs 观测健康面（成熟度扫描 20260901 P1-11）：obs-health 服务与停摄取态', () => {
+  it('装载即 provide：ingesting true；首笔 flush 后 lastFlushAt 立值；行禁用 → tryGet 缺席', async () => {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-health-')));
+    const compositionDir = join(root, 'composition');
+    mkdirSync(compositionDir, { recursive: true });
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: obs\n    config: { flushMs: 60 }\n');
+
+    const runtime = await createRuntime({ dbPath: ':memory:', workspace: root, compositionDir });
+    runtimes.push(runtime);
+
+    // 默认层第十五行装载 → 官方名位单段名 obs-health 经系统区表对宿主读链可见
+    const face = runtime.ctx.tryGet<{ ingesting(): boolean; lastFlushAt(): number | undefined }>('obs-health');
+    expect(face).toBeDefined();
+    expect(face!.ingesting()).toBe(true); // 摄取中
+    expect(face!.lastFlushAt()).toBeUndefined(); // 未 flush 过 = '(未落账)' 语义的数据源
+
+    const session = runtime.session;
+    expect(session).toBeDefined();
+    session!.append('request/header', {
+      config: {},
+      systemPrompt: 'x',
+      toolSchemas: [],
+      reason: 'initial',
+      app: 'chat',
+    });
+    session!.append('llm/usage', {
+      callId: 'c-health',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
+    await settle(300);
+    expect(typeof face!.lastFlushAt()).toBe('number'); // 首笔落账 → 数据截至锚立值
+
+    // 行禁用形态：provide 随行作用域回卷缺席（键缺席 = 无信息不报红——webui/doctor 判读语义）。
+    // 先显式收首个 runtime 再起新形——roleRegistry 单例禁同进程双活（daemon 批
+    // M8 定型纪律）；从 runtimes 摘除防 afterEach 双 shutdown
+    runtimes.splice(runtimes.indexOf(runtime), 1);
+    await runtime.shutdown();
+    const root2 = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-health-off-')));
+    const compositionDir2 = join(root2, 'composition');
+    mkdirSync(compositionDir2, { recursive: true });
+    writeFileSync(join(compositionDir2, 'overlay.yaml'), 'rows:\n  - id: obs\n    disabled: true\n');
+    const runtime2 = await createRuntime({ dbPath: ':memory:', workspace: root2, compositionDir: compositionDir2 });
+    runtimes.push(runtime2);
+    expect(runtime2.ctx.tryGet('obs-health')).toBeUndefined();
+  });
+
+  it('停摄取后健康面翻转：ingesting false + lastFlushAt 冻结在末次成功 flush（T-1 占锁手法复用）', async () => {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-health-stop-')));
+    const compositionDir = join(root, 'composition');
+    mkdirSync(compositionDir, { recursive: true });
+    // flushBatch=1 同步 flush + busyTimeoutMs=50（撞锁等待毫秒级降档——停摄取场景路）
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      'rows:\n  - id: obs\n    config: { flushBatch: 1, flushMs: 600000, busyTimeoutMs: 50 }\n',
+    );
+
+    const runtime = await createRuntime({ dbPath: ':memory:', workspace: root, compositionDir });
+    runtimes.push(runtime);
+    const face = runtime.ctx.tryGet<{ ingesting(): boolean; lastFlushAt(): number | undefined }>('obs-health');
+    expect(face).toBeDefined();
+
+    const session = runtime.session;
+    expect(session).toBeDefined();
+    session!.append('request/header', {
+      config: {},
+      systemPrompt: 'x',
+      toolSchemas: [],
+      reason: 'initial',
+      app: 'chat',
+    });
+    // 第一笔：无锁正常提交（lastFlushAt 立值）
+    session!.append('llm/usage', {
+      callId: 'c-hok',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
+    const before = face!.lastFlushAt();
+    expect(typeof before).toBe('number');
+
+    // 占写锁 → 第二笔 flush 撞 BUSY → 停摄取（闩置位）
+    const dbPath = findRollupDb(root);
+    const holder = createAppSqliteFace().openDatabase(dbPath);
+    holder.pragma('busy_timeout = 100');
+    holder.exec('BEGIN IMMEDIATE');
+    holder.prepare('UPDATE alerts SET enabled = enabled').run();
+    session!.append('llm/usage', {
+      callId: 'c-hbusy',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    });
+    holder.exec('COMMIT');
+    holder.close();
+    await settle(100);
+
+    // 健康面翻转：ingesting false（doctor 判读红项的数据源）+ lastFlushAt 停在末次成功
+    expect(face!.ingesting()).toBe(false);
+    expect(face!.lastFlushAt()).toBe(before);
+  }, 20_000);
 });

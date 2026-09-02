@@ -87,6 +87,13 @@ export interface BuiltinHostResources {
    * 判读：paused 与 cordoned 分立（详见 WebuiAppDeps.writeBehindStats 注）
    */
   readonly writeBehindStats: (() => { paused: boolean; sessions: number; events: number }) | undefined;
+  /**
+   * obs 观测健康面活取值（成熟度扫描 20260901 P1-11——health obs 键数据源）：
+   * 装配根晚绑闭包 `rootCtx.tryGet('obs-health')` 的投影（函数面 → 值面）；
+   * 返回 `undefined` = obs 行未装或 /reload 重装窗（键缺席不推断）。与
+   * writeBehindStats 不同：恒传函数面（obs 行装否在闭包内判，非装配期分叉）
+   */
+  readonly obsHealth: () => { ingesting: boolean; lastFlushAt?: number } | undefined;
   /** 审批 claim 桥挂载点（approvalFace holder 留 assembly——webClaimOf 共用，函数面过界） */
   readonly mountApprovalClaim: (mount: WebuiApprovalMount) => () => void;
   /** documentSymbol 桥挂载点（symbolsFace holder 留 assembly——AppRuntime.symbolsFor 直读，函数面过界） */
@@ -438,6 +445,9 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
       // write-behind 运行态活取值（基建大扫 #27）：health writeBehind 键——闩态
       // + 积压两数（闩红积绿）；无持久层形态 undefined → 键缺席
       ...(host.writeBehindStats === undefined ? {} : { writeBehindStats: host.writeBehindStats }),
+      // obs 观测健康面活取值（P1-11）：恒传函数面——obs 行装否由闭包内 tryGet
+      // 判（行未装/重装窗 = undefined → health 键缺席）
+      obsHealth: host.obsHealth,
       // daemon token 鉴权物（P1）：daemon 形态注入（/api 族全量执法 + cookie
       // 桥）；缺席 = 非 daemon 监听形态——webui 件 apply 期自足生成一次性
       // token（复盘 S-1「监听 ⇒ 鉴权」——执法不再依赖组合形态的接线正确性）

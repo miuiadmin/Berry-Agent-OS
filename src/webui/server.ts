@@ -267,7 +267,9 @@ async function route(
     // （基建大扫 #27：闩态 + 积压两数——闩红积绿两独立判读，消费方 doctor
     // ⑧⑨；deps 未传 = 无持久层诊断形态，键缺席）；进程内存披露（基建大扫
     // #49：rss/heapUsed/uptimeMs 恒在场——node 进程零依赖自报，与 deps 无关
-    // 故不缺席；消费方 doctor ⑩——两级拓扑 RSS > 1GB 挂账触发器的观测锚点）
+    // 故不缺席；消费方 doctor ⑩——两级拓扑 RSS > 1GB 挂账触发器的观测锚点）；
+    // obs 观测健康披露（P1-11：摄取在跑与否 + lastFlushAt——消费方 doctor ②；
+    // 取值 undefined = obs 行未装/重装窗，键缺席即「观测面无信息」）
     const mem = process.memoryUsage();
     sendJson(res, 200, {
       ok: true,
@@ -280,6 +282,7 @@ async function route(
       },
       ...(opts.deps.cordoned?.() === true ? { degraded: 'persistence' } : {}),
       ...(opts.deps.writeBehindStats ? { writeBehind: opts.deps.writeBehindStats() } : {}),
+      ...(opts.deps.obsHealth ? { obs: opts.deps.obsHealth() } : {}),
     });
     return;
   }

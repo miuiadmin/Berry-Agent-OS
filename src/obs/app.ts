@@ -12,13 +12,19 @@
  *
  * 刀二（已落码）：告警面全量——规则表 CRUD + `/obs-alerts` 命令族 + rollup
  * 写入同事务内联执法（过阈 + 冷却窗外 → obs/alert emit + ui.notify +
- * last_fired_at 回写）；红线：只通知不执法（规则面不读不写宿主护栏参数）。
+ * last_fired_at 回写 + alerts.jsonl 留账〔P1-12〕）；红线：只通知不执法
+ * （规则面不读不写宿主护栏参数）。
+ *
+ * 观测健康面（成熟度扫描 20260901 P1-11）：apply 期 provide `obs-health`
+ * 函数面（ingesting/lastFlushAt 晚取）——宿主根读链经 tryGet 织入 webui
+ * `/api/health` 载荷 `obs` 键与 daemon doctor ② 判读（停摄取服务面可见）。
  *
  * 拓扑窄边（web/admin 单边形态 + persist 自管库边）：tools/channels/paths/ui
  * 四服务全经 ctx.get（宿主装配序无条件 provide——fork 级联可见），零跨模块
  * import；typebox 走 contracts 再导出面。
  */
 
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppContext, BuiltinAppModule } from '../contracts/app.js';
 import type { CommandDefinition } from '../contracts/channels.js';
@@ -45,9 +51,21 @@ interface UiFace {
   notify(message: string): void;
   /**
    * 广播面在场探针（复盘 20260901 R-2，可选面——旧宿主缺省视为有观众）：
-   * 告警触发三件整笔前置——探针假（无头进程）整笔跳过不耗冷却。
+   * 告警触发四件整笔前置——探针假（无头进程）整笔跳过不耗冷却。
    */
   hasAudience?(): boolean;
+}
+
+/**
+ * obs 观测健康面（P1-11——`obs-health` 服务的值形状）：**函数面晚取**——探测
+ * 时刻读当前值（非 provide 时刻快照），webui /api/health `obs` 键与 daemon
+ * doctor ② 判读经宿主根读链消费（tryGet 晚绑——行禁用/重装窗键缺席）。
+ */
+export interface ObsHealthFace {
+  /** 摄取是否在跑（false = 停摄取纪律已触发——纯派生数据损失，非服务面危机） */
+  ingesting(): boolean;
+  /** 最近一次成功 flush 时刻（epoch 毫秒；未 flush 过 = undefined → JSON 键缺席） */
+  lastFlushAt(): number | undefined;
 }
 
 /** flush 缺省参数（5s / 256 条——契约篇 §6.9 刀一） */
@@ -282,9 +300,12 @@ export function createObsApp(): BuiltinAppModule {
       // busyTimeoutMs（#17）：撞锁等待降档旋钮——透传开库注入位（缺省 5000）
 
       // 自管库（rollup.db——私有迁移链 + 0600；开库失败 = 行失败响亮）；
-      // 路径提为具名常量：停摄取 warn 的处置文案指真实库文件（成熟度扫描快赢
-      // #3——warn 不再引用不存在的 /obs-rebuild 命令，改指现存路径）
-      const dbPath = join(paths.appDataDir(ctx.rowId ?? 'obs'), 'rollup.db');
+      // 数据域目录提为具名常量：rollup.db 路径（停摄取 warn 处置文案指真实库
+      // 文件——成熟度扫描快赢 #3）与 alerts.jsonl 留账路径（P1-12）同域两物
+      const dataDir = paths.appDataDir(ctx.rowId ?? 'obs');
+      const dbPath = join(dataDir, 'rollup.db');
+      /** 告警留账账本（P1-12——与 rollup.db 同域）：盘上第一手触发记录，crash.log 同族诊断辅助件 */
+      const alertsPath = join(dataDir, 'alerts.jsonl');
       const store = openRollupStore(dbPath, {
         busyTimeoutMs: typeof config.busyTimeoutMs === 'number' ? config.busyTimeoutMs : undefined,
       });
@@ -300,9 +321,10 @@ export function createObsApp(): BuiltinAppModule {
       let unsubscribe: (() => void) | undefined;
 
       /**
-       * 告警触发三件（契约篇 §6.9 刀二——store 内联执法的回调侧）：①obs/alert 总线
+       * 告警触发四件（契约篇 §6.9 刀二——store 内联执法的回调侧）：①obs/alert 总线
        * 词汇（他应用可订阅联动）②ui.notify（到人性依赖 daemon 常驻——TUI 进程
-       * 内形态只到前台）③last_fired_at 回写在 store 事务内（回调前完成）。
+       * 内形态只到前台）③last_fired_at 回写在 store 事务内（回调前完成）
+       * ④alerts.jsonl 留账追写（P1-12——一行 JSON：信封负载 + firedAt + op）。
        * 红线：只通知不执法——本回调零宿主护栏读写。
        */
       const fireAlert = (fire: { rule: AlertRule; value: number }): void => {
@@ -329,6 +351,34 @@ export function createObsApp(): BuiltinAppModule {
             error: err instanceof Error ? err.stack : String(err),
           });
         }
+        // ④ 留账追写（P1-12）：独立隔离位——与通知面分立 try（warn 文案须能归因
+        // 到「留账」面，测试断言据此判读）；机制同 crash-log.ts（同步小写 + 目录
+        // 幂等建），失败策略异——写失败 warn 留痕不吞（观测路径非崩溃路径可承担
+        // warn），不炸事务（异常不冒泡进 store 回调外）不触停摄取
+        try {
+          mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+          appendFileSync(
+            alertsPath,
+            // firedAt = 触发时点 ISO；op 取自规则行（不在 obs/alert 信封里——信封
+            // 消费方自带规则上下文，账本行是离线取证物须自含判据）
+            `${JSON.stringify({
+              ruleId: rule.id,
+              metric: rule.metric,
+              agg: rule.agg,
+              value,
+              threshold: rule.threshold,
+              windowHours: rule.windowHours,
+              firedAt: new Date().toISOString(),
+              op: rule.op,
+            })}\n`,
+          );
+        } catch (err) {
+          ctx.logger.warn('obs 告警留账追写失败（best-effort——不影响触发与事务提交）', {
+            alertsPath,
+            ruleId: rule.id,
+            error: err instanceof Error ? err.stack : String(err),
+          });
+        }
       };
 
       /** 落账一批（drain → 单事务 upsert + 内联告警执法）；失败 = 停摄取纪律（契约篇 §6.9） */
@@ -337,9 +387,9 @@ export function createObsApp(): BuiltinAppModule {
         pendingCount = 0;
         const deltas = aggregator.drain();
         try {
-          // canFire = 观众探针前置（复盘 R-2）：无头进程（无 ui 后端）触发三件
-          // 整笔跳过——不回写 last_fired_at、不 emit、不 notify（探针缺省真
-          // ——旧宿主形态视为有观众，行为不回退）
+          // canFire = 观众探针前置（复盘 R-2）：无头进程（无 ui 后端）触发四件
+          // 整笔跳过——不回写 last_fired_at、不 emit、不 notify、不追写留账
+          // （探针缺省真——旧宿主形态视为有观众，行为不回退）
           store.apply(deltas, fireAlert, () => ui.hasAudience?.() ?? true);
           lastFlushAt = Date.now(); // #15：成功落账时刻——停摄取后「数据截至」的锚
         } catch (err) {
@@ -358,6 +408,15 @@ export function createObsApp(): BuiltinAppModule {
       };
       /** 停摄取披露条（#15）取值面：三消费面（工具回执 / /obs / /obs-alerts）共用 */
       const stoppedNote = (): string | undefined => stoppedNoteText(stopped, lastFlushAt);
+
+      // 观测健康面（P1-11）：provide 函数面晚取——宿主根读链（根表→系统区表，
+      // 本行属默认层 = 系统区表）经 tryGet 消费；/reload 重装时行作用域整体
+      // 回卷、键随之消失（tryGet undefined = 键缺席语义天然正确，无需清槽配对）
+      ctx.provide<ObsHealthFace>('obs-health', {
+        ingesting: () => !stopped,
+        lastFlushAt: () => lastFlushAt,
+      });
+
       const timer = setInterval(flush, flushMs);
       timer.unref?.(); // 不持事件循环（TUI/run 入口自由退出——观测不反噬宿主）
 
