@@ -2,7 +2,7 @@
   "name": "berry-agent-os",
   "version": "1.0.0-alpha.0",
   "codename": "Peiligang",
-  "description": "Berry Agent OS — 跑 AI 应用的个人操作系统（TypeScript + SQLite + pi-ai；文档见 docs/）",
+  "description": "Berry Agent OS — 跑 AI 应用的操作系统",
   "license": "MIT",
   "repository": {
     "type": "git",
