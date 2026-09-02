@@ -66,8 +66,15 @@ export async function fetchVersionInfo(endpoint: string, timeoutMs = 5_000): Pro
     return { browser: '(endpoint)', webSocketDebuggerUrl: endpoint };
   }
   if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
-    const parsed = new URL(endpoint);
-    base = `${parsed.protocol}//${parsed.host}`;
+    // URL 解析腿纳入统一码（定向复扫 20260902 第七轮 L-2）：畸形形态（如
+    // 'http://['）WHATWG 构造器同步抛裸 TypeError——修前逃出 BROWSER_CONNECT_
+    // FAILED 统一面，工具层把它误归数据面「失败：Invalid URL」，丢升级指引语义
+    try {
+      const parsed = new URL(endpoint);
+      base = `${parsed.protocol}//${parsed.host}`;
+    } catch {
+      throw new AppError(BROWSER_CONNECT_FAILED, `CDP 端点形态非法（URL 解析失败）：${endpoint}`);
+    }
   } else {
     base = `http://${endpoint}`;
   }
@@ -113,13 +120,18 @@ export class CdpConnection {
   private deadFired = false;
 
   /** 私有构造——经 `connectCdp` 建立（open 等待收敛在工厂里） */
-  private constructor(ws: WebSocket, rpc: CdpRpc) {
+  private constructor(ws: WebSocket, rpc: CdpRpc, onNoise?: (message: string) => void) {
     this.ws = ws;
     this.rpc = rpc;
     ws.addEventListener('message', (ev: MessageEvent) => {
-      // CDP 只发文本帧（binary 面零消费——异常形态走杂音口不炸桥）
       if (typeof ev.data === 'string') {
         rpc.feed(ev.data);
+      } else if (onNoise !== undefined) {
+        // binary 帧零消费但须可见（定向复扫 20260902 第七轮 L-1）：CDP 协议恒
+        // 文本帧，binary 属异常形态（协议漂移/非标端点）——走杂音口披露不炸桥
+        const data = ev.data as unknown;
+        const size = data instanceof ArrayBuffer ? data.byteLength : data instanceof Blob ? data.size : -1;
+        onNoise(`非文本帧丢弃（binary ${size} 字节）——CDP 协议恒文本帧，此为异常形态`);
       }
     });
     ws.addEventListener('close', () => this.fireDead('CDP 连接已关闭'));
@@ -142,7 +154,15 @@ export class CdpConnection {
       onNoise?: (message: string) => void;
     },
   ): Promise<CdpConnection> {
-    const ws = new WebSocket(wsUrl);
+    // WebSocket 构造腿纳入统一码（第七轮 L-2）：不可解析 ws url（如 'ws://['）
+    // WHATWG 构造器同步抛裸 TypeError——修前逃出连接期统一面（fetchVersionInfo
+    // 的 URL 腿与本处同笔收口：连接期失败一律 BROWSER_CONNECT_FAILED）
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch {
+      throw new AppError(BROWSER_CONNECT_FAILED, `CDP WebSocket 端点形态非法（URL 解析失败）：${wsUrl}`);
+    }
     const conn = new CdpConnection(
       ws,
       newConnection({
@@ -151,6 +171,7 @@ export class CdpConnection {
         ...(opts?.onNoise !== undefined ? { onNoise: opts.onNoise } : {}),
         defaultTimeoutCode: BROWSER_CONNECT_FAILED,
       }),
+      opts?.onNoise, // 传输层异常形态（binary 帧）杂音口同源（第七轮 L-1）
     );
     // open 握手等待（超时/失败 → BROWSER_CONNECT_FAILED——连接期统一码）
     await new Promise<void>((resolve, reject) => {

@@ -243,6 +243,16 @@ class FakeCdpServer {
     for (const socket of this.sockets) socket.write(encoded);
   }
 
+  /**
+   * 推一条 binary 帧（opcode 0x2——定向复扫 20260902 第七轮 L-1 杂音口测试面：
+   * CDP 协议恒文本帧，binary 属异常形态，消费侧须走杂音口可见非静默丢弃）。
+   * 测试面载荷 ≤125 字节（单帧小长度形——无需扩展长度编码）。
+   */
+  pushBinary(payload: Buffer): void {
+    const frame = Buffer.concat([Buffer.from([0x82, payload.length]), payload]);
+    for (const socket of this.sockets) socket.write(frame);
+  }
+
   /** 放行全部扣押应答（收场竞速编排的「开闸」步） */
   releaseHeld(): void {
     const cbs = this.heldReplies;
@@ -1800,5 +1810,59 @@ describe('browser /browser install 命令面 + 云端 provider 占位', () => {
     expect(ok).toBeDefined();
     expect(ok![0]).toContain('999.0.0.0');
     face.rm();
+  });
+});
+
+/* ---------------- 连接期统一码补漏 + binary 帧杂音口（定向复扫 20260902 第七轮） ---------------- */
+
+describe('browser cdp 连接期统一码 + binary 帧杂音口（第七轮 L-1/L-2）', () => {
+  let fake: FakeCdpServer;
+
+  beforeEach(async () => {
+    fake = new FakeCdpServer();
+    await fake.start();
+  });
+
+  afterEach(async () => {
+    await fake.stop();
+  });
+
+  /** 桥工厂（与主 describe 同款——真 JsonRpcConnection） */
+  const newConnection = (opts: ConstructorParameters<typeof JsonRpcConnection>[0]): JsonRpcConnection =>
+    new JsonRpcConnection(opts);
+
+  it('L-2①：fetchVersionInfo 畸形 http 端点 → BROWSER_CONNECT_FAILED（非裸 TypeError）', async () => {
+    // 'http://[' —— WHATWG URL 解析同步抛；修前裸 TypeError 逃出统一码面
+    await expect(fetchVersionInfo('http://[')).rejects.toSatisfy((err: unknown) => {
+      return err instanceof AppError && err.code === 'BROWSER_CONNECT_FAILED';
+    });
+  });
+
+  it('L-2②：connect 畸形 ws url → BROWSER_CONNECT_FAILED（非裸 TypeError）', async () => {
+    // 'ws://[' —— WebSocket 构造器同步抛；修前裸 TypeError 丢连接期统一身份
+    await expect(CdpConnection.connect('ws://[', newConnection)).rejects.toSatisfy((err: unknown) => {
+      return err instanceof AppError && err.code === 'BROWSER_CONNECT_FAILED';
+    });
+  });
+
+  it('L-1：binary 帧走杂音口可见（非静默丢弃）', async () => {
+    const noise: string[] = [];
+    const conn = await CdpConnection.connect(`ws://127.0.0.1:${fake.port}/devtools/browser/fake-uuid`, newConnection, {
+      onNoise: (message) => noise.push(message),
+    });
+    try {
+      fake.pushBinary(Buffer.from([0xde, 0xad, 0xbe, 0xef]));
+      await new Promise((resolve) => setTimeout(resolve, 50)); // 帧到达窗
+      // 修前：binary 帧零报告（noise 空）——注释承诺的「异常形态走杂音口」不存在
+      expect(noise.length).toBe(1);
+      expect(noise[0]).toContain('非文本帧丢弃');
+      expect(noise[0]).toContain('4'); // 字节数披露
+      // 杂音不炸桥：连接仍可用（文本帧照常协议应答）
+      fake.responders = { 'Browser.getVersion': () => ({ product: 'ok' }) };
+      const version = (await conn.rpc.request('Browser.getVersion')) as { product: string };
+      expect(version.product).toBe('ok');
+    } finally {
+      conn.close('测试收尾');
+    }
   });
 });

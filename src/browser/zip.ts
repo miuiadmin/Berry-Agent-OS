@@ -125,9 +125,10 @@ export async function extractZip(zipPath: string, destDir: string): Promise<Extr
         // symlink 条目：数据区内容 = 目标路径（小体量整读）
         const linkTarget = await readRange(zipPath, dataStart, dataEnd).then((b) => b.toString('utf8'));
         // 闸①（C-1）：linkTarget 解析后必须仍收容在 destDir 内——绝对形指向
-        // destDir 外、`../` 逃逸相对形全拒（合法形态不是判据，越界才是）
+        // destDir 外、`../` 逃逸相对形全拒（合法形态不是判据，越界才是）；
+        // 判据经 isWithinRoot 归一（第七轮 H-1——win32 反斜杠原生形同判）
         const resolved = resolve(dirname(target), linkTarget);
-        if (resolved !== rooted && !resolved.startsWith(rooted + '/')) {
+        if (!isWithinRoot(rooted, resolved)) {
           throw zipFail(`条目 ${entry.name} symlink 目标越界拒载：${linkTarget}`);
         }
         await rm(target, { force: true }); // 幂等重装：旧链/旧档先清
@@ -259,15 +260,29 @@ async function readRange(zipPath: string, start: number, end: number): Promise<B
   }
 }
 
+/**
+ * 收容判据（纯词法——两斜杠归一后前缀比对；测试面直测消费）。
+ * 定向复扫 20260902 第七轮 H-1 修死：win32 下 join/resolve 产出反斜杠原生路径，
+ * 字面 '/' 探测器恒 false → extractZip 每条目必拒（/browser install 在 win64
+ * 档确定性全灭）。修法 = B-2/5e76b9c6 族先例：判定前统一 POSIX 形归一——POSIX
+ * 路径含反斜杠属病理性形态（且条目名含 '\' 已在 safeJoin 上方拒载），归一
+ * 不构成误伤面。
+ */
+export function isWithinRoot(rooted: string, candidate: string): boolean {
+  const normRoot = rooted.replaceAll('\\', '/');
+  const normCand = candidate.replaceAll('\\', '/');
+  return normCand === normRoot || normCand.startsWith(normRoot + '/');
+}
+
 /** zip slip 防线：条目名 join 后必须仍在 destDir 内（`..` 段/绝对名/盘符形全拒） */
-function safeJoin(rooted: string, name: string): string {
+export function safeJoin(rooted: string, name: string): string {
   if (name.includes('\\')) throw zipFail(`条目名含反斜杠（跨平台逃逸形拒载）：${name}`);
   const segments = name.split('/');
   if (segments.includes('..') || isAbsolute(name) || /^[a-zA-Z]:/.test(name)) {
     throw zipFail(`条目名路径逃逸拒载：${name}`);
   }
   const target = join(rooted, name);
-  if (target !== rooted && !target.startsWith(rooted + '/')) {
+  if (!isWithinRoot(rooted, target)) {
     throw zipFail(`条目名解析逃逸拒载：${name}`);
   }
   return target;
@@ -281,7 +296,9 @@ function safeJoin(rooted: string, name: string): string {
  * 即写其目标；symlink/目录条目本体会被重建，只检祖先）。
  */
 async function assertNoSymlinkPrefix(rooted: string, path: string, includeSelf: boolean): Promise<void> {
-  const segs = relative(rooted, path).split('/');
+  // 组件切分前两斜杠归一（第七轮 H-1 同笔）：win32 下 relative 产反斜杠串，
+  // 不归一则整串挤成单组件——逐级 lstat 退化为终点一查，祖先链检形同虚设
+  const segs = relative(rooted, path).replaceAll('\\', '/').split('/');
   const upTo = includeSelf ? segs.length : segs.length - 1;
   let cur = rooted;
   for (let i = 0; i < upTo; i += 1) {

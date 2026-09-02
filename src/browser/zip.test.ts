@@ -20,11 +20,11 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { AppError, BROWSER_INSTALL_FAILED } from '../contracts/errors.js';
-import { extractZip } from './zip.js';
+import { extractZip, isWithinRoot, safeJoin } from './zip.js';
 
 /* ---------------- 手构 zip 写入器（测试面专用） ---------------- */
 
@@ -361,5 +361,33 @@ describe('extractZip 解压预算', () => {
     const { zipPath, dest } = await writeZip('lielie', base);
     await expectZipFail(extractZip(zipPath, dest));
     expect(await exists(dest)).toBe(false); // 半解包清理
+  });
+});
+
+/* ---------------- 路径收容 win32 形状（定向复扫 20260902 第七轮 H-1 回归锁） ---------------- */
+
+describe('zip 路径收容 win32 形状（第七轮 H-1——B-2/5e76b9c6 族修法）', () => {
+  it('win32 原生反斜杠路径收容通过——path.win32 构造真实形状（修前字面 / 探测器恒 false）', () => {
+    const rooted = 'C:\\Users\\u\\AppData\\Local\\berry-engine\\131.0.1';
+    // path.win32.join 在任意平台产出 win32 形：条目名正斜杠被归一为反斜杠
+    const target = win32.join(rooted, 'chrome-win64/chrome.exe');
+    expect(target).toContain('\\');
+    expect(isWithinRoot(rooted, target)).toBe(true); // 修前：startsWith(rooted + '/') 恒 false → 必拒
+  });
+
+  it('POSIX 形不受影响；逃逸形仍拒（归一不放松收容）', () => {
+    expect(isWithinRoot('/dest', '/dest/a/b.txt')).toBe(true);
+    expect(isWithinRoot('/dest', '/dest')).toBe(true); // 本体等值收容
+    expect(isWithinRoot('/dest', '/dest2/a')).toBe(false); // 前缀近似名不放松
+    expect(isWithinRoot('/dest', '/other/a')).toBe(false);
+    expect(isWithinRoot('C:\\dest', 'D:\\other\\x')).toBe(false); // 跨盘符逃逸
+    expect(isWithinRoot('C:\\dest', 'C:/dest/x')).toBe(true); // win32 resolve 可产正斜杠盘符形
+  });
+
+  it('safeJoin POSIX 腿零变（macOS host 回归锁）+ 逃逸拒载面不放松', () => {
+    expect(safeJoin('/dest', 'a/b.txt')).toBe('/dest/a/b.txt');
+    expect(() => safeJoin('/dest', '../escape')).toThrow();
+    expect(() => safeJoin('/dest', 'a/../../escape')).toThrow();
+    expect(() => safeJoin('/dest', 'C:/abs')).toThrow();
   });
 });
