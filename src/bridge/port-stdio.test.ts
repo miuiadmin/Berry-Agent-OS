@@ -98,6 +98,59 @@ describe('StdioBridgePort — NDJSON 行协议（流对接）', () => {
     await expect(got).resolves.toEqual({ kind: 'after-blank' });
   });
 
+  it('【回归锁】单行字节超上限：封读 destroy + onBadLine 合成错误 + 后续行不派发（遗漏大扫 20260902 #9）', async () => {
+    // 修前红位：无 maxLineBytes 执法——超限行照常缓冲派发、inbound 不 destroy、
+    // onBadLine 零调用。修后：字节计数流面在行完成前截获（跨 chunk 累计）
+    const inbound = new PassThrough();
+    const badSeen: Array<{ line: string; err: unknown }> = [];
+    const port = new StdioBridgePort(inbound, new PassThrough(), {
+      maxLineBytes: 64,
+      onBadLine: (line, err) => badSeen.push({ line, err }),
+    });
+    const got: unknown[] = [];
+    port.on('message', (m) => got.push(m));
+    inbound.write('{"ok":"small"}\n'); // 帽下好行照常过
+    inbound.write('x'.repeat(100)); // 无换行跨上限——计数器封读（不待行完成）
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(got).toEqual([{ ok: 'small' }]);
+    expect(badSeen).toHaveLength(1);
+    expect(String(badSeen[0]!.err)).toContain('超上限');
+    expect(inbound.destroyed).toBe(true); // 载体级失败：封读（通道死）
+  });
+
+  it('【回归锁】跨 chunk 累计与帽边界（遗漏大扫 20260902 #9）：分块凑超限同封；恰在帽下的行照常进 parse 路径', async () => {
+    // 分块累计：单块 40B 帽下、两块合计 80B 超帽——计数器按「距上一换行累计」执法
+    const inboundA = new PassThrough();
+    const portA = new StdioBridgePort(inboundA, new PassThrough(), { maxLineBytes: 64 });
+    const gotA: unknown[] = [];
+    portA.on('message', (m) => gotA.push(m));
+    inboundA.write('y'.repeat(40));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(inboundA.destroyed).toBe(false); // 单块未超——通道活
+    inboundA.write('y'.repeat(40)); // 合计 80B 超帽
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(inboundA.destroyed).toBe(true);
+
+    // 帽边界：恰 64B 的行不触发封读——计数达帽（running=64）不超（严格大于才
+    // 执法），补换行后照常走 parse 坏行路径（garbage 内容 → onBadLine 真行）
+    const inboundB = new PassThrough();
+    const badB: string[] = [];
+    // 构造即接线（计数监听 + readline）——不持引用，onBadLine 闭包自证
+    new StdioBridgePort(inboundB, new PassThrough(), {
+      maxLineBytes: 64,
+      onBadLine: (line) => badB.push(line),
+    });
+    const line64 = 'z'.repeat(64); // 先无换行写 64B——running 恰达帽（不封）
+    inboundB.write(line64);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(inboundB.destroyed).toBe(false); // 恰达帽未超——通道活
+    inboundB.write('\n'); // 换行重置——行照常emit
+    inboundB.write('{"tail":1}\n');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(inboundB.destroyed).toBe(false); // 帽下生命周期完整——不封读
+    expect(badB).toEqual([line64]); // 走 parse 坏行观测（非超限合成错误）
+  });
+
   it('编码失败打型（20260901-c #4）：BigInt 载荷 → AppError(BRIDGE_ENCODE_FAILED) 上抛（消息级——载体健康，好消息照常过界）', async () => {
     const { a } = makePair();
     // BigInt 过不了 JSON.stringify：修前裸 TypeError 上抛（端点无从分桶）

@@ -192,7 +192,20 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
   /** load 缓存（applyRow 取 optionalInject 快照用；load→apply 之间必持） */
   const metaCache = new Map<string, WorkerModuleMeta>();
 
-  const port = new StdioBridgePort(child.stdout!, child.stdin!);
+  // 载体端口 + 坏行观测接线（遗漏大扫 20260902 #7）：第三方 external 域吐
+  // 出的撕裂/垃圾行不再静默蒸发。域构造时行未绑定——root logger 是唯一合
+  // 法落点；日志字段纪律：workerId + 行字节长 + 错误 message + 行首 120 字
+  // 符截断预览（禁全文——防坏行本身放大日志面）
+  const port = new StdioBridgePort(child.stdout!, child.stdin!, {
+    onBadLine: (line, err) => {
+      opts.root.logger.warn('external 域坏行（已跳过）', {
+        workerId,
+        bytes: line.length,
+        error: err instanceof Error ? err.message : String(err),
+        preview: line.slice(0, 120),
+      });
+    },
+  });
   let endpoint!: BridgeEndpoint;
   endpoint = new BridgeEndpoint(port, {
     origin: { workerId },
@@ -208,6 +221,15 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
         message: string;
         fields?: Record<string, unknown>;
       };
+      // 域级路由（遗漏大扫 20260902 #7）：rowId 空串 = 域级标记——域入口侧
+      // 坏行观测等无行可绑的上行经此落 root logger（按 level 动态派发）；
+      // 只认已知四档 level（防任意键打到 logger 非日志方法面）
+      if (rowId === '') {
+        if (level === 'error' || level === 'warn' || level === 'info' || level === 'debug') {
+          opts.root.logger[level](message, fields);
+        }
+        return;
+      }
       const binding = bindings.get(rowId);
       if (binding === undefined) return; // 行已回卷——迟到日志静默丢弃
       const logger = binding.scope.logger as unknown as Record<

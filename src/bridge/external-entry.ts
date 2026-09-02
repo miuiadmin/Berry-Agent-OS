@@ -21,12 +21,35 @@
  */
 import { StdioBridgePort } from './port-stdio.js';
 import { startWorkerRealm } from './worker.js';
+import type { BridgeEndpoint } from './session.js';
 
 // 域 id（argv[0]=node、argv[1]=本入口；缺省 'external' 与 worker 入口缺省同族）
 const workerId = process.argv[2] ?? 'external';
+
+// 端点前置声明：坏行观测要经它上行（startWorkerRealm 返回后才就绪——首行
+// 即坏行的窗口观测蒸发，可接受：boot 期宿主侧本就无诊断消费面在等它）
+let endpoint: BridgeEndpoint | undefined;
 // NDJSON 载体端口：stdin 入站（宿主→域）、stdout 出站（域→宿主）——stdio[2]
-// （stderr）不进协议面：崩溃栈由宿主侧收集为死亡结算 diagnostic
-startWorkerRealm(new StdioBridgePort(process.stdin, process.stdout), workerId);
+// （stderr）不进协议面：崩溃栈由宿主侧收集为死亡结算 diagnostic。坏行观测
+// 接线（遗漏大扫 20260902 #7）：宿主半发来的撕裂/垃圾行经 log tell 通道回
+// 报宿主（rowId 空串 = 域级标记——无行可绑，宿主侧域级路由落 root logger），
+// 双向留痕与 worker 腿 stderr 收集同纪律；行首 120 字符截断预览禁全文
+const port = new StdioBridgePort(process.stdin, process.stdout, {
+  onBadLine: (line, err) => {
+    endpoint?.tell('log', {
+      rowId: '',
+      level: 'warn',
+      message: 'external 域入口收到坏行（已跳过）',
+      fields: {
+        workerId,
+        bytes: line.length,
+        error: err instanceof Error ? err.message : String(err),
+        preview: line.slice(0, 120),
+      },
+    });
+  },
+});
+endpoint = startWorkerRealm(port, workerId);
 
 /**
  * 孤儿收尾（critic #1 收割腿，2026-08-29）：stdin 断 = 宿主已亡——先组杀本域

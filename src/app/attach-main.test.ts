@@ -100,6 +100,32 @@ describe('createApprovalAnswerer — attach 审批应答政策（复盘 #51 回�
     expect(decided).toEqual([]);
   });
 
+  it('【回归锁】decided 镜像在追问腿期间到达：追问同享 signal + aborted 复查拦截，不投 decide（遗漏大扫 20260902 #8）', async () => {
+    // 现场复刻：首问 y（草案在场）→ 追问 always 在身时他腿已决（decided 镜像
+    // 到达）——修前追问 confirm 传 {}（无 signal）且无 aborted 复查：镜像收
+    // 不了场、追问作答后照常投 decide（对着已失效的追问要答案）
+    const confirmOpts: Array<{ signal?: AbortSignal } | undefined> = [];
+    let releaseSecond!: () => void;
+    const confirm = vi.fn((_message: string, opts?: { signal?: AbortSignal }) => {
+      confirmOpts.push(opts);
+      if (confirmOpts.length === 1) return Promise.resolve(true); // 首问 y
+      return new Promise<boolean | undefined>((resolve) => {
+        releaseSecond = () => resolve(undefined); // 追问挂起——等竞速现场
+      });
+    });
+    const { deps, decided } = makeDeps({ confirm });
+    const answerer = createApprovalAnswerer(deps);
+    answerer.ask(makeApproval({ suggestedEntry: { tool: 'write' } as never }));
+    await vi.waitFor(() => expect(confirmOpts).toHaveLength(2)); // 首问已答、追问在身
+    // 追问腿 signal 接线（修前 {} 无 signal——必红位①）
+    expect(confirmOpts[1]!.signal).toBeInstanceOf(AbortSignal);
+    answerer.settle('ap-1'); // decided 镜像到达——摘卡 + abort 在身追问
+    releaseSecond(); // 追问收场（真 TUI 里 signal 驱动；此处手动放行）
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // aborted 复查拦截（修前无复查——追问 false 作答后投 approve——必红位②）
+    expect(decided).toEqual([]);
+  });
+
   it('sync 幂等：同一卡重复投递只建一卡（清单重拉/镜像竞窗）', async () => {
     let release!: (value: boolean | undefined) => void;
     const confirm = vi.fn(

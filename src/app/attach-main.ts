@@ -102,14 +102,26 @@ export function createApprovalAnswerer(deps: ApprovalAnswererDeps): {
       // Ctrl+D 收尾守卫（复盘 #51）：cancelAsks 的 confirm false 收场 = 撤销非
       // 拒绝——quitting 后不投 decide，卡留 daemon 侧待决
       if (deps.isQuitting()) return;
-      openAsks.delete(approval.approvalId);
       let decision: 'approve' | 'reject' | 'always' = allow ? 'approve' : 'reject';
       if (allow && approval.suggestedEntry !== undefined) {
-        // 草案在场且已 approve：追问一次是否始终允许（y = always 落 daemon 侧 allowlist）
-        const always = (await deps.confirm(`记住此决定（始终允许 ${approval.suggestedEntry.tool}）？`, {})) ?? false;
+        // 草案在场且已 approve：追问一次是否始终允许（y = always 落 daemon 侧 allowlist）。
+        // 追问腿同享 per-ask signal（遗漏大扫 20260902 #8）：decided 镜像在追问
+        // 期间到达时同样能收场——signal 预 abort 陷阱不成立（上一步 aborted 检
+        // 查后同步到达本调用，abort 只可能在 await 点发生）
+        const always =
+          (await deps.confirm(`记住此决定（始终允许 ${approval.suggestedEntry.tool}）？`, {
+            signal: controller.signal,
+          })) ?? false;
+        // aborted 复查：追问在身时 decided 镜像到达（settle abort 了 signal）——
+        // 对已失效的追问作答应静默收场，不投 decide
+        if (controller.signal.aborted) return;
         if (always) decision = 'always';
       }
       const res = await deps.decide(approval.approvalId, decision);
+      // 在身卡延后到 decide 投递完成后再摘（遗漏大扫 20260902 #8）：追问/投递
+      // 在途期间 decided 镜像仍能在 openAsks 查到 controller 收场在身提问；
+      // 顺带收紧清单重拉幂等窗（decide 在途的重复 ask 不因先摘而重建卡）
+      openAsks.delete(approval.approvalId);
       if (res !== undefined && res.status === 200 && res.accepted === false) {
         deps.notify(`审批已被其他应答面抢先处理（${res.reason ?? '已决'}）`);
       } else if (res === undefined || res.status !== 200) {

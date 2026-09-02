@@ -12,10 +12,12 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
+import type { Logger } from '../context/logger.js';
 import { loadApps } from '../context/loader.js';
 import type { WorkerRowLoader } from '../context/loader.js';
 import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
@@ -172,6 +174,17 @@ export default async function apply(ctx) {
 }
 `;
 
+/**
+ * 坏行双发 fixture（.mjs——非 .ts 不走引导器路由，node 直跑）：先吐一行撕裂
+ * JSON（宿主侧 onBadLine 接线断言面）、再吐一行合法的域级 log tell（rowId 空
+ * ——宿主 onTell 'log' 域级路由断言面）。setInterval 保活等宿主 terminate 收割。
+ */
+const FX_NOISY = `
+process.stdout.write('{torn-json\\n');
+process.stdout.write(JSON.stringify({ kind: 'tell', event: 'log', payload: { rowId: '', level: 'warn', message: 'entry-noisy 域级上行', fields: { k: 1 } } }) + '\\n');
+setInterval(() => {}, 1 << 30);
+`;
+
 /** 测试环境根（fixture 全落这里；afterAll 统一清） */
 let fixtureDir: string;
 let root: ContextScope;
@@ -224,6 +237,7 @@ beforeAll(async () => {
   writeFileSync(join(fixtureDir, 'fx-pm-probe.ts'), FX_PM_PROBE);
   writeFileSync(join(fixtureDir, 'fx-term-trap.ts'), FX_TERM_TRAP);
   writeFileSync(join(fixtureDir, 'fx-freeze.ts'), FX_FREEZE);
+  writeFileSync(join(fixtureDir, 'fx-noisy.mjs'), FX_NOISY);
   root = createContext({ name: 'bridge-ext-test' });
   tools = new FakeTools();
   domain = spawnExternalDomain({
@@ -489,6 +503,56 @@ describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/c
       expect(exits[0]!.code).toBe(-1); // 信号死（exitCode null → -1）——组杀含自的孤儿防线语义
       expect(orphan.child.signalCode).toBe('SIGKILL');
       await until(() => !pidAlive(orphan.child.pid));
+    },
+  );
+
+  it(
+    '【回归锁】坏行观测双向接线（遗漏大扫 20260902 #7）：宿主侧 onBadLine 落 root logger warn + 域级 log tell（rowId 空）域级路由',
+    { timeout: 40_000 },
+    async () => {
+      // 修前红位：宿主侧构造点未传 onBadLine（坏行静默蒸发）+ onTell 'log' 只认
+      // 行绑定（rowId 空的域级上行被「行已回卷」分支静默丢弃）——两 warn 全缺席
+      const warns: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+      const noop = (): void => undefined;
+      const recorder: Logger = {
+        error: noop,
+        info: noop,
+        debug: noop,
+        warn: (message, fields) => warns.push({ message, fields }),
+        child: () => recorder, // createContext 会 child(name)——同录音面
+        setLevel: noop,
+      };
+      const noisyRoot = createContext({ name: 'bridge-ext-noisy', logger: recorder });
+      const noisy = spawnTestDomain({
+        root: noisyRoot,
+        externalUrl: pathToFileURL(join(fixtureDir, 'fx-noisy.mjs')),
+      });
+      await until(() => warns.length >= 2);
+      // 宿主侧腿：坏行 → root logger warn（预览 + 字节数 + parse 错误）
+      const hostLeg = warns.find((w) => w.message.includes('坏行'));
+      expect(hostLeg).toBeTruthy();
+      // parse 错误第一手（V8 各版本消息形态有差——以 JSON 关键词锚定不回显依赖）
+      expect(String(hostLeg!.fields?.error)).toContain('JSON');
+      expect(hostLeg!.fields?.preview).toBe('{torn-json'); // 截断预览 = 行原文（10 字符 < 120 上限）
+      expect(hostLeg!.fields?.bytes).toBe('{torn-json'.length);
+      // 域入口侧腿：坏行观测经 log tell 上行（rowId 空 = 域级标记）→ 域级路由落 root logger
+      const entryLeg = warns.find((w) => w.message.includes('域级上行'));
+      expect(entryLeg).toBeTruthy();
+      expect(entryLeg!.fields).toEqual({ k: 1 });
+      noisy.terminate('测试收尾');
+      await noisyRoot.dispose().catch(() => undefined);
+
+      // 真入口上行腿：fx-noisy 是裸 .mjs 绕过了 external-entry——另起真入口域，
+      // 向 child.stdin 写坏行 → 入口 onBadLine 经 tell 上行（rowId 空）→ 域级
+      // 路由落 root logger（修前红位：入口构造点未传 onBadLine——该 warn 恒缺席）
+      const entryRoot = createContext({ name: 'bridge-ext-noisy-entry', logger: recorder });
+      const entryDomain = spawnTestDomain({ root: entryRoot });
+      entryDomain.child.stdin?.write('{torn-host-side\n');
+      await until(() => warns.some((w) => w.message.includes('域入口收到坏行')));
+      const hostSideLeg = warns.find((w) => w.message.includes('域入口收到坏行'))!;
+      expect(hostSideLeg.fields?.bytes).toBe('{torn-host-side'.length);
+      entryDomain.terminate('测试收尾');
+      await entryRoot.dispose().catch(() => undefined);
     },
   );
 
