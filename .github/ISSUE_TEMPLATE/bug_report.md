@@ -33,5 +33,5 @@ assignees: ''
 
 **诊断信息**
 
-- `berry doctor` 输出（daemon 相关问题必附）：
+- `berry daemon doctor` 输出（daemon 相关问题必附）：
 - 崩溃类问题附数据目录 `crash.log` 尾部若干行（粘贴前请抹除密钥、内部路径等敏感信息）：
