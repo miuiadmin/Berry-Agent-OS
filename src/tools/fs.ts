@@ -176,6 +176,34 @@ export async function serializeWrites<T>(paths: readonly string[], op: () => Pro
 }
 
 /**
+ * 互斥段内写目标漂移重验（复盘 20260901 S-2 规范先行，骨架篇 §7.5② 竞速
+ * 边界注记）：写串行链只互斥宿主写者——不可信共享写者（external 域应用对
+ * workspace 持直接 OS 写权）不受链约束，可在链外 canonicalize〔T0〕→ 段内
+ * 物理写〔T1〕窗口把任一父组件 swap 成符号链，writeFile/rm 跟随即宿主全权
+ * 写出 fence 外（fence 只在链外验过一次，对 T1 的真实落点不再过问）。
+ * 修法 = 物理写前重跑 canonicalize 与链外定键值比对，漂移即拒（fail-closed）。
+ * 调用形态约束：重验完成后与物理写之间零 await——重验是物理写前的最后一跳，
+ * 残窗收敛至 realpath 走查与 open 提交之间的指令级窗（治本 = 父目录 fd 锚定
+ * 或 temp+rename，挂账等真实攻击面拉动）。
+ *
+ * 模块级导出面（2026-09-02 遗漏大扫 20260902-b #10：原 createFsTools 闭包
+ * 私有——checkpoint 恢复写段作为链的第四写者同窗漂移未验，重验提为导出面
+ * 跨文件复用，与工具写腿同一函数同一纪律）。
+ *
+ * @param abs       用户拼写路径（重跑 canonicalize 的输入——与 T0 定键同源）
+ * @param canonical 链外推导定键（T0 值）——比对基准
+ */
+export const assertTargetStable = async (abs: string, canonical: string): Promise<void> => {
+  const nowCanonical = await canonicalize(abs);
+  if (nowCanonical !== canonical) {
+    throw new AppError(
+      FS_WRITE_TARGET_DRIFTED,
+      `[FS_WRITE_TARGET_DRIFTED] 写目标在互斥段内漂移：${abs} 现规范化 ${nowCanonical} ≠ 定键 ${canonical}（疑似父组件被符号链交换——拒绝落盘；请重新执行写操作）`,
+    );
+  }
+};
+
+/**
  * read/edit 前置读共用：原始字节 → 决策树（read 半边 ACP 标签；两段式懒探测，
  * 骨架篇 §7.5——挖矿 B11 缺口④ read 半边）。
  * 干净 UTF-8 零探测开销；仅终判 lossy 时异步探一次码页重解码（非 win32
@@ -229,30 +257,6 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
       FS_OUTSIDE_WRITABLE_ROOTS,
       `[FS_OUTSIDE_WRITABLE_ROOTS] 目标不在可写根内：${abs}（可写根：${writableRoots().join('、')}）`,
     );
-  };
-
-  /**
-   * 互斥段内写目标漂移重验（复盘 20260901 S-2 规范先行，骨架篇 §7.5② 竞速
-   * 边界注记）：写串行链只互斥宿主写者——不可信共享写者（external 域应用对
-   * workspace 持直接 OS 写权）不受链约束，可在链外 canonicalize〔T0〕→ 段内
-   * 物理写〔T1〕窗口把任一父组件 swap 成符号链，writeFile/rm 跟随即宿主全权
-   * 写出 fence 外（fence 只在链外验过一次，对 T1 的真实落点不再过问）。
-   * 修法 = 物理写前重跑 canonicalize 与链外定键值比对，漂移即拒（fail-closed）。
-   * 调用形态约束：重验完成后与物理写之间零 await——重验是物理写前的最后一跳，
-   * 残窗收敛至 realpath 走查与 open 提交之间的指令级窗（治本 = 父目录 fd 锚定
-   * 或 temp+rename，挂账等真实攻击面拉动）。
-   *
-   * @param abs       用户拼写路径（重跑 canonicalize 的输入——与 T0 定键同源）
-   * @param canonical 链外推导定键（T0 值）——比对基准
-   */
-  const assertTargetStable = async (abs: string, canonical: string): Promise<void> => {
-    const nowCanonical = await canonicalize(abs);
-    if (nowCanonical !== canonical) {
-      throw new AppError(
-        FS_WRITE_TARGET_DRIFTED,
-        `[FS_WRITE_TARGET_DRIFTED] 写目标在互斥段内漂移：${abs} 现规范化 ${nowCanonical} ≠ 定键 ${canonical}（疑似父组件被符号链交换——拒绝落盘；请重新执行写操作）`,
-      );
-    }
   };
 
   /* ---------------- read：观察登记的唯一天然入口 ---------------- */

@@ -18,7 +18,7 @@
 
 import { mkdir, writeFile, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { canonicalize, serializeWrites } from '../tools/fs.js';
+import { assertTargetStable, canonicalize, serializeWrites } from '../tools/fs.js';
 import { readBlob, type CheckpointManifest } from './store.js';
 import { toPosix } from './snapshot.js';
 
@@ -77,11 +77,19 @@ export async function restoreWorkspace(
   // ——重建被删文件与新建文件两形态同键）。
   const chainKeys = await Promise.all(target.files.map((entry) => canonicalize(join(workspaceRoot, entry.rel))));
   const leftovers = await serializeWrites(chainKeys, async () => {
-    // 逐路径覆写：先建父目录（重建被删文件的目录树），blob 内容写回
-    for (const entry of target.files) {
+    // 逐路径覆写：先建父目录（重建被删文件的目录树），blob 内容写回。
+    // 段内目标漂移重验（遗漏大扫 20260902-b #10，会话篇 §5.3 恢复写段条款）：
+    // 链键在段外定（T0），段内 readBlob await 撑宽窗口——若目标路径父组件被
+    // 链外写者换成指向工作区外的符号链，恢复字节在 open 时重新解析落到链键
+    // 与 manifest 都不曾锚定的区外目标（宿主信任级恢复写引出工作区）。每路径
+    // writeFile 前重跑 canonicalize 与段外定键值比对、漂移即整体抛错中止
+    // （FS_WRITE_TARGET_DRIFTED——快照保留不 fork，既有失败语义同款收场；
+    // 与工具写腿同一 assertTargetStable 同一纪律）。
+    for (const [i, entry] of target.files.entries()) {
       const abs = join(workspaceRoot, entry.rel);
       const content = await readBlob(dataRoot, entry.hash);
       await mkdir(join(abs, '..'), { recursive: true });
+      await assertTargetStable(abs, chainKeys[i]!); // 重验与物理写之间零 await
       await writeFile(abs, content);
     }
 

@@ -7,7 +7,7 @@
  * 与在飞工具写交叠即撕裂混合两态）。hermetic：临时目录作双根，用后即清。
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -115,6 +115,63 @@ describe('restoreWorkspace（写串行链义务——遗漏大扫 20260901-c #5�
       expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v2-现场内容');
     } finally {
       rmSync(ws, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('restoreWorkspace（段内目标漂移重验——遗漏大扫 20260902-b #10）', () => {
+  it('链外定键后目标被换成指向区外的符号链 → 段内重验抛 FS_WRITE_TARGET_DRIFTED 整体中止、区外零落盘', async () => {
+    // 修前形态：链键在临界段外定（T0），段内 readBlob await 撑宽窗口——链外
+    // 写者把 a.txt 换成指向区外的符号链后，writeFile 在 open 时重新解析，恢复
+    // 字节落到链键与 manifest 都不曾锚定的区外目标（宿主信任级恢复写引出
+    // 工作区）。修后：writeFile 前重跑 canonicalize 与定键比对，漂移即拒。
+    const ws = mkdtempSync(join(tmpdir(), 'checkpoint-restore-drift-'));
+    const outsideDir = mkdtempSync(join(tmpdir(), 'checkpoint-restore-drift-out-'));
+    try {
+      // 内容取本用例唯一串：内容寻址仓跨用例共享——与「blob 损坏」用例同内容
+      // 会命中其故意污染的同名 blob（坏 hash 混进本用例先炸 CORRUPT）
+      const v1 = Buffer.from('v1-快照内容-漂移窗');
+      const hash = hashContent(v1);
+      await writeBlob(dataRoot, hash, v1);
+      const target: CheckpointManifest = {
+        id: newManifestId(),
+        sessionId: 'sess-restore-drift-test',
+        time: 1755900000000,
+        triggerTool: 'write',
+        guard: false,
+        forkSeq: null,
+        triggerText: null,
+        files: [{ rel: 'a.txt', hash, size: v1.length, mtimeMs: 1, mode: 0o644 }],
+        skipped: [],
+        newBytes: v1.length,
+        totalBytes: v1.length,
+      };
+      writeFileSync(join(ws, 'a.txt'), 'v2-现场内容');
+      // 区外受害目标必须**存在**（canonicalize 对指向不存在目标的符号链走祖先
+      // 回退拼尾段——与原键同串检不出漂移；指向存在文件时 realpath 穿透解析
+      // 出区外真身，漂移可检）
+      writeFileSync(join(outsideDir, 'victim.txt'), '区外现场-不可被动');
+
+      // T0 定键（a.txt 还是真身）→ 占链 → 恢复入队（段被链挡在 T0 之后）
+      const key = await canonicalize(join(ws, 'a.txt'));
+      let release!: () => void;
+      const holder = serializeWrites([key], () => new Promise<void>((r) => (release = r)));
+      const restoring = restoreWorkspace(ws, dataRoot, target);
+      await new Promise((resolve) => setTimeout(resolve, 20)); // 让 T0 定键+入队完成
+
+      // 链外写者的 symlink swap：真身换符号链（发生在定键之后、恢复段进入前）
+      rmSync(join(ws, 'a.txt'));
+      symlinkSync(join(outsideDir, 'victim.txt'), join(ws, 'a.txt'));
+
+      release(); // 放链——恢复段进入，writeFile 前的段内重验面对已漂移目标
+      await holder;
+      const err = await restoring.catch((e: unknown) => e);
+      expect((err as AppError).code).toBe('FS_WRITE_TARGET_DRIFTED'); // 断言形态同上用例先例
+      // 区外零落盘（宿主信任级恢复写不引出工作区——修前红：victim 被覆写成 v1）
+      expect(readFileSync(join(outsideDir, 'victim.txt'), 'utf8')).toBe('区外现场-不可被动');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
     }
   });
 });
