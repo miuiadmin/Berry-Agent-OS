@@ -35,14 +35,21 @@ vi.mock('./attach-main.js', () => ({ attachMain: vi.fn(async () => 0) }));
 vi.mock('./upgrade.js', () => ({ upgradeMain: vi.fn(async () => 0) }));
 
 /** 一次真分派：改 argv → 动态 import（顶层跑 main）→ 等异步退出码落定 */
-async function dispatch(argv: readonly string[]): Promise<{ code: number | null | undefined; stderr: string }> {
+async function dispatch(
+  argv: readonly string[],
+): Promise<{ code: number | null | undefined; stderr: string; stdout: string }> {
   vi.clearAllMocks(); // 清跨用例调用史（resetModules 不清 mock 历史——断言只看本次分派）
   vi.resetModules();
   const origArgv = process.argv;
   const origCode = process.exitCode;
   const errChunks: string[] = [];
+  const outChunks: string[] = [];
   const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
     errChunks.push(String(chunk));
+    return true;
+  });
+  const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+    outChunks.push(String(chunk));
     return true;
   });
   process.argv = ['node', '/berry', ...argv];
@@ -51,11 +58,16 @@ async function dispatch(argv: readonly string[]): Promise<{ code: number | null 
     // 分派是 run().then 异步落 exitCode——一个宏任务足够（用法错分支同步返回）
     await new Promise((resolve) => setTimeout(resolve, 0));
     const code = process.exitCode; // Node 类型面含 string 形——本分派只落 number
-    return { code: typeof code === 'number' ? code : undefined, stderr: errChunks.join('') };
+    return {
+      code: typeof code === 'number' ? code : undefined,
+      stderr: errChunks.join(''),
+      stdout: outChunks.join(''),
+    };
   } finally {
     process.argv = origArgv;
     process.exitCode = origCode;
     errSpy.mockRestore();
+    outSpy.mockRestore();
   }
 }
 
@@ -92,6 +104,63 @@ describe('CLI 分派：未识别 `--` 旗标与终结符（20260901-c #1）', ()
     expect((await dispatch(['--version'])).code).toBe(0);
     expect((await dispatch(['-v'])).code).toBe(0);
     expect((await dispatch(['--help'])).code).toBe(0);
+  });
+});
+
+/* ---------------- 命令位词越位短路（遗漏大扫 20260902-b #1） ---------------- */
+
+describe('CLI 分派：命令位词越位短路（20260902-b #1，技术栈篇 §5 执法四律⑥）', () => {
+  it('run 参数位 --help → 打帮助退 0，不触达 runOnceMain（旧形并进消息真跑模型）', async () => {
+    const { runOnceMain } = await import('./run-main.js');
+    const { code, stdout } = await dispatch(['run', '--help']);
+    expect(code).toBe(0);
+    expect(stdout).toContain('用法'); // HELP 面真打出（非空回执）
+    expect(vi.mocked(runOnceMain)).not.toHaveBeenCalled(); // 关键回归锁：零模型调用
+  });
+
+  it('run 参数位 --version / -v → 打版本退 0，不触达 runOnceMain', async () => {
+    const { runOnceMain } = await import('./run-main.js');
+    for (const word of ['--version', '-v'] as const) {
+      const { code, stdout } = await dispatch(['run', word]);
+      expect(code, `run ${word}`).toBe(0);
+      expect(stdout, `run ${word}`).not.toBe(''); // 版本串真打出
+      expect(vi.mocked(runOnceMain), `run ${word}`).not.toHaveBeenCalled();
+    }
+  });
+
+  it('run -h 单短横线同形：越位短路（不落位置参数）', async () => {
+    const { runOnceMain } = await import('./run-main.js');
+    const { code } = await dispatch(['run', '-h']);
+    expect(code).toBe(0);
+    expect(vi.mocked(runOnceMain)).not.toHaveBeenCalled();
+  });
+
+  it('dump-config 参数位 --help → 打帮助退 0（旧形静默忽略照常打印组合树）', async () => {
+    const { dumpConfigMain } = await import('./dump-config.js');
+    const { code, stdout } = await dispatch(['dump-config', '--help']);
+    expect(code).toBe(0);
+    expect(stdout).toContain('用法');
+    expect(vi.mocked(dumpConfigMain)).not.toHaveBeenCalled();
+  });
+
+  it('旗标前缀的命令位词仍在命令位（berry --debug --help 打帮助）——旧顶层行为保持', async () => {
+    const { code, stdout } = await dispatch(['--debug', '--help']);
+    expect(code).toBe(0);
+    expect(stdout).toContain('用法');
+  });
+
+  it('执法序：未识别旗标闸先于越位短路（run --frobnicate --help 仍退 2）', async () => {
+    const { code, stderr } = await dispatch(['run', '--frobnicate', '--help']);
+    expect(code).toBe(2);
+    expect(stderr).toContain('未识别旗标');
+  });
+
+  it('`--` 终结符保真通道：run -- --help 仍是字面消息送达 runOnceMain', async () => {
+    const { runOnceMain } = await import('./run-main.js');
+    const { code } = await dispatch(['run', '--', '--help']);
+    expect(code).toBe(0);
+    expect(vi.mocked(runOnceMain)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(runOnceMain).mock.calls[0]![0]).toBe('--help');
   });
 });
 

@@ -113,7 +113,8 @@ const KNOWN_FLAG_WORDS: ReadonlySet<string> = new Set([
   '--app-file',
   '--standalone',
 ]);
-/** 命令位词（合法落在位置参数首位、由分派 switch 匹配——不算未识别旗标） */
+/** 命令位词（合法落在位置参数首位、由分派 switch 匹配——不算未识别旗标；
+ * 越位形态〔出现在子命令位之后〕由解析层记录、分派层统一短路——执法四律⑥） */
 const COMMAND_WORDS: ReadonlySet<string> = new Set(['--help', '-h', '--version', '-v']);
 
 /** 解析结果：首个非旗标参数为子命令，其余顺次为参数 */
@@ -143,11 +144,15 @@ interface ParsedArgs {
   appFile: string | undefined;
   /** 未识别 `--` 词（终结符之前收到的——分派层统一用法错退 2，20260901-c #1） */
   unknownFlags: readonly string[];
+  /** 首个越位命令位词（--help/-h/--version/-v 出现在子命令位之后——20260902-b
+   * #1：旧形落位置参数被静默并进消息正文送 LLM，改为分派层统一短路退 0） */
+  strayCommandWord: string | undefined;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
   const unknownFlags: string[] = [];
+  let strayCommandWord: string | undefined; // 首个越位命令位词（子命令位已占后才记录——见 ParsedArgs 注）
   let debug = false;
   let readOnly = false;
   let background = false;
@@ -218,6 +223,12 @@ function parseArgs(argv: string[]): ParsedArgs {
       // 未识别 `--` 词（含 = 取值形/拼写错写）：收进名单交分派层统一用法错——
       // 旧形落位置参数被静默并进消息（#1：`berry run --app=chat "hi"` 送进 LLM）
       unknownFlags.push(arg);
+    } else if (COMMAND_WORDS.has(arg) && positional.length > 0) {
+      // 命令位词越位（20260902-b #1，执法四律⑥）：子命令位已占（run/dump-config
+      // 等任何入口的参数段）——不再落位置参数（旧形静默并进消息正文送 LLM，
+      // 凭证在场时真实发起模型调用），记首个越位词交分派层统一短路；终结符后
+      // 不进此枝（全字面落点不变——`berry run -- --help` 仍是字面消息）
+      strayCommandWord ??= arg;
     } else {
       positional.push(arg);
     }
@@ -238,6 +249,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     standalone,
     appFile,
     unknownFlags,
+    strayCommandWord,
   };
 }
 
@@ -299,6 +311,7 @@ function main(argv: string[]): number {
     standalone,
     appFile,
     unknownFlags,
+    strayCommandWord,
   } = parseArgs(argv);
 
   // 未知 APP_ 变量提示（基建大扫 #31）：boot 期一次、全命令族统一
@@ -317,6 +330,18 @@ function main(argv: string[]): number {
         `未识别旗标：${unknownFlags.join(' ')}（用法见 berry --help；以 -- 起头的消息内容用 \`--\` 终结符转义）\n`,
       );
       return 2;
+    }
+    // 命令位词越位短路（20260902-b #1，技术栈篇 §5 执法四律⑥）：--help/-h/
+    // --version/-v 出现在子命令位之后——统一打帮助/版本退 0（旧形静默并进消息
+    // 正文送 LLM）；执法位在未识别旗标闸**后**（闸与短路不抢序——
+    // `berry run --frobnicate --help` 仍闸红退 2，与顶层同判）
+    if (strayCommandWord !== undefined) {
+      if (strayCommandWord === '--version' || strayCommandWord === '-v') {
+        process.stdout.write(VERSION + '\n');
+      } else {
+        process.stdout.write(HELP + '\n');
+      }
+      return 0;
     }
     switch (command) {
       case '': {
