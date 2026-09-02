@@ -228,18 +228,25 @@ export interface KillTreeDeps {
  *
  * 2026-08-26 导出（mcp 第一刀冷读 #1 裁决）：调用方 = 组合根闭包
  * （app/mcp-spawn.ts——mcp 件经闭包收 killTree，结构上不见 exec）。
+ *
+ * 2026-09-02 运行时探针 F-2 修死：退役 childPidAlive 守卫参数——原守卫
+ * 「主进程已退则跳过 killpg」把进程组纪律要覆盖的形态定义成了跳过条件
+ * （后台 & 孤儿存在 ⟺ 主进程已退；真跑实证超时/取消双执法失灵 + 结算被
+ * 孤儿寿命绑架）。无条件发射：组真已空时 ESRCH 落 catch 无副作用；组内
+ * 尚有成员（主或孤儿）时整组 SIGKILL 正是本函数职责。
  */
-export function killTree(pid: number | undefined, childPidAlive: () => boolean, deps: KillTreeDeps = {}): void {
+export function killTree(pid: number | undefined, deps: KillTreeDeps = {}): void {
   if (pid === undefined) return;
   if ((deps.platform ?? process.platform) === 'win32') {
     void win32KillTree(pid, deps).catch(() => undefined);
     return;
   }
   try {
-    // POSIX：负 pid = 进程组整组信号（组内全部命令进程一并终结）
-    if (childPidAlive()) process.kill(-pid, 'SIGKILL');
+    // POSIX：负 pid = 进程组整组信号（组内全部命令进程一并终结——含主进程
+    // 已退后存活的同 pgid 后台孤儿）
+    process.kill(-pid, 'SIGKILL');
   } catch {
-    // 组已不存在（主进程先退出带塌了组）——无事可做
+    // 组已不存在（全部成员已退）——无事可做
   }
 }
 
@@ -370,8 +377,18 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
 
     let settled = false; // close 与 error 竞速的单次结算闸
     let closeInfo: { code: number | null; signal: string | null } | undefined;
+    /**
+     * 主进程已死信息（'exit' 事件——早于 'close'：后者还要等 stdio 管道全部
+     * 排干，组外管道持有者〔detached 异组孤儿〕会拖住 close；运行时探针
+     * 20260902 F-2 修法②的主动结算依据）
+     */
+    let exitInfo: { code: number | null; signal: string | null } | undefined;
     let spawnError: Error | undefined;
     let timedOut = false;
+    /** 执法已发旗（超时/取消树杀已执行——宽限主动结算的武装条件） */
+    let killIssued = false;
+    /** 执法后宽限计时器（close 自然先到即清——防悬垂） */
+    let graceTimer: NodeJS.Timeout | undefined;
     /**
      * 摘除 abort 监听（结算时执行）。复盘 20260901 L-3：同一 run 的 N 次工具调用
      * 共享 runAbort.signal——once 只保证触发后自摘，正常完成的调用监听器永不触发
@@ -433,6 +450,24 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
       });
     };
 
+    /**
+     * 执法后宽限主动结算（运行时探针 20260902 F-2 修法②）：超时/取消树杀
+     * 已发（组内 SIGKILL 不可挡）而 close 在宽限内未至——组外管道持有者
+     * （detached 异组孤儿等，威胁模型外不追杀）拖住 close 的形态——按
+     * 'exit' 事件已知信息合成 closeInfo 主动结算，超时/取消的结算不被输出
+     * 流尾巴绑架。宽限给 killpg 的自然 close 留主路（保住精确 close 语义
+     * 与输出 flush）；仅执法已发（killIssued）且主进程已死（exitInfo 已知
+     * ——活主进程的 close 必然会来，等它）时武装，一次性。
+     */
+    const tryArmForceSettle = (): void => {
+      if (settled || graceTimer !== undefined || !killIssued || exitInfo === undefined) return;
+      graceTimer = setTimeout(() => {
+        if (settled) return;
+        if (closeInfo === undefined) closeInfo = exitInfo;
+        settle();
+      }, 250);
+    };
+
     child.on('error', (err: NodeJS.ErrnoException) => {
       // spawn/启动失败（ENOENT 找不到程序、EACCES 无权限、E2BIG env 超限）
       spawnError = err;
@@ -442,8 +477,16 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
         settle();
       }
     });
+    child.on('exit', (code, signal) => {
+      // 主进程已死（早于 close——close 还要等 stdio 管道排干）。执法已发时
+      // 用它武装宽限主动结算（F-2 修法②：组外管道持有者拖住 close 的形态）
+      exitInfo = { code, signal };
+      tryArmForceSettle();
+    });
     child.on('close', (code, signal) => {
       closeInfo = { code, signal };
+      // close 自然到达——清执法宽限计时器（若已武装）防悬垂
+      if (graceTimer !== undefined) clearTimeout(graceTimer);
       settle();
     });
 
@@ -460,10 +503,13 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
       child.stdin.end();
     }
 
-    /** 树杀并标记超时（结算走 close 事件——等进程真死再抛，flush 已采集输出） */
+    /** 树杀并标记超时（结算走 close 事件——等进程真死再抛，flush 已采集输出；
+     * 组外管道持有者拖住 close 的形态由 tryArmForceSettle 宽限兜底） */
     const armTimeout = (): void => {
       timedOut = true;
-      killTree(child.pid, () => child.exitCode === null);
+      killTree(child.pid);
+      killIssued = true;
+      tryArmForceSettle();
     };
     if (opts.timeoutMs !== undefined && opts.timeoutMs > 0) {
       const timer = setTimeout(armTimeout, opts.timeoutMs);
@@ -477,7 +523,9 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
       // 不复位 timedOut（复盘 20260901 L-3）：超时已武装时 abort 只是冗余树杀——
       // 无条件覆写会让 close 前到达的 abort 吞掉 TOOL_TIMEOUT 结算腿（归因先到先得）
       const onAbort = (): void => {
-        killTree(child.pid, () => child.exitCode === null);
+        killTree(child.pid);
+        killIssued = true;
+        tryArmForceSettle();
       };
       if (signal.aborted) onAbort();
       else {

@@ -78,7 +78,7 @@ export interface BrowserAppDeps {
   /** 裸 spawn 闭包（组合根 app/browser-spawn.ts——detached 组领导 + env 白名单） */
   readonly spawnEngine: (opts: { command: string; args: readonly string[] }) => EngineChild;
   /** 树杀原语（exec killTree 经组合根注入） */
-  readonly killTree: (pid: number, alive: () => boolean) => void;
+  readonly killTree: (pid: number) => void;
   /** 子进程登记簿（组合根实例化——<dataDir>/browser/children.json） */
   readonly registry: EngineRegistryLike;
   /** JSON-RPC 桥核工厂（mcp JsonRpcConnection 经组合根注入——帧无关复用） */
@@ -114,7 +114,7 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
       detectProviders(cfg, ui, ctx);
 
       // 孤儿清扫（先于自家 spawn——上次宿主非正常退出残留的引擎进程树）
-      void deps.registry.sweep({ kill: (pid) => deps.killTree(pid, () => true) }).then((report) => {
+      void deps.registry.sweep({ kill: (pid) => deps.killTree(pid) }).then((report) => {
         if (report.killed.length > 0) {
           ctx.logger.warn(`browser 孤儿引擎清扫 ${report.killed.length} 株（${report.killed.join(',')}）`);
         }

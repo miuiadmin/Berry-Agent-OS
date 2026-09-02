@@ -139,11 +139,11 @@ function makeDeps(
   spawn: (config: McpServerConfig) => Promise<SpawnedChild>,
   onSpawned?: (childPid: number) => () => void,
 ) {
-  const kills: Array<{ pid: number; alive: boolean }> = [];
+  const kills: Array<{ pid: number }> = [];
   const logger = { debug: vi.fn(), warn: vi.fn() };
   const deps: McpConnectDeps = {
     spawnServer: spawn,
-    killTree: (pid, alive) => kills.push({ pid, alive: alive() }),
+    killTree: (pid) => kills.push({ pid }),
     logger,
     ...(onSpawned === undefined ? {} : { onSpawned }),
   };
@@ -195,7 +195,7 @@ describe('connectMcpServer — connect 期一码收口', () => {
     await expect(connectMcpServer('srv', { ...CONFIG, startup_timeout_sec: 0.01 }, deps)).rejects.toMatchObject({
       code: MCP_CONNECT_FAILED,
     });
-    expect(kills).toEqual([{ pid: 4242, alive: true }]); // alive 恒 true = 无条件杀
+    expect(kills).toEqual([{ pid: 4242 }]); // 无条件杀（F-2 修后守卫参数已退役）
   });
 
   it('spawn 即写钩子：spawn 返回 pid 的同步点调用，握手失败路对称撤销（遗漏大扫 20260902-b #7）', async () => {
@@ -228,7 +228,7 @@ describe('connectMcpServer — connect 期一码收口', () => {
     await expect(pending).rejects.toSatisfy(
       (err: unknown) => err instanceof AppError && err.code === MCP_CONNECT_FAILED,
     );
-    expect(kills).toEqual([{ pid: 4242, alive: true }]);
+    expect(kills).toEqual([{ pid: 4242 }]);
   });
 });
 

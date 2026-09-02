@@ -95,7 +95,7 @@ export interface BrowserEngineDeps {
   /** 裸 spawn 闭包（组合根——buildChildEnv + detached 组领导） */
   readonly spawnEngine: (opts: { command: string; args: readonly string[] }) => EngineChild;
   /** 树杀原语（exec killTree 经组合根注入） */
-  readonly killTree: (pid: number, alive: () => boolean) => void;
+  readonly killTree: (pid: number) => void;
   /** 子进程登记簿（组合根实例化——<dataDir>/browser/children.json） */
   readonly registry: EngineRegistryLike;
   /** JSON-RPC 桥核工厂（mcp JsonRpcConnection 经组合根注入） */
@@ -491,7 +491,7 @@ export class BrowserEngine {
       this.status = { state: 'closed' };
     }
     if (atClose.child !== undefined) {
-      this.deps.killTree(atClose.child.pid, atClose.child.alive); // 树杀兜底（Browser.close 未达/竞态）
+      this.deps.killTree(atClose.child.pid); // 树杀兜底（Browser.close 未达/竞态）
       this.deps.registry.remove(atClose.child.pid);
     }
   }

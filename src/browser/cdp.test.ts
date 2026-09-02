@@ -617,7 +617,7 @@ describe('browser 引擎生命周期', () => {
     // context 级闲置（~70ms）→ dispose context；引擎闲置钟起算（再 ~70ms）→ 引擎收场
     await new Promise((resolve) => setTimeout(resolve, 220));
     expect(engine.getStatus().state).toBe('closed');
-    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(killTree).toHaveBeenCalledWith(424_242);
     expect(registry.remove).toHaveBeenCalledWith(424_242);
 
     // disposeBrowserContext 已发（context 回收腿物证）
@@ -687,7 +687,7 @@ describe('browser 引擎生命周期', () => {
     await expect(acquiring).rejects.toThrow('已回卷');
     await disposing;
     // 修前红位②：closeEngine 对未收养连接早退——树杀/净退全空，Chrome 滞留闲置双钟
-    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(killTree).toHaveBeenCalledWith(424_242);
     expect(registry.remove).toHaveBeenCalledWith(424_242);
     expect(engine.getStatus().state).toBe('closed');
   });
@@ -760,7 +760,7 @@ describe('browser 引擎生命周期', () => {
     expect(describeError(err)).toContain('BROWSER_CONNECT_FAILED');
     expect(describeError(err)).toContain('启动即退出');
     // 清算三断言（修复前红：野 Chrome 不杀、登记簿留尸、状态谎报 starting）
-    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(killTree).toHaveBeenCalledWith(424_242);
     expect(registry.remove).toHaveBeenCalledWith(424_242);
     expect(engine.getStatus().state).toBe('closed');
   });
@@ -782,7 +782,7 @@ describe('browser 引擎生命周期', () => {
     expect(err).toBeInstanceOf(AppError); // 修复前红：裸 Error
     expect(describeError(err)).toContain('BROWSER_CONNECT_FAILED');
     expect(describeError(err)).toContain('就绪等待超时');
-    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function)); // 修复前红
+    expect(killTree).toHaveBeenCalledWith(424_242); // 修复前红
     expect(registry.remove).toHaveBeenCalledWith(424_242); // 修复前红
     expect(engine.getStatus().state).toBe('closed'); // 修复前红：谎报 starting
   });
@@ -815,7 +815,7 @@ describe('browser 引擎生命周期', () => {
     // 引擎 running 但零活 context——闲置钟应照常武装（~70ms 后收场树杀）
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(engine.getStatus().state).toBe('closed'); // 修复前红：running 悬死（闲置钟永久失防）
-    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(killTree).toHaveBeenCalledWith(424_242);
   });
 
   it('#17 收场代际护栏：closeEngine await 窗内换代——新引擎不被旧收场误杀', async () => {
@@ -841,7 +841,7 @@ describe('browser 引擎生命周期', () => {
     fake.releaseHeld();
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(killTree).toHaveBeenCalledTimes(1);
-    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(killTree).toHaveBeenCalledWith(424_242);
     expect(engine.getStatus().state).toBe('running'); // 修复前红：新引擎被旧收场拆走
     // 新引擎 context 簿记未被旧收场清走：同 session 复用不重建（新起 context 应答改值不命中）
     fake.responders['Target.createBrowserContext'] = () => ({ browserContextId: 'CTX-9' });
@@ -889,13 +889,13 @@ describe('browser 引擎生命周期', () => {
     }
     expect(err).toBeInstanceOf(AppError); // 第二代失败腿本身清算正确（#2/#9 语义）
     expect(describeError(err)).toContain('BROWSER_CONNECT_FAILED');
-    expect(killTree).toHaveBeenCalledWith(424_243, expect.any(Function)); // 本代 child 即杀
+    expect(killTree).toHaveBeenCalledWith(424_243); // 本代 child 即杀
     // 放行旧收场：第一代必须仍被清算（修复前红：闸位被失败腿抢占 → 两腿早退，
     // 424242 永不树杀、登记簿留尸）
     fake.releaseHeld();
     await until(() => killTree.mock.calls.some((c) => c[0] === 424_242));
     expect(killTree).toHaveBeenCalledTimes(2); // 两代各恰一次（修复前 = 1：只有 424243）
-    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(killTree).toHaveBeenCalledWith(424_242);
     expect(registry.remove).toHaveBeenCalledWith(424_242);
     expect(registry.remove).toHaveBeenCalledWith(424_243);
     // 引用面收干净（三判据分立的红面：conn 未清会卡 status 复位）
@@ -1644,8 +1644,8 @@ describe('browser 行 apply 接线（孤儿清扫——刀一治理面的接线�
 
     // 接线三断言（修复前红形态：sweep 被摘或 kill 探针接错——崩溃残留进程永久泄漏且无测试红）
     expect(sweep).toHaveBeenCalledTimes(1); // apply 期恰扫一次（先于一切自家 spawn）
-    expect(killTree).toHaveBeenCalledWith(111, expect.any(Function)); // 探针 → killTree(pid, () => true)
-    expect(killTree).toHaveBeenCalledWith(222, expect.any(Function));
+    expect(killTree).toHaveBeenCalledWith(111); // 探针 → killTree(pid)（F-2 修后守卫参数退役）
+    expect(killTree).toHaveBeenCalledWith(222);
     // 清扫命中走 warn（人读出口——operator 排障面）
     await new Promise((resolve) => setTimeout(resolve, 0)); // sweep promise .then 结算
     expect(warns.join('\n')).toContain('孤儿引擎清扫 2 株');

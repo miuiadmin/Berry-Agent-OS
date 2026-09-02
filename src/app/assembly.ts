@@ -632,7 +632,7 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 不动手。宿主猝死遗留的 detached 命令组在此认领树杀（域同组孙进程由
     // §1.7 孤儿防线域侧组杀收，两腿合成宪章七进程墙完整生命周期）。
     // hostPid 活性检查天然双开安全（兄弟宿主条目不碰，mcp 同律）。
-    const sweepReport = await commandRegistry.sweep({ kill: (pid) => killTree(pid, () => true) });
+    const sweepReport = await commandRegistry.sweep({ kill: (pid) => killTree(pid) });
     if (sweepReport.killed.length > 0) {
       ctx.logger.warn(`exec 孤儿清扫：树杀 ${sweepReport.killed.join(',')}（宿主猝死遗留命令进程）`);
     }

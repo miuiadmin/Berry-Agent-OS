@@ -80,7 +80,7 @@ export interface LspAppDeps {
   /** spawn 组装闭包（组合根 confined spawner 的 lsp 实例——workspace 腿传 rootUri 物理根） */
   readonly spawnServer: (config: LspServerConfig) => Promise<SpawnedProcess>;
   /** 树杀原语（exec killTree 经组合根注入） */
-  readonly killTree: (pid: number, alive: () => boolean) => void;
+  readonly killTree: (pid: number) => void;
   /** 子进程登记簿（组合根实例化注入——<dataDir>/lsp/children.json） */
   readonly registry: ChildRegistryLike;
   /** rootUri 物理根闭包（canonical 工作区根的 realpath——惰性求值，别名层排除） */
@@ -217,7 +217,7 @@ async function applyLspApp(
   }
 
   // 启动期孤儿清扫（先于自家 spawn——宿主猝死遗留的 detached 子进程在此认领）
-  const report = await deps.registry.sweep({ kill: (pid) => deps.killTree(pid, () => true) });
+  const report = await deps.registry.sweep({ kill: (pid) => deps.killTree(pid) });
   if (report.killed.length > 0) ctx.logger.warn(`lsp 孤儿清扫：树杀 ${report.killed.join(',')}（宿主猝死遗留）`);
 
   const ui = ctx.get<UiNotifyFace>('ui');

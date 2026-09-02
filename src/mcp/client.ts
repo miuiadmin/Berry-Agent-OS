@@ -50,7 +50,7 @@ export interface McpConnectDeps {
   /** spawn 组装（app/mcp-spawn.ts：env 白名单 + detached 建组 + cwd=dataDir） */
   readonly spawnServer: (config: McpServerConfig) => Promise<SpawnedChild>;
   /** 树杀原语（exec killTree 经组合根注入） */
-  readonly killTree: (pid: number, alive: () => boolean) => void;
+  readonly killTree: (pid: number) => void;
   /** 诊断日志（stderr 行/通知杂音——debug 级） */
   readonly logger: Pick<AppLogger, 'debug' | 'warn'>;
   /**
@@ -156,7 +156,7 @@ export async function connectMcpServer(
     // 握手失败/超时：响亮杀进程树不留挂起（契约篇 §6.6 连接语义条）；
     // alive 恒 true = 无条件树杀（killpg 打在已死组上抛 ESRCH 被内吞——安全）
     unregisterSpawned?.(); // spawn 即写的对称撤销（遗漏大扫 20260902-b #7）
-    deps.killTree(child.pid ?? -1, () => true);
+    deps.killTree(child.pid ?? -1);
     if (err instanceof AppError) throw err;
     throw new AppError(MCP_CONNECT_FAILED, `服务器 ${server} 握手失败：${describeCause(err)}`, { cause: err });
   }
@@ -207,11 +207,11 @@ export async function connectMcpServer(
       const exited = new Promise<void>((resolve) => child.on('close', () => resolve()));
       child.stdin.end();
       const timer = setTimeout(() => {
-        deps.killTree(child.pid ?? -1, () => true);
+        deps.killTree(child.pid ?? -1);
       }, DISPOSE_GRACE_MS);
       await Promise.race([exited, sleep(DISPOSE_GRACE_MS + 200)]);
       clearTimeout(timer);
-      deps.killTree(child.pid ?? -1, () => true); // 已退即 ESRCH 内吞（幂等收尾）
+      deps.killTree(child.pid ?? -1); // 已退即 ESRCH 内吞（幂等收尾）
     },
   };
 }

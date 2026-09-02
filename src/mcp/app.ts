@@ -53,7 +53,7 @@ export interface McpAppDeps {
   /** spawn 组装闭包（app/mcp-spawn.ts：buildChildEnv + env set 层 + detached + cwd=dataDir） */
   readonly spawnServer: (config: McpServerConfig) => Promise<SpawnedChild>;
   /** 树杀原语（exec killTree 经组合根注入） */
-  readonly killTree: (pid: number, alive: () => boolean) => void;
+  readonly killTree: (pid: number) => void;
   /** 数据目录（登记簿 <dataDir>/mcp/children.json 物理根） */
   readonly dataDir: string;
 }
@@ -101,7 +101,7 @@ async function applyMcpApp(
   const registry = new ChildRegistry(`${deps.dataDir}/mcp/children.json`);
   // 启动期孤儿清扫（先于自家 spawn——宿主猝死遗留的 detached 子进程在此认领）
   const report = await registry.sweep({
-    kill: (pid) => deps.killTree(pid, () => true),
+    kill: (pid) => deps.killTree(pid),
   });
   if (report.killed.length > 0) {
     ctx.logger.warn(`mcp 孤儿清扫：树杀 ${report.killed.join(',')}（宿主猝死遗留）`);
