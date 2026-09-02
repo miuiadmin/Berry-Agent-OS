@@ -92,6 +92,34 @@ function scriptedStream(responses: AssistantMessage[]): StreamFn {
   };
 }
 
+/**
+ * 打断感知脚本流（chat.test interrupt 小刀组同款）：signal 已 abort 的当轮以
+ * stopReason 'aborted' 收场（真 provider 打断同形——loop 终态短路把 run 收成
+ * aborted）；未 abort 轮照常走脚本序。打断落在工具段（审批 ask 在身）时，撤销
+ * 收场后的下一轮流即由本桩如实编码 aborted。
+ */
+function abortAwareScriptedStream(responses: AssistantMessage[]): StreamFn {
+  let calls = 0;
+  return (context: LlmContext, _options: StreamFnOptions, signal?: AbortSignal) => {
+    void context;
+    calls += 1;
+    if (signal?.aborted) {
+      const aborted: AssistantMessage = {
+        role: 'assistant',
+        content: [],
+        usage: NO_USAGE,
+        // done.reason 闭集不含 'aborted'（pi-ai 只有 stop/length/toolUse/deferred
+        // /error）——打断编码位 = message.stopReason（loop 终态短路查此处）
+        stopReason: 'aborted',
+        timestamp: 1,
+      };
+      return syntheticStream(aborted);
+    }
+    const message = responses[Math.min(calls - 1, responses.length - 1)]!;
+    return syntheticStream(message);
+  };
+}
+
 /** 临时工作区（realpath 归一——macOS /var 与 /private/var 差异教训） */
 function makeWorkspace(): string {
   return realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-webui-')));
@@ -794,6 +822,68 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
       const late = await postJson(port, `/api/approvals/${id2}/decide`, JSON.stringify({ decision: 'reject' }));
       expect(late).toEqual({ status: 200, body: { accepted: false, reason: 'superseded' } });
       expect(session.events.filter((e) => e.type === 'approval/decided')).toHaveLength(2); // 仍两条
+    } finally {
+      sse.close();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('web-only 腿打断收场（遗漏大扫 20260902-b #2，契约篇 §6.8 验收 (viii)(ix)）：daemon 形态 POST interrupt 结算在身 web 审批——decided 落 cancel、turn 收场、他端迟答 superseded（修复前必红——web 腿无信号面，run 永挂 waitFor 超时）', async () => {
+    const port = await grabPort();
+    const workspace = makeWorkspace();
+    // daemon 形态锚：interactive:false + daemon 装配——confirm 不注入（TUI 腿
+    // 缺席）而 answerer 注册闸经 webAnswerActive（daemon 恒真）放行，webLeg 是
+    // 唯一应答腿（#2 失效时序的准确复刻形态——非 daemon 的 headless+--port 形态
+    // 走「无 answerer = 全线 unavailable 纪律」，不走本缺陷链）
+    const DAEMON_TOKEN = 'web-only-interrupt-token';
+    const runtime = await createRuntime({
+      dbPath: ':memory:',
+      workspace,
+      interactive: false, // daemon 形态缺省（显式钉死——形态是装配的选择非代码分叉）
+      approvalPolicy: 'ask',
+      sandboxMode: 'read-only', // bash 升权必触发 ask
+      daemon: { token: DAEMON_TOKEN, port },
+      streamFn: abortAwareScriptedStream([bashEscalation('web-only 腿打断理由'), textMessage('不可达')]),
+    });
+    runtimes.push(runtime);
+    bearer = DAEMON_TOKEN; // daemon 形态鉴权 = daemonAuth token（ephemeral face 恒缺席不自足）
+    const base = `http://127.0.0.1:${port}`;
+
+    const frames: WebuiSseEnvelope[] = [];
+    const sse = openSse(port, frames); // 在场 SSE 连接：armed 判据 ask 时点冻结不武装（attachedCount>0）——复现超时兜底不可达的病态形态
+    try {
+      const list = (await getJson(`${base}/api/sessions`)).body as { id: string; active: boolean }[];
+      const bootId = list.find((s) => s.active)!.id;
+      const session = runtime.session!;
+      const countFrames = (type: string): number =>
+        frames.filter((f) => f.kind === 'session' && (f.payload as { type?: string })?.type === type).length;
+
+      // 起跑到升权 ask 在身：web-only 形态唯一腿 = claim 悬置 promise
+      expect((await postSubmit(port, bootId, '跑升权')).status).toBe(202);
+      await waitFor(() => countFrames('approval/asked') >= 1);
+      const askedId =
+        frames
+          .map((f) => f.payload as { type?: string; data?: { approvalId?: string } })
+          .find((p) => p.type === 'approval/asked')?.data?.approvalId ?? '';
+      expect(askedId).toMatch(/.+/);
+
+      // 打断（daemon 形态唯一打断面 = HTTP 端点）：修前 web 腿无信号面——run
+      // 吊死在 ask 的 await 上，decided 永不落账（waitFor 超时红即本用例红形态）
+      const stop = await postJson(port, `/api/sessions/${bootId}/interrupt`, JSON.stringify({}));
+      expect(stop).toEqual({ status: 200, body: { interrupted: true } });
+
+      // decided 落 cancel（打断非拒绝——诚实落账词汇）+ turn 收场（run 不再吊死）
+      await waitFor(() => countFrames('approval/decided') >= 1);
+      const decided = session.events.find((e) => e.type === 'approval/decided')!;
+      expect((decided.data as { decision: string }).decision).toBe('cancel');
+      await waitFor(() => countFrames('turn/end') >= 1);
+      expect(runtime.drivers.entries.get(bootId)?.driver.isRunning).toBe(false);
+
+      // 他端迟答 → superseded（登记簿 abort 收场已标决——不误收已撤销审批）
+      const late = await postJson(port, `/api/approvals/${askedId}/decide`, JSON.stringify({ decision: 'approve' }));
+      expect(late).toEqual({ status: 200, body: { accepted: false, reason: 'superseded' } });
+      // decided 单写不二写（迟答不落账——decide 端点只 resolve 绝不写 durable）
+      expect(session.events.filter((e) => e.type === 'approval/decided')).toHaveLength(1);
     } finally {
       sse.close();
       rmSync(workspace, { recursive: true, force: true });

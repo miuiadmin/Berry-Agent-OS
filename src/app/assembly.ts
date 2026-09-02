@@ -58,6 +58,7 @@ import {
   installSafetyGate,
 } from '../safety/index.js';
 import type {
+  ApprovalDecisionValue,
   ApprovalPolicyMode,
   ApprovalService,
   ApprovalRequest,
@@ -1465,26 +1466,33 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * 与入口披露（tui-main notify / run-main stderr）两消费点读它；daemon 形态
    * 注入 daemonAuth 故本 holder 恒 undefined（不自足不双披） */
   let ephemeralAuthFace: WebuiEphemeralAuthFace | undefined;
-  /** ApprovalRequest → claim 载荷适配（enriched 三字段词面拷贝——chat/根 answerer 共用） */
-  const webClaimOf = (req: ApprovalRequest): Promise<'approve' | 'reject' | 'always'> | undefined =>
+  /** ApprovalRequest → claim 载荷适配（enriched 三字段词面拷贝——chat/根 answerer 共用；signal = 撤销面透传（#2 修死），abort 时登记簿以 'cancel' 结算 web 腿） */
+  const webClaimOf = (
+    req: ApprovalRequest,
+    signal?: AbortSignal,
+  ): Promise<'approve' | 'reject' | 'always' | 'cancel'> | undefined =>
     req.approvalId === undefined
       ? undefined // 无 id 载荷（防御位——ask 恒织入 randomUUID）
-      : approvalFace?.claim(req.approvalId, {
-          summary: req.summary,
-          ...(req.reason === undefined ? {} : { reason: req.reason }),
-          ...(req.suggestedEntry === undefined
-            ? {}
-            : { suggestedEntry: { tool: req.suggestedEntry.tool, pattern: req.suggestedEntry.pattern } }),
-          ...(req.ownership === undefined
-            ? {}
-            : {
-                ownership: {
-                  sessionId: req.ownership.sessionId,
-                  ...(req.ownership.appId === undefined ? {} : { appId: req.ownership.appId }),
-                },
-              }),
-          ...(req.priority === undefined ? {} : { priority: req.priority }),
-        });
+      : approvalFace?.claim(
+          req.approvalId,
+          {
+            summary: req.summary,
+            ...(req.reason === undefined ? {} : { reason: req.reason }),
+            ...(req.suggestedEntry === undefined
+              ? {}
+              : { suggestedEntry: { tool: req.suggestedEntry.tool, pattern: req.suggestedEntry.pattern } }),
+            ...(req.ownership === undefined
+              ? {}
+              : {
+                  ownership: {
+                    sessionId: req.ownership.sessionId,
+                    ...(req.ownership.appId === undefined ? {} : { appId: req.ownership.appId }),
+                  },
+                }),
+            ...(req.priority === undefined ? {} : { priority: req.priority }),
+          },
+          signal,
+        );
   /* 应用组件缺场表（组装批默认应用键——声明提前 + 合成后赋值）：appGaps 是
    * resolveApps 闭包的活读源（per-open 活取），必须在 chatBundle 构造前声明、
    * 在组合树合成后（装载 ⑨ 之前）赋真值——boot 首驱动 open 发生于 chat 件
@@ -2717,16 +2725,18 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * 死码（「无消费者的匹配器不预造」判据，与 gate 层判定收窄 fs 族同源裁决）。 */
   if (opts.interactive) {
     ctx.on(APPROVAL_ANSWER_EVENT, async (req: ApprovalRequest, _next: () => unknown) => {
-      // 刀三 claim 竞速注入（与驱动 answerer 同款）：web 腿在场时两腿竞速——
-      // 先胜者即裁决；缺席（webui 未开面/条目已决）= 纯 TUI 腿原语义。
-      // 刀 A 竞速收束即撤销败腿：race 收束 finally abort TUI 腿（TUI 腿先胜
-      // 时 abort 落在已结算提问 = no-op）；根路无三态分支，confirm 腿直透
-      const webLeg = webClaimOf(req);
       // 刀 A：per-request controller——撤销信号经 ui.confirm opts 透传
       const controller = new AbortController();
       // interrupt 小刀（冷读 F1）：admin 生命周期闸路（写类七工具）的 ask 也
       // 走本根 answerer——req.signal 桥接由此成为必需（非空转）；监听随结算摘除
       const detachRunSignal = bridgeApprovalSignal(req, controller);
+      // 刀三 claim 竞速注入（与驱动 answerer 同款）：web 腿在场时两腿竞速——
+      // 先胜者即裁决；缺席（webui 未开面/条目已决）= 纯 TUI 腿原语义。
+      // 刀 A 竞速收束即撤销败腿：race 收束 finally abort TUI 腿（TUI 腿先胜
+      // 时 abort 落在已结算提问 = no-op）；根路无三态分支，confirm 腿直透。
+      // controller 先于 webLeg（#2 修死）：signal 透传同一撤销面——run abort
+      // 时 web 腿经登记簿以 'cancel' 结算（与 TUI 腿同款单源，不再吊死 run）
+      const webLeg = webClaimOf(req, controller.signal);
       try {
         // 应答即短路（waterfall 语义：返回值即最终值，不调 next）
         // 保守收场（false）+ controller.signal.aborted → 'cancel'（打断非拒绝
@@ -2799,10 +2809,10 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       if (entry !== undefined && !entry.retired) return entry.session;
       return persistence === undefined ? undefined : persistence.loadSession(sessionId);
     };
-    /** 合成汇流点：append decided（loadSession 副本 append 后 flush 屏障落盘） */
+    /** 合成汇流点：append decided（loadSession 副本 append 后 flush 屏障落盘）。值域 = durable 五值全谱（回放腿实际只产 web 三值与 unavailable——claim 不传 signal，'cancel' 结构性不可达；类型随事件词汇全谱镜像） */
     const appendReplayDecided = (
       ask: { readonly approvalId: string; readonly sessionId: string },
-      decision: 'approve' | 'reject' | 'always' | 'unavailable',
+      decision: ApprovalDecisionValue,
       via: 'web' | 'timeout',
     ): void => {
       const session = sessionForReplay(ask.sessionId);

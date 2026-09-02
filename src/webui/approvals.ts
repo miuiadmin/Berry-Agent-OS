@@ -16,6 +16,13 @@
  * **未决条目不结算**——未决 claim promise 仍是竞速在途腿，resolve 任何值都
  * 会抢答污染竞速；悬置无害（行回卷后 decide/镜像均不可达，竞速由 TUI 腿
  * 收敛，promise 随竞速结算自然回收）。
+ *
+ * 撤销面（遗漏大扫 20260902-b #2 修死，第六十一批）：claim 可携带撤销信号
+ * （answerer 的 per-request controller——run abort 与竞速败腿收束汇入同一
+ * 面）。abort 时本簿以 'cancel' 结算该腿（daemon 形态 web-only 腿的唯一
+ * 打断收场路）并**同步标 decided='cancel' 镜像**——他端迟答走 decide 的
+ * superseded 回执，不误收已撤销审批；任何结算路径（decide / decided 镜像 /
+ * 行回卷 settleAll / abort 自身）摘监听——迟到 abort 恒 no-op。
  */
 
 import type { SessionEvent } from '../contracts/events.js';
@@ -37,10 +44,12 @@ interface RegistryEntry {
   ownership?: { appId?: string; sessionId: string };
   /** 出队优先级（'background' 时卡面注记） */
   priority?: string;
-  /** 已决旗（undefined = 未决；镜像标决/decide 落决——值域 durable 五值） */
+  /** 已决旗（undefined = 未决；镜像标决/decide 落决/abort 收场——值域 durable 五值） */
   decided?: string;
-  /** claim promise 的 resolve 针（claim 时挂、结算后置弃；undefined = 未 claim 或已结算） */
-  resolver?: (decision: WebuiApprovalDecision) => void;
+  /** claim promise 的 resolve 针（claim 时挂、结算后置弃；undefined = 未 claim 或已结算；值域并 'cancel'——signal 透传的宿主动作结算） */
+  resolver?: (decision: WebuiApprovalDecision | 'cancel') => void;
+  /** 撤销监听摘针（claim 带 signal 时挂；任何结算路径〔decide/decided 镜像/settleAll/abort 自身〕置弃——迟到 abort no-op） */
+  detachAbort?: () => void;
 }
 
 /** 在册条目软帽（超帽清最旧**已决**条目——未决条目绝不逐出） */
@@ -61,6 +70,22 @@ export function createPendingApprovals(): PendingApprovals {
       if (entries.size <= MAX_ENTRIES) break;
       if (entry.decided !== undefined) entries.delete(id);
     }
+  }
+
+  /**
+   * 结算单点（decide / decided 镜像 / abort 收场三路共用）：标已决 + resolve
+   * 悬置腿（值由调用方语境给——decide 是真消费、镜像/abort 是丢弃性防悬）+
+   * 摘撤销监听（任何结算路径都使迟到 abort no-op——摘监听不变式）。幂等守卫
+   * 在调用方（decided !== undefined 先判）。
+   */
+  function settleEntry(entry: RegistryEntry, decided: string, value: WebuiApprovalDecision | 'cancel'): void {
+    entry.decided = decided;
+    const resolve = entry.resolver;
+    entry.resolver = undefined;
+    const detach = entry.detachAbort;
+    entry.detachAbort = undefined;
+    detach?.();
+    resolve?.(value);
   }
 
   return {
@@ -94,18 +119,20 @@ export function createPendingApprovals(): PendingApprovals {
           // 标已决保留：值域是 durable 五值（含 cancel/unavailable——web 闭集外，
           // 仅作条目状态非应答值）。此刻竞速必已收敛（decided 镜像在 ask 返回前
           // 同步发射）——顺手 resolve 是丢弃性结算，值无人消费仅防悬 await
-          entry.decided = typeof data.decision === 'string' ? data.decision : '';
-          const resolve = entry.resolver;
-          entry.resolver = undefined;
-          resolve?.(entry.decided === 'always' ? 'always' : entry.decided === 'approve' ? 'approve' : 'reject');
+          const decided = typeof data.decision === 'string' ? data.decision : '';
+          settleEntry(entry, decided, decided === 'always' ? 'always' : decided === 'approve' ? 'approve' : 'reject');
         }
         evictOverflow();
         return;
       }
     },
 
-    /** claim（answerer 时点调用）：富化 + 缺槽自注册；已决/已 claim/未决双 claim = undefined（无 web 腿） */
-    claim(approvalId: string, detail: WebuiApprovalDetail): Promise<WebuiApprovalDecision> | undefined {
+    /** claim（answerer 时点调用）：富化 + 缺槽自注册 + 撤销面挂接；已决/已 claim/未决双 claim = undefined（无 web 腿） */
+    claim(
+      approvalId: string,
+      detail: WebuiApprovalDetail,
+      signal?: AbortSignal,
+    ): Promise<WebuiApprovalDecision | 'cancel'> | undefined {
       const existing = entries.get(approvalId);
       if (existing === undefined) {
         // 缺槽自注册（行重载后镜像已过——enriched 载荷自带全量归属信息）
@@ -129,12 +156,25 @@ export function createPendingApprovals(): PendingApprovals {
         if (existing.priority === undefined && detail.priority !== undefined) existing.priority = detail.priority;
         if (existing.reason === undefined && detail.reason !== undefined) existing.reason = detail.reason;
       }
+      const entry = entries.get(approvalId)!;
+      // 撤销面挂接（遗漏大扫 20260902-b #2）：signal 已 abort = 竞速败腿收束
+      // finally abort 先于本 claim 到达（此刻竞速已决）或 run 早撤——同步结算
+      // 'cancel' 防悬；未 abort 挂监听——abort 时以 'cancel' 结算本腿并同步标
+      // decided 镜像（daemon web-only 形态的唯一打断收场路；他端迟答 superseded）
+      if (signal !== undefined) {
+        if (signal.aborted) {
+          settleEntry(entry, 'cancel', 'cancel');
+          return Promise.resolve('cancel');
+        }
+        const onAbort = () => settleEntry(entry, 'cancel', 'cancel');
+        signal.addEventListener('abort', onAbort, { once: true });
+        entry.detachAbort = () => signal.removeEventListener('abort', onAbort);
+      }
       // 悬置 promise：decide 端点 resolve 它（web 腿胜）；TUI 腿胜时 decided 镜像丢弃性结算
-      let resolve!: (decision: WebuiApprovalDecision) => void;
-      const promise = new Promise<WebuiApprovalDecision>((r) => {
+      let resolve!: (decision: WebuiApprovalDecision | 'cancel') => void;
+      const promise = new Promise<WebuiApprovalDecision | 'cancel'>((r) => {
         resolve = r;
       });
-      const entry = entries.get(approvalId)!;
       entry.resolver = resolve;
       return promise;
     },
@@ -173,19 +213,19 @@ export function createPendingApprovals(): PendingApprovals {
       const entry = entries.get(approvalId);
       if (entry === undefined) return undefined; // 已决保留使竞窗不存在——本分支只剩「槽从未存在」
       if (entry.decided !== undefined) return { accepted: false, reason: 'superseded' }; // TUI 腿先胜
-      entry.decided = decision;
-      const resolve = entry.resolver;
-      entry.resolver = undefined;
-      resolve?.(decision); // web 腿胜出——resolve 即竞速裁决值（真消费，非丢弃）
+      settleEntry(entry, decision, decision); // web 腿胜出——resolve 即竞速裁决值（真消费，非丢弃）
       evictOverflow();
       return { accepted: true };
     },
 
-    /** 行回卷卫生：**未决条目不结算**（见模块头——resolve 会抢答污染在途竞速）；已解针条目自然回收 */
+    /** 行回卷卫生：**未决条目不结算**（见模块头——resolve 会抢答污染在途竞速）；已解针条目自然回收。撤销监听同摘（迟到 abort 对已摘簿 no-op） */
     settleAll(): void {
       for (const entry of entries.values()) {
         // 只清结算针引用（decide/镜像均已不可达——防御位：迟到的 resolver 持有者不再可结算）
         entry.resolver = undefined;
+        const detach = entry.detachAbort;
+        entry.detachAbort = undefined;
+        detach?.();
       }
     },
   };
@@ -195,8 +235,12 @@ export function createPendingApprovals(): PendingApprovals {
 export interface PendingApprovals {
   /** session 族镜像入列（asked/decided 两词——幂等） */
   readonly onMirror: (payload: unknown) => void;
-  /** claim 面（经 deps.approvals.mountClaim 挂进 answerer 竞速——WebuiApprovalClaim 同形） */
-  readonly claim: (approvalId: string, detail: WebuiApprovalDetail) => Promise<WebuiApprovalDecision> | undefined;
+  /** claim 面（经 deps.approvals.mountClaim 挂进 answerer 竞速——WebuiApprovalClaim 同形；signal = 撤销面透传，abort 时 'cancel' 结算） */
+  readonly claim: (
+    approvalId: string,
+    detail: WebuiApprovalDetail,
+    signal?: AbortSignal,
+  ) => Promise<WebuiApprovalDecision | 'cancel'> | undefined;
   /** 未决条目单查（undefined = 无未决条目） */
   readonly pending: (approvalId: string) => WebuiPendingApproval | undefined;
   /** 未决清单（GET /api/approvals） */

@@ -87,7 +87,11 @@ export interface WebuiTodoItem {
 /* 刀三：审批应答面 + 工作区补全面公共类型（契约篇 §6.8 刀三落码形态细化条） */
 /* ------------------------------------------------------------------ */
 
-/** web 应答闭集（TUI 四值闭集减 cancel——cancel 无 web 产出面，spec 钉死） */
+/**
+ * web 应答闭集（TUI 四值闭集减 cancel——cancel 无 web **用户**产出面，spec 钉
+ * 死；遗漏大扫 20260902-b #2 勘正：'cancel' 仍可经 claim 腿返回——run abort 的
+ * 宿主动作结算，非用户应答，见 WebuiApprovalClaim signal 注）
+ */
 export type WebuiApprovalDecision = 'approve' | 'reject' | 'always';
 
 /**
@@ -113,11 +117,19 @@ export interface WebuiApprovalDetail {
  * registry 后经 `deps.approvals.mountClaim` 挂真身、ctx.effect 回卷摘除——
  * 未开面/行卸载 = holder 空 = answerer 纯 TUI 腿。@returns undefined = 无
  * web 腿（未决条目不存在/已决）。
+ *
+ * signal 透传（遗漏大扫 20260902-b #2 修死，第六十一批）：answerer 把
+ * per-request 撤销面（run abort 与竞速败腿收束汇入的同一 controller）传入——
+ * 登记簿为 claim 条目挂 abort 监听，abort 时以 'cancel' 结算该腿并同步标
+ * decided 镜像（他端迟答 → superseded）。返回值域相应并 'cancel'（宿主动作
+ * 结算——打断非拒绝的诚实落账，与 TUI 腿同款单源）；已 abort 的 signal 传入
+ * = 同步结算。缺省不传（boot 回放重挂⑦——悬案无活 run 可撤，超时腿维持兜底）。
  */
 export type WebuiApprovalClaim = (
   approvalId: string,
   detail: WebuiApprovalDetail,
-) => Promise<WebuiApprovalDecision> | undefined;
+  signal?: AbortSignal,
+) => Promise<WebuiApprovalDecision | 'cancel'> | undefined;
 
 /**
  * claim 桥挂载物（daemon 刀一·per-ownership 帽拓宽；刀二·armed 计数键拓

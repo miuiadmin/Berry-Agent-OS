@@ -552,8 +552,14 @@ export interface ChatAppDeps {
    * 原语之外与 web 审批卡竞速——先胜者即裁决，败腿结算丢弃。组合根注入
    * （闭包读晚绑 holder：webui 行未开面/已卸载 = 返回 undefined = 纯 TUI 腿
    * 原语义）。chat 不 import webui——结构函数键（WebuiApprovalClaim 词面）。
+   * 遗漏大扫 20260902-b #2：可选 signal 透传（run abort 与竞速败腿收束汇入
+   * 的同一撤销面）——登记簿 abort 时以 'cancel' 结算本腿（daemon web-only
+   * 形态的唯一打断收场路），返回值域相应并 'cancel'（宿主动作结算非用户应答）。
    */
-  readonly webAnswer?: (req: ApprovalRequest) => Promise<'approve' | 'reject' | 'always'> | undefined;
+  readonly webAnswer?: (
+    req: ApprovalRequest,
+    signal?: AbortSignal,
+  ) => Promise<'approve' | 'reject' | 'always' | 'cancel'> | undefined;
   /**
    * web 应答腿在场判据（daemon 刀一·M2：answerer 注册闸第二支——晚绑 holder
    * 在场即注册。闭包读组合根晚绑 approvalClaim holder（webui 行未开面/已卸载 =
@@ -1088,8 +1094,10 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
                 : undefined;
             // web 腿（刀三 claim 竞速注入）：晚绑闭包——webui 行未开面/已卸载
             // 返回 undefined = 无此腿（/reload 卸 webui 后 confirm 缺席的注册
-            // answerer 走双腿皆缺路）
-            const webLeg = webAnswer?.(req);
+            // answerer 走双腿皆缺路）。signal 透传（#2 修死）：controller 是
+            // run abort 与竞速败腿收束的同一撤销面——TUI 腿同款单源，web 腿
+            // abort 时经登记簿以 'cancel' 结算（不再吊死 run）
+            const webLeg = webAnswer?.(req, controller.signal);
             // 超时腿 Promise：胜出即记 via 'timeout'
             const timeoutLeg = armed
               ? new Promise<undefined>((resolve) => {
