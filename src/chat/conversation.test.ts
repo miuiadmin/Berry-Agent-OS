@@ -10,6 +10,9 @@ import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions } from '..
 import type { AgentTool } from '../contracts/tools.js';
 import { Session } from '../session/session.js';
 import type { LlmRetryData } from '../session/event-types.js';
+// goal 件 durable 词汇注册（模块加载即注册面）——遗漏大扫 20260902-c #1 回归锁需
+// append goal/evidence（测试豁免模块 DAG，跨模块导入合法；本导入轻量只触注册面）
+import '../goal/events.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import {
   ConversationDriver,
@@ -733,6 +736,55 @@ describe('ConversationDriver 溢出兜底（第四十五批 compact-and-retry-on
     const facts = session.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
     expect(facts.map((d) => d.phase)).toEqual(['scheduled', 'exhausted']);
     expect(facts[1]).toMatchObject({ attempt: 1, maxAttempts: 1, reason: 'overflow' });
+  });
+
+  it('倒扫白名单化（遗漏大扫 20260902-c #1）：goal/evidence 预算越限笔同步落入遮蔽区间——恢复照走不静默放弃', async () => {
+    // 报告场景镜像：active goal 剩余预算 < 一条溢出零输出消息的 input usage——
+    // goal ④ 预算监听器挂 session/event 活体总线，assistant/message 同步记账且
+    // 越限即同步 appendEvent('goal/evidence')（goal/app.ts:551），经 registry
+    // 路由回同一条目落在 assistant/message（N）与 llm/usage（N+2）之间。此处用
+    // Session emit 钩子同形复刻该同步镜像（监听器只在 delta>0 的 assistant 上落笔）
+    const goalSession = new Session({
+      sessionId: 'goal-mirror',
+      emit: (event) => {
+        if (event.type !== 'assistant/message') return;
+        const usage = (event.data as { usage?: { input?: number } }).usage;
+        if (usage === undefined || usage.input === 0) return; // delta=0 不记账（监听器同判）
+        goalSession.append('goal/evidence', { goalId: 'g-overflow', reason: 'budget', willRetry: false });
+      },
+    });
+    const calls: LlmContext[] = [];
+    const comp = compactionStub(['nothing']); // 压缩救不了 → 诚实失败（run 终值 failed）
+    const driver = new ConversationDriver({
+      sessionId: 'goal-mirror',
+      context: { messages: [], tools: [] },
+      loopConfig: {
+        streamFn: scriptedStream([lengthOverflow()], calls),
+        model: 'test/model',
+        convertToLlm: minimalConvert,
+      },
+      durable: createDurableSinks(goalSession),
+      session: goalSession,
+      isOverflowError: (m) => m.stopReason === 'length' && m.usage.output === 0,
+      resolveCompaction: comp.resolveCompaction,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    // 落账序物证先行：goal/evidence 确实插在 assistant/message 与 llm/usage 之间
+    // （否则白名单化后测试退化为普通恢复锁——遮蔽窗口内无污染事件）
+    const seqOf = (type: string) => goalSession.events.find((e) => e.type === type)!.seq;
+    expect(seqOf('goal/evidence')).toBeGreaterThan(seqOf('assistant/message'));
+    expect(seqOf('goal/evidence')).toBeLessThan(seqOf('llm/usage'));
+    // 修前红锚：倒扫在 goal/evidence 撞墙 return false——无遮蔽无恢复事实，
+    // 零产出轮冒充 completed 收场；修后：恢复全走（scheduled+exhausted + failed）
+    const facts = goalSession.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
+    expect(facts.map((d) => d.phase)).toEqual(['scheduled', 'exhausted']);
+    expect(facts[0]).toMatchObject({ attempt: 1, maxAttempts: 1, reason: 'overflow' });
+    expect(settled).toEqual(['failed']);
+    expect(comp.results).toEqual(['nothing']);
   });
 
   it('双缺省直通：无判定器/无压缩面注入——单次调用直通失败零落账（诊断装配形态）', async () => {

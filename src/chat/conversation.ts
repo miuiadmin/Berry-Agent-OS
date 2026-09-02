@@ -963,9 +963,19 @@ export class ConversationDriver {
         session.append('llm/retry', data, { surfaceOp: { op: 'replace', start, end }, sourceEventSeqs });
         return true;
       }
-      // 垫底事件继续向前扫（伴生 tool/call / turn 边界 / 计量笔账）
-      if (event.type === 'tool/call' || event.type === 'turn/end' || event.type === 'llm/usage') continue;
-      return false; // 形态异常（user 等内容事件在 assistant 之后）——保守放弃
+      // 内容事件白名单（遗漏大扫 20260902-c #1）：倒扫只在撞上真正会污染遮蔽区间的
+      // 内容事件时保守放弃——user/message（用户真实输入）/ tool/result（已完成的
+      // 工具产出），assistant/message 是锚点在前一分支即停即用。其余全部继续：
+      // 旧拒绝清单 {tool/call, turn/end, llm/usage} 漏掉应用声明层 log-only 词
+      // （goal/evidence 预算越限笔、goal/summary、compaction/*、obs/* 等）——溢出
+      // 零输出轮的 usage 恰把活跃 goal 预算推过线时，④ 预算监听器经活体总线同步
+      // 落 goal/evidence 在 assistant/message 与 llm/usage 之间，倒扫撞墙 return
+      // false，溢出恢复静默不发生（零产出轮冒充 completed）。log-only 词不进投影
+      // fold（无内容载体、纯删除语义）——落入遮蔽区间无害，continue 即可。
+      if (event.type === 'user/message' || event.type === 'tool/result') {
+        return false; // 内容事件（assistant 之后有真内容 = 形态异常）——保守放弃
+      }
+      // 其余（伴生 tool/call / turn 边界 / 计量笔账 / 应用声明层 log-only 词）继续向前扫
     }
     return false;
   }
