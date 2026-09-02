@@ -494,11 +494,17 @@ export class MemoryStore {
   /**
    * 软删（status=dismissed；by 缺省 'user'——用户终审手权最大，§8.4）。
    * 冻结条目拒删（§3 frozen 免覆写义——解冻-再忘是唯一路径）：返回 'frozen'。
+   * 终态短路（定向复扫 20260902 第七轮 M-2）：已 dismissed 行幂等短路不覆写
+   * `superseded_by`——返 'dismissed'。先前无条件 UPDATE 会把用户终审 'user'
+   * 覆写成后到的 'llm:<id>'（consolidation 消费陈旧快照时的竞速腿）——终审
+   * 来源是审计面不是可重写位。restore 复活后 forget 重新可用。
    */
-  forget(id: string, by: string = 'user', nowMs: number = Date.now()): 'ok' | 'missing' | 'frozen' {
-    const row = this.db.prepare('SELECT frozen FROM memories WHERE id = ?').get(id) as { frozen: number } | undefined;
+  forget(id: string, by: string = 'user', nowMs: number = Date.now()): 'ok' | 'missing' | 'frozen' | 'dismissed' {
+    const row = this.db.prepare('SELECT frozen, status FROM memories WHERE id = ?').get(id) as
+      { frozen: number; status: string } | undefined;
     if (!row) return 'missing';
     if (row.frozen === 1) return 'frozen';
+    if (row.status === 'dismissed') return 'dismissed';
     this.db
       .prepare(`UPDATE memories SET status = 'dismissed', superseded_by = ?, updated_at = ? WHERE id = ?`)
       .run(by, nowMs, id);

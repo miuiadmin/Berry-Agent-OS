@@ -328,6 +328,48 @@ describe('runConsolidationOnce（合并组 + 降权应用——走既有路径�
     expect(broke.calls).toHaveLength(0);
   });
 
+  it('LLM 窗口 TOCTOU（第七轮 M-2）：窗口内 keep 条被并发 forget——整组跳过不复活已删内容、终审来源不被覆写', async () => {
+    const keep = db.list(['global']).find((r) => r.summary === '用户偏好 pnpm')!;
+    const drop = db.list(['global']).find((r) => r.summary === '包管理器用 pnpm')!;
+    const decay = db.list(['global']).find((r) => r.kind === 'insight')!;
+    // 脚本模型在 complete 窗口内并发 forget keep 与 decay（模拟 60s LLM 窗口内
+    // 用户经 memory_forget//memory 命令先行软删——快照陈旧化）
+    const advice = JSON.stringify({
+      merges: [{ keepId: keep.id, dropIds: [drop.id], reason: 'both entries prefer pnpm as the package manager' }],
+      decays: [{ id: decay.id, factor: 0.5 }],
+    });
+    const llm: ReviewLlmFace = {
+      async complete() {
+        db.forget(keep.id, 'user');
+        db.forget(decay.id, 'user');
+        return { message: { content: advice } };
+      },
+      canAfford: () => true,
+    };
+    const report = await runConsolidationOnce(
+      { store: db, llm, logger: createLogger({ module: 't' }) },
+      { now: () => NOW },
+    );
+    // 修前：keep 条被 guardedAddMemory 重插复活（keep.status 回 active 或证据 +1）、
+    // decay 仍被降权——消费陈旧快照三害齐发；修后：合并组原子跳过 + decay 跳过
+    expect(report).toMatchObject({ candidates: 3, mergedGroups: 0, decayed: 0 });
+    // keep 条维持用户终审：dismissed + superseded_by='user' 不被 'llm:' 覆写
+    const keepAfter = db.get(keep.id)!;
+    expect(keepAfter.status).toBe('dismissed');
+    expect(keepAfter.supersededBy).toBe('user');
+    // 不复活：owner 名下 active 行不含已删 keep 的原文（两条老条目里 keep 已终审）
+    const activeSummaries = db
+      .list(['global'])
+      .filter((r) => r.status === 'active')
+      .map((r) => r.summary);
+    expect(activeSummaries).not.toContain('用户偏好 pnpm');
+    // decay 条同样维持终审不降权（confidence 不动）
+    const decayAfter = db.get(decay.id)!;
+    expect(decayAfter.status).toBe('dismissed');
+    expect(decayAfter.supersededBy).toBe('user');
+    expect(decayAfter.confidence).toBeCloseTo(0.8);
+  });
+
   it('理由护栏 + 血缘继承（第十四批 A 组）：分类学理由整组驳回 drops 不执行；点名重叠组应用且 drop 溯源过继 keep', async () => {
     // 给 drop 条补独立溯源：同 summary 重写走 exact 合并——refs 追加、老化基准不动
     const drop0 = db.list(['global']).find((r) => r.summary === '包管理器用 pnpm')!;

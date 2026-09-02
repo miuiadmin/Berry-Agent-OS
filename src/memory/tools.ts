@@ -178,6 +178,14 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
           },
         );
       }
+      if (result === 'dismissed') {
+        // 终态短路（第七轮 M-2）：已软删行幂等不覆写终审来源——如实告知已退场
+        return textResult(`该条目此前已软删（终态幂等，superseded_by 不覆写）：${args.id}`, false, {
+          id: args.id,
+          forgotten: true,
+          reason: 'dismissed',
+        });
+      }
       return result === 'ok'
         ? textResult(
             promoted === undefined

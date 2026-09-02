@@ -339,6 +339,12 @@ export async function runConsolidationOnce(
     return { candidates: candidates.length, ...counts };
   }
   const byId = new Map(candidates.map((r) => [r.id, r]));
+  // 存活重验谓词（定向复扫 20260902 第七轮 M-2 修死）：候选快照与模型建议之间
+  // 隔一次 llm.complete（最长 60s 窗口），窗口内并发 forget（memory_forget 工具
+  // //memory 命令/scan 管线）会把候选置 dismissed——应用腿消费陈旧快照会：
+  // keep 条 guardedAddMemory 重插复活已删内容、drop 条 forget 覆写终审来源
+  // （'user' → 'llm:'）。消费前按现行 status 重验（非 active 即不碰）。
+  const alive = (id: string) => deps.store.get(id)?.status === 'active';
 
   for (const group of parsed.merges) {
     const keep = byId.get(group.keepId);
@@ -347,6 +353,12 @@ export async function runConsolidationOnce(
       .map((id) => byId.get(id))
       .filter((r): r is NonNullable<typeof r> => r !== undefined && r.id !== keep.id);
     if (drops.length === 0) continue;
+    // 合并组原子：组内任一条目在 LLM 窗口内被并发 forget → 整组跳过（组是被
+    // 应用或被忽略的原子——keep 复活害与 drop 覆写终审害同源，不解组）
+    if (!alive(keep.id) || drops.some((d) => !alive(d.id))) {
+      deps.logger.debug('consolidation 合并组候选在 LLM 窗口内已终审——整组跳过', { keepId: keep.id });
+      continue;
+    }
     // 理由护栏（§5 触发与护栏，第十四批 A 组）：reason 未点名具体重叠（token
     // 交集 0——分类学断言的元语言词汇不在摘要里）→ 整组驳回，drops 不单独执行
     //（组是被应用或被忽略的原子）
@@ -372,6 +384,8 @@ export async function runConsolidationOnce(
   }
   for (const decay of parsed.decays) {
     if (!byId.has(decay.id)) continue;
+    // 存活重验（M-2 同律）：LLM 窗口内被并发 forget 的条目不再降权
+    if (!alive(decay.id)) continue;
     if (deps.store.decayConfidence(decay.id, decay.factor)) counts.decayed += 1;
   }
   return { candidates: candidates.length, ...counts };

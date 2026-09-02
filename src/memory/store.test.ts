@@ -211,6 +211,23 @@ describe('forget / restore（软删与恢复）', () => {
     db.forget(out.memory.id);
     expect(db.search('pnpm', ['global'])).toHaveLength(0);
   });
+
+  it('终态短路（第七轮 M-2）：已 dismissed 行再 forget 不覆写 superseded_by——返 dismissed 幂等', () => {
+    const out = write({});
+    if (out.outcome !== 'inserted') return;
+    const id = out.memory.id;
+    expect(db.forget(id, 'user')).toBe('ok');
+    // 修前：无条件 UPDATE 把用户终审 'user' 覆写成后到的 'llm:x'（审计面被重写）
+    expect(db.forget(id, `llm:${id}`)).toBe('dismissed');
+    expect(db.get(id)?.supersededBy).toBe('user');
+    // 用户手权重 forget 同律幂等（不刷 updated_at 也不换终审来源）
+    expect(db.forget(id)).toBe('dismissed');
+    expect(db.get(id)?.supersededBy).toBe('user');
+    // restore 后 forget 重新可用（终态短路不绑架复活路径）
+    expect(db.restore(id)).toEqual({ restored: true });
+    expect(db.forget(id, `llm:${id}`)).toBe('ok');
+    expect(db.get(id)?.supersededBy).toBe(`llm:${id}`);
+  });
 });
 
 describe('search（FTS5 投影 + 转义）', () => {
