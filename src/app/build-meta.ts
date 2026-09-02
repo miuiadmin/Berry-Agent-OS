@@ -8,7 +8,8 @@
  * （tools/write-build-meta.mjs），运行入口 boot 期对照——
  *
  * 告警三前置（全过才 warn，任一失败静默跳过——dev 便利件永不 brick 启动）：
- * ① 入口自身跑在 /dist/ 下（src 直跑/tsx 开发形态无此概念）；
+ * ① 入口自身跑在 /dist/ 下（src 直跑/tsx 开发形态无此概念；探测前归一分隔符
+ *    ——win32 反斜杠原生形统一转正斜杠，B-2）；
  * ② 包根目录直接含 .git（node_modules 装机形态零 git 探针成本——existsSync
  *    先行，装进他人仓的形态不误报）；
  * ③ `git rev-parse --show-toplevel` === 包根（防「包在他人仓的子目录」形态
@@ -88,10 +89,16 @@ export function warnIfStaleDist(
   } catch {
     return; // 非 file: URL——非常规形态，无从判定
   }
-  const marker = filePath.indexOf('/dist/app/');
+  // 分隔符归一（全面复盘 20260902 B-2）：win32 fileURLToPath 得反斜杠原生路径，
+  // 正斜杠字面量探针恒 < 0 → 告警链在 Windows 整条静默。统一转正斜杠后探针与
+  // 切片同串；pkgRoot/distRoot 以正斜杠形继续传 fs 与 git（两消费面均收正斜杠
+  // 形；前置③ git 返回在 win32 亦正斜杠——归一后同形可比）。POSIX 真实路径含
+  // 反斜杠是病理性形态，replaceAll 不构成误伤面。
+  const normPath = filePath.replaceAll('\\', '/');
+  const marker = normPath.indexOf('/dist/app/');
   if (marker < 0) return;
-  const pkgRoot = filePath.slice(0, marker);
-  const distRoot = `${filePath.slice(0, marker)}/dist`;
+  const pkgRoot = normPath.slice(0, marker);
+  const distRoot = `${pkgRoot}/dist`;
 
   // 前置②：包根直接含 .git（装机形态零 spawn 成本先行筛除）
   if (!existsSync(join(pkgRoot, '.git'))) return;
