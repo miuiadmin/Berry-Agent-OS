@@ -127,3 +127,35 @@ describe('onLiveEvent 活体镜像（三路接线）', () => {
     await p.close();
   });
 });
+
+// 登记元数据账有界（遗漏大扫 20260902-c #10——会话篇 §6 per-session 键域有界性统策）：
+// sessionMeta 属「可无损重种」类——LRU 帽 256（缺席后果 = 该会话后续首队登记无
+// cwd/profile；sessions 行 ON CONFLICT 静默首登为准）。
+describe('登记元数据账有界（遗漏大扫 20260902-c #10）', () => {
+  it('300 会话登记后键数 ≤ 256——修复前必红（裸 Map 无界累积）', async () => {
+    const p = Persistence.open({ path: join(dir, 'meta-cap.db') });
+    for (let i = 0; i < 300; i++) {
+      p.createSession({ cwd: `/w/${i}` }); // 登记即入账（事件未发——冷会话形态）
+    }
+    const size = (p as unknown as { sessionMeta: { size: number } }).sessionMeta.size;
+    expect(size).toBeLessThanOrEqual(256); // 修复前 = 300
+    await p.close();
+  });
+
+  it('活跃会话 touch 续驻：sink 读（每事件）把老键推出逐出区——安全锁', async () => {
+    const p = Persistence.open({ path: join(dir, 'meta-touch.db') });
+    const veteran = p.createSession({ cwd: '/w/veteran' });
+    for (let i = 0; i < 255; i++) {
+      p.createSession({ cwd: `/w/cold-${i}` }); // 256 键恰在帽内——veteran 最旧但在场
+    }
+    // 老会话发事件：sink 闭包 get 即 touch → 移到最新端（须发生在被逐之前）
+    veteran.append('turn/start', {});
+    for (let i = 0; i < 40; i++) {
+      p.createSession({ cwd: `/w/late-${i}` }); // 超帽逐 40 个最旧闲置（cold-0..39）
+    }
+    const meta = (p as unknown as { sessionMeta: Map<string, { cwd?: string }> }).sessionMeta;
+    expect(meta.get(veteran.header.sessionId)?.cwd).toBe('/w/veteran'); // touch 过 = 在场
+    await p.flush();
+    await p.close();
+  });
+});

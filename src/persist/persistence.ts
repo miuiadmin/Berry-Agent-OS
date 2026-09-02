@@ -18,6 +18,7 @@ import { openStore } from './store.js';
 import type { Store, StoreOptions } from './store.js';
 import { WriteBehind } from './write-behind.js';
 import type { WriteBehindOptions } from './write-behind.js';
+import { LruBoundedMap, SESSION_KEY_CAP } from './bounded-map.js';
 
 /** 门面参数（Store 与 WriteBehind 参数合并 + 活体镜像回调） */
 export type PersistenceOptions = StoreOptions &
@@ -37,8 +38,16 @@ export class Persistence {
   readonly writeBehind: WriteBehind;
   /** 本进程生命周期 UUID（revision 复位边界；跨进程变更检测的一半） */
   readonly incarnation: string;
-  /** createSession 附带的会话元数据（cwd/profile/app/importer——sessions 表登记素材） */
-  private readonly sessionMeta = new Map<string, { cwd?: string; profile?: string; app?: string; importer?: string }>();
+  /**
+   * createSession 附带的会话元数据（cwd/profile/app/importer——sessions 表登记素材）。
+   * LRU 帽 256（遗漏大扫 20260902-c #10——会话篇 §6 键域有界性统策）：可无损重种
+   * 账，缺席后果 = 该会话后续首队登记无 cwd/profile（sessions 行 ON CONFLICT 静默
+   * 首登为准）；活跃会话每事件 sink 读恒 touch 恒驻，fork 继承读同 touch。
+   */
+  private readonly sessionMeta = new LruBoundedMap<
+    string,
+    { cwd?: string; profile?: string; app?: string; importer?: string }
+  >(SESSION_KEY_CAP);
   /** 原始打开参数（活体镜像回调在其中） */
   private readonly options: PersistenceOptions;
 

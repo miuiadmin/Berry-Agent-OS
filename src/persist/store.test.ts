@@ -521,3 +521,23 @@ describe('文件权限三件（0600 追打——会话与存储篇 §6，2026-08
     }
   });
 });
+
+// 自有提交边界账有界（遗漏大扫 20260902-c #10——会话篇 §6 per-session 键域有界性统策）：
+// ownBoundaries 属「可无损重种」类——LRU 帽 256。缺席后果 = 失败裁剪退化保守全批
+// 保留（C-1 既有姿态）：cursor 连续性护栏才是正确性权威，边界账是裁剪优化。
+describe('自有提交边界账有界（遗漏大扫 20260902-c #10）', () => {
+  it('300 会话各提交一批后键数 ≤ 256；被逐键读 undefined（保守退化）——修复前必红', () => {
+    const store = openStore({ path: nextPath() });
+    try {
+      for (let i = 0; i < 300; i++) {
+        store.appendCore(reg(`cap-${i}`), [ev(0)], 'inc-test');
+      }
+      const size = (store as unknown as { ownBoundaries: { size: number } }).ownBoundaries.size;
+      expect(size).toBeLessThanOrEqual(256); // 修复前 = 300
+      expect(store.ownCommittedSeq('cap-0')).toBeUndefined(); // 最旧已逐——修前 = 0
+      expect(store.ownCommittedSeq('cap-299')).toBe(0); // 最新在场（片提交成功即续驻）
+    } finally {
+      store.close();
+    }
+  });
+});

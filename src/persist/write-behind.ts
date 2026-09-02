@@ -161,10 +161,19 @@ export class WriteBehind {
     const prev = this.chains.get(sessionId) ?? Promise.resolve();
     const next = prev.then(() => this.writeBatch(sessionId, queue));
     // 串行链吞错续命：失败不断链，显式 flush 的重试批仍排在链上正确位置之后
-    this.chains.set(
-      sessionId,
-      next.catch(() => undefined),
-    );
+    const tail = next.catch(() => undefined);
+    this.chains.set(sessionId, tail);
+    // 尾链结算清理（遗漏大扫 20260902-c #10——会话篇 §6 键域有界性统策）：
+    // 链尾结算且仍为尾链（无后继批链上）、且 pending 无残余（失败重试批回队时
+    // writeBatch 仍读 registrations——回队发生在 writeBatch catch 块内，微任务序
+    // 先于本清理）→ 两键皆死重同删；再入队由 enqueue 首队路径重建。删的是结算
+    // 后的死重不是链——串行化语义零变。
+    void tail.then(() => {
+      if (this.chains.get(sessionId) === tail && !this.pending.has(sessionId)) {
+        this.chains.delete(sessionId);
+        this.registrations.delete(sessionId);
+      }
+    });
     return next;
   }
 

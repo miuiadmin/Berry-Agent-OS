@@ -20,6 +20,7 @@ import type { UserMessage } from '../contracts/llm.js';
 import type { PromptsService } from '../contracts/app.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { DatabaseConnection } from '../persist/index.js';
+import { LruBoundedMap, SESSION_KEY_CAP } from '../persist/index.js';
 import { MemoryStore, projectOwnerKey } from './store.js';
 import type { MemoryKind } from './store.js';
 import { canonicalWorkspaceRoot } from '../context/index.js';
@@ -226,8 +227,10 @@ async function applyMemoryApp(ctx: AppContext, config: MemoryConfig | undefined,
     mirror: MemoryDiffEntry[] | undefined;
   }
   /** 会话差分纪元表：sessionId → 纪元（per-session 闭包单值退役——多会话差分
-   * 各归各；退役会话无新请求即无新读写，滞留条目无害） */
-  const epochs = new Map<string, SessionEpoch>();
+   * 各归各；退役会话无新请求即无新读写，滞留条目无害但须有界——LRU 帽 256
+   * 〔遗漏大扫 20260902-c #9，会话篇 §6 键域有界性统策〕：被逐纪元下一请求
+   * 懒初始化重派生，本件语义零变） */
+  const epochs = new LruBoundedMap<string, SessionEpoch>(SESSION_KEY_CAP);
   const prompts = ctx.get<PromptsService>('prompts');
   ctx.effect(() =>
     prompts.registerSection({

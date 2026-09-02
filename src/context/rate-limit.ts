@@ -23,6 +23,9 @@ interface RateBucketState {
   last: number;
 }
 
+/** 摊销清扫节拍：每 256 次 tryCharge 全表扫一次（不逐次扫——摊销后均价 O(1)） */
+const SWEEP_EVERY = 256;
+
 /**
  * per-key 令牌桶（缺省满桶起算）：tokens 按墙上钟以 perMinute 速率回填夹
  * capacity；每次扣 1，桶空返回 false。「桶空 ≠ 拒绝一切」——等回填即可再发，
@@ -32,9 +35,20 @@ export class RateLimiter {
   private readonly buckets = new Map<string, RateBucketState>();
   /** 参数只读暴露（调用方错误文案需要两阈值——面/键/阈值三件套可分辨） */
   readonly params: RateLimitParams;
+  /**
+   * 桶闲置过期阈值（毫秒）= 回填满桶所需时长（capacity/perMinute 分钟）。
+   * 闲置超阈的桶与新建桶同为满额态——删键零损（遗漏大扫 20260902-c #11——
+   * 会话篇 §6 键域有界性统策：sessions 消费面 per-会话桶随会话开张只增不减，
+   * daemon 常驻无界累积）。零回填档（perMinute=0）为 Infinity：桶空即永空是
+   * 语义本身，删空桶 = 白送突发容量，结构性免扫。
+   */
+  private readonly staleMs: number;
+  /** tryCharge 累计计数（摊销清扫节拍器——每 SWEEP_EVERY 次触发全表扫） */
+  private charges = 0;
 
   constructor(params: RateLimitParams) {
     this.params = params;
+    this.staleMs = params.perMinute > 0 ? (params.capacity / params.perMinute) * 60_000 : Infinity;
   }
 
   /**
@@ -45,6 +59,9 @@ export class RateLimiter {
    */
   tryCharge(key: string): boolean {
     const now = Date.now();
+    // 摊销清扫：闲置 ≥ staleMs 的桶删除零损（惰性回填本会在下次扣费时补满，
+    // 删后重建 = 满桶同态）——emit 侧作用域键少而热，清扫对其无副作用
+    if (++this.charges % SWEEP_EVERY === 0) this.sweepStale(now);
     let bucket = this.buckets.get(key);
     if (bucket === undefined) {
       bucket = { tokens: this.params.capacity, last: now };
@@ -58,5 +75,12 @@ export class RateLimiter {
     if (bucket.tokens < 1) return false;
     bucket.tokens -= 1;
     return true;
+  }
+
+  /** 全表扫删闲置过期桶（摊销路径——迭代中删当前键是 Map 迭代器安全操作） */
+  private sweepStale(now: number): void {
+    for (const [key, bucket] of this.buckets) {
+      if (now - bucket.last >= this.staleMs) this.buckets.delete(key);
+    }
   }
 }

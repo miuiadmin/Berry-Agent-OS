@@ -444,3 +444,64 @@ describe('积压披露与批落打点（基建大扫 #27）', () => {
     await p.close();
   });
 });
+
+// 尾链结算清理（遗漏大扫 20260902-c #10——会话篇 §6 per-session 键域有界性统策）：
+// chains/registrations 只在「批存在或链在飞」时被读——链尾结算后的条目是死重。
+// daemon 常驻下每会话各留两键永不回收 = 无界累积；结算删（精确生命周期点，
+// 非 LRU 帽）双守卫：仍为尾链（无后继批链上）+ pending 无残余（失败重试批
+// 回队时 writeBatch 仍读登记）。
+describe('尾链结算清理（遗漏大扫 20260902-c #10）', () => {
+  /** 读私有键域尺寸（any 直读——纯结构断言面：清理只动内部账不动行为） */
+  const sizes = (wb: WriteBehind): { chains: number; registrations: number } => ({
+    chains: (wb as unknown as { chains: Map<string, unknown> }).chains.size,
+    registrations: (wb as unknown as { registrations: Map<string, unknown> }).registrations.size,
+  });
+
+  it('成功批结算后两键同删；再入队由首队路径重建——修复前必红（两 Map 永久滞留）', async () => {
+    const real = Persistence.open({ path: nextPath(), windowMs: 20 });
+    const wb = new WriteBehind(real.store, 'inc-test', { windowMs: 20 });
+    const session = new Session({ sessionId: 's-clean' });
+    wb.enqueue(session, session.append('user/message', { content: 'a' }), { cwd: '/w/clean' });
+    await wb.flush('s-clean');
+    await sleep(5); // 宏任务一拍：让链尾结算清理续体（微任务链）跑完
+    expect(sizes(wb)).toEqual({ chains: 0, registrations: 0 }); // 修前 {chains:1, registrations:1}
+
+    // 清理后再入队：enqueue 首队路径重建两键，落盘照常（登记不丢 cwd）
+    wb.enqueue(session, session.append('user/message', { content: 'b' }), { cwd: '/w/clean' });
+    await wb.flush('s-clean');
+    await sleep(5);
+    expect(sizes(wb)).toEqual({ chains: 0, registrations: 0 });
+    expect(real.store.loadEvents('s-clean')).toHaveLength(2);
+    expect(real.store.sessionRow('s-clean')?.cwd).toBe('/w/clean');
+    await wb.close();
+    await real.close();
+  });
+
+  it('失败批回队期间两键存活（pending 守卫），重试成功后才清理——安全锁', async () => {
+    const real = Persistence.open({ path: nextPath(), windowMs: 20 });
+    const store = real.store;
+    const origAppend = store.appendCore.bind(store);
+    let failedOnce = false;
+    (store as unknown as { appendCore: Store['appendCore'] }).appendCore = (r, batch, inc) => {
+      if (!failedOnce) {
+        failedOnce = true;
+        throw new Error('模拟批写失败');
+      }
+      return origAppend(r, batch, inc);
+    };
+    const wb = new WriteBehind(store, 'inc-test', { windowMs: 20, onError: vi.fn() });
+    const session = new Session({ sessionId: 's-fail-clean' });
+    wb.enqueue(session, session.append('user/message', { content: 'x' }), { cwd: '/w/f' });
+    await sleep(60); // 窗口触发 → 失败 → 残余批回 pending → 尾链吞错结算
+    await sleep(5);
+    // pending 有残余（重试批）：registrations 仍被 writeBatch 引用——清理必须跳过
+    expect(sizes(wb)).toEqual({ chains: 1, registrations: 1 });
+
+    await wb.flush(); // 故障移除后显式重试成功
+    await sleep(5);
+    expect(sizes(wb)).toEqual({ chains: 0, registrations: 0 }); // 重试批结算 → 清理收口
+    expect(store.loadEvents('s-fail-clean')).toHaveLength(1);
+    await wb.close();
+    await real.close();
+  });
+});

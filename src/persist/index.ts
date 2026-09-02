@@ -11,6 +11,8 @@ export type { StoreOptions, SessionRow, SessionRegistration, RecentSessionRow } 
 export { spentBackgroundTokensSince, localDayStartMs, openTurnDepth } from './usage-account.js';
 export { WriteBehind } from './write-behind.js';
 export type { WriteBehindOptions } from './write-behind.js';
+/** per-session 键域 LRU 帽统策件（遗漏大扫 20260902-c #9/#10/#11——会话篇 §6 有界性统策） */
+export { LruBoundedMap, SESSION_KEY_CAP } from './bounded-map.js';
 /** 原子写公共件（契约篇 §1.5.1(b)——overlay 写回等落盘面统一用，禁逐应用复刻） */
 export { writeAtomicFile, writeAtomicBuffer } from './atomic-write.js';
 export { APPLICATION_ID, SCHEMA_VERSION, CANONICAL_DDL, SESSION_APP_COLUMN_MIGRATION } from './schema.js';

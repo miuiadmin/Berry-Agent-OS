@@ -16,6 +16,7 @@ import type { EventQueryOptions, EventQueryResult, EventQueryRow, SessionEvent }
 import { deepFreeze } from '../session/snapshot.js';
 import { normalizeMigrations, type MigrationSpec } from './migrations.js';
 import { prepareWalConnection } from './app-sqlite.js';
+import { LruBoundedMap, SESSION_KEY_CAP } from './bounded-map.js';
 import {
   APPLICATION_ID,
   CANONICAL_DDL,
@@ -285,8 +286,11 @@ export class Store {
    * 库内 max(seq) 是全库事实（含外部写者行），误当本批边界即本进程事件
    * 静默蒸发 + 错误文案谎报 + 重试片错位续写他人日志（三方分叉）。
    * 生命周期：随 Store 实例（= 进程内单连接），跨进程各自记账互不可见。
+   * LRU 帽 256（遗漏大扫 20260902-c #10——会话篇 §6 键域有界性统策）：可无损
+   * 重种账，缺席后果 = 失败裁剪退化保守全批保留（既有姿态——cursor 护栏才是
+   * 正确性权威，边界账是裁剪优化）；片提交成功即 set 续驻，活跃会话恒在场。
    */
-  private readonly ownBoundaries = new Map<string, number>();
+  private readonly ownBoundaries = new LruBoundedMap<string, number>(SESSION_KEY_CAP);
 
   constructor(db: DatabaseConnection, storeId: string) {
     this.db = db;
