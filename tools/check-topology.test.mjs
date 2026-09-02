@@ -28,40 +28,41 @@ const SCRIPT = join('tools', 'check-topology.mjs');
 /** 夹具树根（beforeAll 建）——模块席清单与边表同步维护（新席落码时同步补行） */
 let fixtureRoot = '';
 
+/** 边表全席清单（两夹具共用）：席缺失本身是「无对应模块目录」违规（口径③）——
+ * 全席在场让夹具红聚焦在目标违规上（死边/死项违规是空档的自然产物，见头注） */
+const SEATS = [
+  'contracts',
+  'context',
+  'session',
+  'agent',
+  'persist',
+  'llm',
+  'tools',
+  'safety',
+  'skills',
+  'subagent',
+  'chat',
+  'memory',
+  'goal',
+  'exec',
+  'scheduler',
+  'mcp',
+  'lsp',
+  'web',
+  'bridge',
+  'compaction',
+  'checkpoint',
+  'admin',
+  'channels',
+  'webui',
+  'obs',
+  'browser',
+  'app',
+];
+
 beforeAll(() => {
   fixtureRoot = mkdtempSync(join(tmpdir(), 'berry-check-topo-fix-'));
-  // 边表全席空目录：席缺失本身是「无对应模块目录」违规（口径③）——全席在场让
-  // 夹具红聚焦在目标越边上（死边违规是空档的自然产物，见头注）
-  const modules = [
-    'contracts',
-    'context',
-    'session',
-    'agent',
-    'persist',
-    'llm',
-    'tools',
-    'safety',
-    'skills',
-    'subagent',
-    'chat',
-    'memory',
-    'goal',
-    'exec',
-    'scheduler',
-    'mcp',
-    'lsp',
-    'web',
-    'bridge',
-    'compaction',
-    'checkpoint',
-    'admin',
-    'channels',
-    'webui',
-    'obs',
-    'browser',
-    'app',
-  ];
-  for (const mod of modules) {
+  for (const mod of SEATS) {
     const dir = join(fixtureRoot, 'src', mod);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'index.ts'), '');
@@ -87,6 +88,7 @@ describe('check-topology 机器闸（复盘 20260901 T-3）', () => {
     // 汇总锚：模块计数占位（真值由器内规则 3 对照 README 机器执法，此处不重复锚死）
     expect(stdout).toMatch(/拓扑检查通过：\d+ 个模块/);
     expect(stdout).toContain('死边零');
+    expect(stdout).toContain('裸导入产码死项零'); // P1-8 汇总锚（真树产码账全对子有据）
   });
 
   it('违规夹具 exit 1：agent → session 越边 import 被 stderr 点名（CHECK_ROOT 根缝）', () => {
@@ -109,5 +111,45 @@ describe('check-topology 机器闸（复盘 20260901 T-3）', () => {
     // 锚面随 CHECK_ROOT 随移 + 计数对照真值恒为边表实数（内嵌脚本）——
     // 夹具宣称 99 ≠ 实数必被点名；锚规则被静默删除时此断言先红
     expect(run.stderr).toContain('README.md：模块计数宣称 99 ≠ 边表实数');
+  });
+
+  it('P1-8 裸导入死项断言在岗：空席夹具的产码死项被 stderr 点名（整块删除后本测必红）', () => {
+    const run = spawnSync(process.execPath, [SCRIPT], {
+      cwd: ROOT,
+      env: { ...process.env, CHECK_ROOT: fixtureRoot },
+      encoding: 'utf8',
+    });
+    expect(run.status).toBe(1);
+    // 空席夹具零产码 import → 产码账全对子皆死项；点名任一具体对子即证明断言在岗
+    //（断言块被静默删除 / 证据口径误含测试文件时此断言先红——成熟度扫描 20260901 P1-8）
+    expect(run.stderr).toContain('BARE_IMPORTS 产码死项：typebox → contracts');
+  });
+
+  it('P1-8 两账分离：测试账对子测试文件放行 + 产码文件拒收（typebox → app 形）', () => {
+    const root2 = mkdtempSync(join(tmpdir(), 'berry-check-topo-p18-'));
+    try {
+      for (const mod of SEATS) {
+        const dir = join(root2, 'src', mod);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'index.ts'), '');
+      }
+      // 组合根纪律段读此文件——缺失会 ENOENT 崩脚本（空档即可）
+      writeFileSync(join(root2, 'src', 'app', 'assembly.ts'), '');
+      // 测试文件引用 typebox（测试账对子）——合法，stderr 不得点名本文件
+      writeFileSync(join(root2, 'src', 'app', 'dogfood-fixture.test.ts'), "import { Type } from 'typebox';\n");
+      // 产码文件引用同包——产码账已无 app 键（两账分离），必点名
+      writeFileSync(join(root2, 'src', 'app', 'evil.ts'), "import { Type } from 'typebox';\n");
+      const run = spawnSync(process.execPath, [SCRIPT], {
+        cwd: ROOT,
+        env: { ...process.env, CHECK_ROOT: root2 },
+        encoding: 'utf8',
+      });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('app/evil.ts：模块 app 不允许裸导入 typebox');
+      // 反向锁：并查退化成只查产码账时，测试文件将被误点名——本行先红
+      expect(run.stderr).not.toContain('dogfood-fixture');
+    } finally {
+      rmSync(root2, { recursive: true, force: true });
+    }
   });
 });

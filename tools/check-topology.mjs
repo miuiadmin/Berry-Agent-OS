@@ -151,23 +151,34 @@ const MODULE_EDGES = {
   ],
 };
 
-/** 裸导入白名单：包名 → 允许引用它的模块（node:* 与测试专用包单独放行）
- * 2026-08-31 第四十三批死项复核（同 R6 边表收册精神；本表不进死边断言——口径②，
- * 虚拟键/测试面合法项混载，产码死项靠周期人工复核）：收册四死项——typebox→skills/
- * safety（两模块产码测试零引用）、@earendil-works/pi-tui→app、jiti→app（src/app
- * 仅注释残留）。typebox→app 保留：狗粮件 fixture（dogfood.test.ts）真引用虚拟面键 */
+/** 裸导入白名单·产码账：包名 → 允许引用它的模块（产码+测试文件同查；死项断言只认产码证据）
+ * 2026-09-02 成熟度扫描 20260901 P1-8 两账分离（复刻 R6 边表两账——测试需求给产码
+ * 白名单续命正是复盘 #38 七死边的烂出机制）：仅测试文件引用的对子移 TEST_BARE_IMPORTS
+ * 测试账；本账对子进死项断言（「包随真用入册」机器执法，替代原「产码死项靠周期
+ * 人工复核」人工口径——规范 = 内核与应用边界篇 §4.3#4 口径②）。历史收册（2026-08-31
+ * 第四十三批）：typebox→skills/safety、@earendil-works/pi-tui→app、jiti→app 四死项已删。 */
 const BARE_IMPORTS = {
   // context = 应用加载器（虚拟注入映射构造 + 行 config schema 校验 Value 面——契约篇 §1.2 落码注记③）
-  typebox: ['contracts', 'context', 'tools', 'app', 'exec'],
-  // berryagent = 加载器注入的虚拟模块名（非 npm 包；loader.test fixture 源码 + echo.ts
-  // 宿主自养金样件〔app 域测试资产，import type 编译期擦除——与第三方作者同一导入面〕的合法引用面）
-  berryagent: ['context', 'app'],
+  typebox: ['contracts', 'context', 'tools', 'exec'],
+  // berryagent = 加载器注入的虚拟模块名（非 npm 包）；产码面唯一合法引用 = echo.ts
+  // 宿主自养金样件（app 域资产，import type 编译期擦除——与第三方作者同一导入面）。
+  // loader.test fixture 的引用住测试账（下方 TEST_BARE_IMPORTS）
+  berryagent: ['app'],
   '@earendil-works/pi-ai': ['llm'],
   '@earendil-works/pi-tui': ['channels'],
   'better-sqlite3': ['persist', 'app'], // app = daemon doctor ④ 库 readonly 只读探针（daemon 两测试同款直开）
   yaml: ['app', 'skills'],
   ignore: ['skills', 'tools', 'checkpoint', 'webui'], // tools = 检索族 gitignore 遍历（2026-08-25 检索族纵切）；checkpoint = 工作区快照 DFS 遍历（2026-08-30 会话篇 §5.3——CR-10 语义同源不共享，第四消费者仍再议）；webui = @-mention 文件补全行走（2026-08-30 契约篇 §6.8 刀三）
   jiti: ['context'],
+};
+/** 裸导入白名单·测试账：包名 → 仅测试文件可引用的模块（产码引用即违规——两账分离的对价面）
+ * 测试夹具的设计性引用（loader fixture 装载面 / 狗粮件虚拟面键）住此，不再混进产码账
+ * 给死项断言制造不可修误报（原口径②「人工复核」半正是被此混载烂出的）。 */
+const TEST_BARE_IMPORTS = {
+  // 狗粮件 fixture（dogfood.test.ts）与自建回环（self-build-loop.test.ts）真引用虚拟面键
+  typebox: ['app'],
+  // loader.test fixture 源码引用虚拟模块名（装载面设计而非漂移）
+  berryagent: ['context'],
 };
 const TEST_ONLY_BARE = new Set(['vitest']);
 
@@ -216,6 +227,9 @@ const seenModules = new Set();
 // 只计产码（.test.ts 不计）：测试 import 给边续命正是复盘批 #38 七死边的烂出机制，
 // 证据口径必须与测试豁免（下文 isTest 分支）同源两账分离（契约篇 §6.3#2）。
 const usedEdges = new Set();
+// 产码裸导入记录（"bare module"）——裸导入死项断言的用例证据（P1-8，口径同 usedEdges）：
+// 测试引用住 TEST_BARE_IMPORTS 测试账，不给产码账续命
+const usedBare = new Set();
 
 for (const file of collect(srcRoot)) {
   const module = moduleOf(file);
@@ -271,11 +285,17 @@ for (const file of collect(srcRoot)) {
       continue;
     }
     const bareAllowed = BARE_IMPORTS[bare];
+    const testAllowed = TEST_BARE_IMPORTS[bare];
     // app 恒放行已废（基建大扫 #48）：组合根所需包显式入表——误引 devDependencies
     // （react/vite/tsx 等）时 typecheck 本地绿但发布物装机 require 不到，此门禁先红
-    if (!bareAllowed || !bareAllowed.includes(module)) {
+    // 两账并查（P1-8）：测试文件合法面 = 产码账 ∪ 测试账；产码文件只认产码账
+    const inProd = bareAllowed?.includes(module) ?? false;
+    const inTest = testAllowed?.includes(module) ?? false;
+    if (isTest ? !(inProd || inTest) : !inProd) {
       violations.push(`${relative(file)}：模块 ${module} 不允许裸导入 ${bare}`);
     }
+    // 产码死项证据：只计产码 import（与 usedEdges 口径同源——测试账引用不入此账）
+    if (!isTest) usedBare.add(`${bare} ${module}`);
   }
 }
 
@@ -308,9 +328,9 @@ function relative(file) {
  * 声明未用边（MODULE_EDGES 有、产码 import 零证据）= 违规——「边随真用入册」的机器执法。
  * 三口径（冷读 #1/#2/#3 钉死）：
  * ①用例证据只计产码（.test.ts 豁免，与主循环 isTest 分支同源）；
- * ②断言只及模块 DAG 边表 MODULE_EDGES——BARE_IMPORTS 裸导入白名单不参与（其内含
- *   berryagent 虚拟键等测试面合法项，死边断言管它必致不可修误报）；裸导入白名单的
- *   产码死项靠周期人工复核；
+ * ②断言只及模块 DAG 边表 MODULE_EDGES——裸导入白名单自有两账不与边表混账：
+ *   产码账死项由下方裸导入死项断言分治执法（P1-8 前的「产码死项靠周期人工复核」
+ *   人工口径已废）；
  * ③边表键 ⊆ 在场模块 ∪ 占位清单——防模块删除后残键/键名手滑被「占位零检查」豁免
  *   （死键对门禁不可见 = 死边盲区的同构复刻）。 */
 {
@@ -329,6 +349,24 @@ function relative(file) {
       if (!usedEdges.has(`${mod} ${target}`)) {
         violations.push(
           `死边：${mod} → ${target} 声明未用（产码零 import 证据）——边随真用入册，未用的边删掉（内核篇 §4.3#4 边表双向执法）`,
+        );
+      }
+    }
+  }
+}
+
+/* ---------------- 裸导入产码死项断言（内核篇 §4.3#4 口径② P1-8 增补，2026-09-02 成熟度扫描 20260901） ----------------
+ * 声明未用对子（BARE_IMPORTS 产码账有、产码 import 零证据）= 违规——「包随真用入册」。
+ * 口径与死边断言同源：证据只计产码（.test.ts 豁免）；测试引用住 TEST_BARE_IMPORTS
+ * 测试账（两账分离——测试需求给产码白名单续命正是 #38 七死边的烂出机制）。
+ * 虚拟键/字符串引用等非 import 形态的合法对子不属产码账（今日零先例——真出现时
+ * 再议显式占位机制，不预防性堆砌）。 */
+{
+  for (const [pkg, mods] of Object.entries(BARE_IMPORTS)) {
+    for (const mod of mods) {
+      if (!usedBare.has(`${pkg} ${mod}`)) {
+        violations.push(
+          `BARE_IMPORTS 产码死项：${pkg} → ${mod} 产码零引用（测试引用改入 TEST_BARE_IMPORTS 测试账；真死项收册删除——内核篇 §4.3#4 口径②）`,
         );
       }
     }
@@ -387,5 +425,5 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `拓扑检查通过：${seenModules.size} 个模块（${[...seenModules].sort().join(', ')}），边表 ${Object.keys(MODULE_EDGES).length} 行（死边零，双向执法，公开面模块计数锚对照绿）`,
+  `拓扑检查通过：${seenModules.size} 个模块（${[...seenModules].sort().join(', ')}），边表 ${Object.keys(MODULE_EDGES).length} 行（死边零，裸导入产码死项零，双向执法，公开面模块计数锚对照绿）`,
 );
