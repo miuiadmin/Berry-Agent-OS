@@ -339,3 +339,38 @@ describe('pickAttachSession：active 过滤 + cwd 优先 + recency', () => {
     expect(pickAttachSession([b, c], '/w')?.id).toBe('c');
   });
 });
+
+/* ---------------- ⑤ 慢滴流超时语义（遗漏大扫 20260902-b #6，第六十五批） ---------------- */
+
+describe('attachRequest：慢滴流应答者总 deadline（修前 socket idle 恒被滴字节重置、探针永挂）', () => {
+  it('写头后隔秒滴字节永不 end → timeoutMs 总预算到点探败 undefined（非看门狗收场）', async () => {
+    // startServer 路由形态：应答头写完即每 100ms 滴一字节——应答体永不 end
+    const { server, port } = await startServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      const drip = setInterval(() => {
+        // 守卫：客户端 abort 摧毁连接后写已死 res 逃 EPIPE（竞速窗）
+        if (res.destroyed) {
+          clearInterval(drip);
+          return;
+        }
+        res.write('x');
+      }, 100);
+      res.on('close', () => clearInterval(drip));
+      // 吸收对端 abort 后的迟到写错（EPIPE 等）——滴流服务端无错可报
+      res.on('error', () => clearInterval(drip));
+    });
+    const startedAt = Date.now();
+    try {
+      // 看门狗竞速：修前请求永挂（idle 计时器恒重置）、看门狗先到即红
+      const out = await Promise.race([
+        attachRequest({ port, token: 't', method: 'GET', path: '/api/sessions', timeoutMs: 500 }),
+        new Promise<'WATCHDOG'>((resolve) => setTimeout(() => resolve('WATCHDOG'), 2_500)),
+      ]);
+      expect(out).toBeUndefined();
+      expect(Date.now() - startedAt).toBeLessThan(2_000); // 总 deadline ~500ms 收场非看门狗
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 8_000);
+});

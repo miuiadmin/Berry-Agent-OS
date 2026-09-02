@@ -43,6 +43,7 @@ import {
 import { VERSION } from './version.js';
 import Database from 'better-sqlite3';
 import { createServer } from 'node:http';
+import { createServer as createTcpServer } from 'node:net';
 
 /** 文件级数据目录钉扎（防任何缺省路径腿渗漏到真实 ~/.berry） */
 const dataRoot = mkdtempSync(join(realpathSync(tmpdir()), 'daemon-unit-data-'));
@@ -314,6 +315,54 @@ describe('daemon 命令族：start（gate/清扫/超时）', () => {
     expect(killed()).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });
+
+  it('start 慢滴流占端者（遗漏大扫 20260902-b #6 ①）：真探针挂死不吞启动预算——gate 按剩余预算收口响亮超时（修前单次挂死探针使 30s 预算整体失效无限挂起）', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-cmd-'));
+    captureStdout();
+    const { child, killed } = fakeChild(null);
+    // 慢滴流应答器占住目标端口：写头后每 120ms 滴一字节、永不 end——
+    // 旧形 httpProbe（socket idle）对此永挂；本测 probeHttp 不注入（用真码）
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      const drip = setInterval(() => {
+        // 守卫：探针 abort 摧毁连接后写已死 res 逃 EPIPE（竞速窗）
+        if (res.destroyed) {
+          clearInterval(drip);
+          return;
+        }
+        res.write('x');
+      }, 120);
+      res.on('close', () => clearInterval(drip));
+      // 吸收对端 abort 后的迟到写错（EPIPE 等）——滴流服务端无错可报
+      res.on('error', () => clearInterval(drip));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const dripPort = (server.address() as { port: number }).port;
+    try {
+      const startedAt = Date.now();
+      // 看门狗竞速：修前 gate await 挂死探针永不返回、看门狗先到即红
+      const outcome = await Promise.race([
+        daemonCommandMain('start', dripPort, {
+          dataRoot: root,
+          spawnFn: () => child,
+          probe: { startId: () => undefined },
+          startGateBudgetMs: 1_200,
+          pollIntervalMs: 40,
+        }).then(
+          () => 'settled',
+          (err: AppError) => `rejected:${err.code}`,
+        ),
+        new Promise<'WATCHDOG'>((resolve) => setTimeout(() => resolve('WATCHDOG'), 4_000)),
+      ]);
+      expect(outcome).toBe(`rejected:${DAEMON_START_TIMEOUT}`); // 预算内响亮收场
+      expect(Date.now() - startedAt).toBeLessThan(3_500); // 非看门狗兜底（真预算收口）
+      expect(killed()).toBe(true); // 超时杀子不留守
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 12_000);
 
   it('start 子进程启动即退：响亮失败带日志路径', async () => {
     const root = mkdtempSync(join(tmpdir(), 'daemon-cmd-'));
@@ -670,6 +719,41 @@ describe('probeStatus：headers-arrive-immediate 探针（daemon.ts 实码）', 
     await new Promise<void>((resolve) => server.close(() => resolve()));
     expect(await probeStatus(`http://127.0.0.1:${port}/api/events`, {}, 500)).toBeUndefined();
   });
+
+  it('半截应答头慢滴流（TCP 级只写半行头即隔秒滴字节）→ 总 deadline 到点探败（遗漏大扫 20260902-b #6——修前 socket idle 恒被滴字节重置、response 事件永不至、探针永挂）', async () => {
+    // 纯 TCP server 绕开 node:http 服务端解析：连接一建立就写半截状态行，
+    // 之后每 120ms 滴一字节——客户端头块永不完整（\r\n\r\n 永不出现）
+    // 在册 socket 集（net.Server 无 closeAllConnections——收尾手动销毁）
+    const socks = new Set<import('node:net').Socket>();
+    const server = createTcpServer((sock) => {
+      socks.add(sock);
+      sock.on('close', () => socks.delete(sock));
+      sock.write('HTTP/1.1 200 OK\r\n');
+      const drip = setInterval(() => {
+        // 守卫：探针 abort 摧毁连接后 socket 已死——写已死 fd 逃 EPIPE（竞速窗）
+        if (sock.destroyed) {
+          clearInterval(drip);
+          return;
+        }
+        sock.write('x');
+      }, 120);
+      sock.on('close', () => clearInterval(drip));
+      // 吸收对端 abort 后的迟到写错（EPIPE 等）——滴流服务端无错可报
+      sock.on('error', () => clearInterval(drip));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const startedAt = Date.now();
+    // 看门狗竞速：修前探针永挂、看门狗先到即红（'WATCHDOG' 字面直证挂死）
+    const out = await Promise.race([
+      probeStatus(`http://127.0.0.1:${port}/api/events`, {}, 600),
+      new Promise<'WATCHDOG'>((resolve) => setTimeout(() => resolve('WATCHDOG'), 3_000)),
+    ]);
+    expect(out).toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(2_500); // 总 deadline ~600ms 收场非看门狗
+    for (const sock of socks) sock.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }, 10_000);
 });
 
 describe('httpProbe：三腿探活（daemon.ts 实码——start/stop/doctor 三处生产缺省，复盘 #33）', () => {
@@ -706,6 +790,36 @@ describe('httpProbe：三腿探活（daemon.ts 实码——start/stop/doctor 三
     await new Promise<void>((resolve) => server.close(() => resolve()));
     expect(await httpProbe(`http://127.0.0.1:${port}/api/sessions`, {}, 500)).toBeUndefined();
   });
+
+  it('慢滴流应答者（写头后隔秒滴字节、永不 end）→ 总 deadline 到点收场 undefined（遗漏大扫 20260902-b #6——修前 socket idle 恒被滴字节重置、超时永不至、探针永挂）', async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      // 每 120ms 滴一字节（< 600ms 超时）——idle 计时器恒重置；永不 end
+      const drip = setInterval(() => {
+        // 守卫：探针 abort 摧毁连接后写已死 res 逃 EPIPE（竞速窗）
+        if (res.destroyed) {
+          clearInterval(drip);
+          return;
+        }
+        res.write('x');
+      }, 120);
+      res.on('close', () => clearInterval(drip));
+      // 吸收对端 abort 后的迟到写错（EPIPE 等）——滴流服务端无错可报
+      res.on('error', () => clearInterval(drip));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const startedAt = Date.now();
+    // 看门狗竞速：修前探针永挂、看门狗先到即红（'WATCHDOG' 字面直证挂死）
+    const out = await Promise.race([
+      httpProbe(`http://127.0.0.1:${port}/api/sessions`, {}, 600),
+      new Promise<'WATCHDOG'>((resolve) => setTimeout(() => resolve('WATCHDOG'), 3_000)),
+    ]);
+    expect(out).toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(2_500); // 总 deadline ~600ms 收场非看门狗
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }, 10_000);
 });
 
 /* ------------------------------------------------------------------ */

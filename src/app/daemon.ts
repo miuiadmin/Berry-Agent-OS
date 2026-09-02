@@ -129,6 +129,12 @@ const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(do
  * ready-gate 与 status 的真握手共用：请求 **须 token 的端点**（GET
  * /api/sessions 带 Bearer）——200 才算「活」，401 = 进程在而 token 不符
  * （轮换竞窗），同样不算活证。
+ *
+ * 超时语义 = **总 deadline**（遗漏大扫 20260902-b #6，第六十五批）：旧形
+ * `RequestOptions.timeout` 是 socket 空闲计时器——慢滴流应答者每滴一字节
+ * 即重置、超时永不至（探针永挂）。改挂 `AbortSignal.timeout`：从发起计的
+ * 总预算，到点 abort → 'error'（AbortError）→ 既有 error 监听幂等吸收为
+ * 探败 undefined。
  */
 export function httpProbe(
   urlStr: string,
@@ -142,7 +148,8 @@ export function httpProbe(
       port: url.port,
       path: url.pathname + url.search,
       headers: { ...headers },
-      timeout: timeoutMs,
+      // 总 deadline（非 socket idle——见函数 JSDoc）；Node ≥22 恒在场
+      signal: AbortSignal.timeout(timeoutMs),
     };
     const req = httpGet(opts, (res) => {
       const chunks: Buffer[] = [];
@@ -150,10 +157,7 @@ export function httpProbe(
       res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }));
       res.on('error', () => resolve(undefined));
     });
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(undefined);
-    });
+    // abort 到点的错误（AbortError）与连接失败同面吸收——promise 单次收场
     req.on('error', () => resolve(undefined));
   });
 }
@@ -162,6 +166,11 @@ export function httpProbe(
  * 应答头即回探针（状态码单值）：SSE 等长流端点不会自然 end——httpProbe 会
  * 挂到超时，本探针取到状态码即断流收场（doctor ②「顺手连一次 /api/events
  * 即关」与裸 berry 检测共用）。
+ *
+ * 超时语义 = **总 deadline**（遗漏大扫 20260902-b #6，第六十五批——与
+ * httpProbe 同批同语义）：旧形 socket idle 计时器对「头都写不完就滴字节」
+ * 的应答者永不至；abort 总预算到点 → error 吸收为探败。本探针另有头内收
+ * 场（writeHead 完整到达即 resolve）——长流不依赖超时面。
  */
 export function probeStatus(
   urlStr: string,
@@ -175,7 +184,8 @@ export function probeStatus(
       port: url.port,
       path: url.pathname + url.search,
       headers: { ...headers },
-      timeout: timeoutMs,
+      // 总 deadline（非 socket idle——见函数 JSDoc）
+      signal: AbortSignal.timeout(timeoutMs),
     };
     const req = httpGet(opts, (res) => {
       const status = res.statusCode ?? 0;
@@ -183,11 +193,8 @@ export function probeStatus(
       res.destroy(); // 长流即断——本探针只取状态码
       resolve(status);
     });
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(undefined);
-    });
-    req.on('error', () => resolve(undefined)); // destroy 后的迟到 error 幂等吸收
+    // destroy 后的迟到 error 与 abort 到点错误（AbortError）同面幂等吸收
+    req.on('error', () => resolve(undefined));
   });
 }
 
@@ -313,7 +320,10 @@ export async function daemonCommandMain(
       const res = await probeHttp(
         `http://127.0.0.1:${port}/api/sessions`,
         { authorization: `Bearer ${token}` },
-        HANDSHAKE_TIMEOUT_MS,
+        // 剩余预算传导（遗漏大扫 20260902-b #6）：探针自身已是总 deadline，
+        // 再把 start 启动预算的剩余量钳进来——单次探针至多吃掉剩余预算，
+        // 不越 30s 总预算（旧形一次挂死探针使预算整体失效无限挂起）
+        Math.min(HANDSHAKE_TIMEOUT_MS, Math.max(deadline - Date.now(), 1)),
       );
       if (res !== undefined && res.status === 200) {
         // 应答者身份核验（遗漏大扫 20260901 O-5）：200 只证「端口上有活

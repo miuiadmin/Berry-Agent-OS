@@ -71,6 +71,11 @@ export interface AttachHttpResponse {
  * 单次 attach 请求（node:http 零依赖形态）。GET/POST 同道：method + 可选
  * JSON body（Content-Type: application/json）；应答体按 JSON 直解（非 JSON
  * 应答保留原文于 json=undefined——调用方按 status 分诊）。
+ *
+ * 超时语义 = **总 deadline**（遗漏大扫 20260902-b #6，第六十五批——与
+ * daemon.ts 探针族同批同语义）：旧形 `RequestOptions.timeout` 是 socket
+ * 空闲计时器，慢滴流应答者使超时永不至；改挂 `AbortSignal.timeout` 总
+ * 预算，abort 错误幂等吸收为 undefined。
  */
 export function attachRequest(opts: {
   readonly port: number;
@@ -93,7 +98,8 @@ export function attachRequest(opts: {
           ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload).toString() }
           : {}),
       },
-      timeout: opts.timeoutMs ?? 10_000,
+      // 总 deadline（非 socket idle——见函数 JSDoc）
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
     };
     const req = httpRequest(options, (res) => {
       const chunks: Buffer[] = [];
@@ -110,19 +116,19 @@ export function attachRequest(opts: {
       });
       res.on('error', () => resolve(undefined));
     });
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(undefined);
-    });
+    // abort 到点错误（AbortError）与连接失败同面幂等吸收
     req.on('error', () => resolve(undefined));
     req.end(payload);
   });
 }
 
-/** GET /api/health（公开探活——无 token；degraded 在场 = cordon 横幅数据源） */
+/** GET /api/health（公开探活——无 token；degraded 在场 = cordon 横幅数据源）
+ *
+ * 超时语义 = 总 deadline（遗漏大扫 20260902-b #6，第六十五批——attachRequest
+ * 同批同语义；窗 3s 硬编码是探活档非握手档） */
 export function fetchDaemonHealth(port: number): Promise<{ degraded?: string; version?: string } | undefined> {
   return new Promise((resolve) => {
-    const req = httpGet({ host: '127.0.0.1', port, path: '/api/health', timeout: 3_000 }, (res) => {
+    const req = httpGet({ host: '127.0.0.1', port, path: '/api/health', signal: AbortSignal.timeout(3_000) }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => {
@@ -134,10 +140,7 @@ export function fetchDaemonHealth(port: number): Promise<{ degraded?: string; ve
       });
       res.on('error', () => resolve(undefined));
     });
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(undefined);
-    });
+    // abort 到点错误（AbortError）与连接失败同面幂等吸收
     req.on('error', () => resolve(undefined));
   });
 }
