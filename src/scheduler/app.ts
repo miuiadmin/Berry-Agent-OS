@@ -407,6 +407,18 @@ function handleRun(rest: string, opts: TickCommandOpts): void {
     ui.notify(`任务不存在：${name}（/tick list 查看）`);
     return;
   }
+  // goal 挂钟行拒执（遗漏大扫 20260902-c #12——内核边界篇席 13 K2-c 例外，
+  // 规范先行）：手动 spawn 只带行内静态 prompt，绕过归因（goalId/wakeId/
+  // wakePath durable 落账）/唤醒帽/工具收窄/last_session_id 回写全账——开
+  // 无归因孤儿会话。挂钟投递的执法面是 OS 到点路（run --tick）专属；手动
+  // 推进有正路。拒在 gate 与抢占之前：不烧抢占、不占闸
+  if (job.owner === GOAL_JOB_OWNER) {
+    ui.notify(
+      `任务 ${name} 是 goal 挂钟行——由 OS 钟到点投递（归因/唤醒帽/工具收窄` +
+        `执法面是 run --tick 专属），不走手动触发。手动推进：/goal resume 或在目标会话直接说话。`,
+    );
+    return;
+  }
   // gate：统一闸门四判据（busy 配对投影 / recent_user_msg / canAfford / 自激预算）
   // ——定时/事件/手动三触发同一纯函数（席 13④）；手动路 wakeCount 不适用传 null
   const decision = discoveryGates({

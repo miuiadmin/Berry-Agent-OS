@@ -17,7 +17,7 @@ import type { AssistantMessage } from '../contracts/llm.js';
 import type { UiBackend } from '../channels/types.js';
 import type { AppContext } from '../contracts/app.js';
 import { JobsStore } from '../scheduler/store.js';
-import { createSchedulerApp } from '../scheduler/app.js';
+import { createSchedulerApp, goalJobName, GOAL_JOB_OWNER } from '../scheduler/app.js';
 import { openStore } from '../persist/index.js';
 import { collectBuiltinMigrations } from './builtins.js';
 import { createRuntime } from './assembly.js';
@@ -278,6 +278,36 @@ describe('scheduler 官方件全栈：触发链（gate → 抢占 → runner）'
     runtime.ui.attach(backend);
     expect(await runtime.channels.commands.dispatch('/tick run ghost')).toBe('ok');
     expect(notifies.at(-1)).toContain('任务不存在：ghost');
+  });
+
+  it('【回归锁 20260902-c #12】goal 挂钟行 /tick run 拒执——归因/唤醒帽/工具收窄执法面 OS 路专属，手动 spawn 绕全账', async () => {
+    const runner = fakeRunner();
+    const runtime = await assemble({ tickRunner: runner.runJob });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    // goal 挂钟行（真 JobsStore.putOwned——与 goal 件 /goal wake register 同路落库）
+    new JobsStore(runtime.persistence!.store.connection).putOwned({
+      name: goalJobName('g1'),
+      prompt: '续跑快照',
+      schedule: 'daily@08:30',
+      sessionId: 's-target',
+      owner: GOAL_JOB_OWNER,
+      ownerKey: 'g1',
+      now: Date.now(),
+    });
+
+    expect(await runtime.channels.commands.dispatch('/tick run goal-g1')).toBe('ok');
+    // 拒执回执 + 正路指引（修前：携静态 prompt 触发 spawn——「任务 goal-g1 触发…」）
+    expect(notifies.at(-1)).toContain('挂钟行');
+    expect(notifies.at(-1)).toContain('/goal resume');
+    // spawn 未发生：runner 零调用（修前：prompts = ['续跑快照']——无归因孤儿会话起跑）
+    expect(runner.prompts).toEqual([]);
+    // 不烧抢占：last_run_at 未推进（修前：reserveRun('manual') 已记账）
+    const row = runtime
+      .persistence!.store.connection.prepare(`SELECT last_run_at FROM jobs WHERE name = 'goal-g1'`)
+      .get() as { last_run_at: number | null };
+    expect(row.last_run_at).toBeNull();
   });
 
   it('抢占推进落库：触发后 last_run_at 从 NULL 前进（jobs 表真库）', async () => {

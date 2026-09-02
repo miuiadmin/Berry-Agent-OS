@@ -66,8 +66,8 @@ exit 0
   return { bin, stateFile };
 }
 
-/** 注册器构造帮手（每用例独立目录树：dataDir + LaunchAgents） */
-function makeSetup(platform: NodeJS.Platform) {
+/** 注册器构造帮手（每用例独立目录树：dataDir + LaunchAgents；env 可冻结注入——#13 快照面） */
+function makeSetup(platform: NodeJS.Platform, env?: NodeJS.ProcessEnv) {
   const root = makeTempDir('tick-reg-');
   const dataDir = join(root, 'data');
   const launchAgentsDir = join(root, 'LaunchAgents');
@@ -82,6 +82,7 @@ function makeSetup(platform: NodeJS.Platform) {
     baseArgv: ['/usr/bin/node', '/opt/dist/main.js'],
     launchctlBin: launchctl.bin,
     crontabBin: crontab.bin,
+    ...(env !== undefined ? { env } : {}),
   };
   return {
     registrar: createTickOsRegistrar(opts),
@@ -220,6 +221,33 @@ describe('OS 注册器 darwin：launchd plist 面', () => {
     }
   });
 
+  it('【回归锁 20260902-c #13】plist 注入面：override 类注册时快照有值才注 + 凭证族维持零注入', async () => {
+    const setup = makeSetup('darwin', {
+      APP_MODEL: 'provider/m1',
+      APP_BASH_PATH: '/custom/bin/bash',
+      // 凭证族在场也必须被拒之门外（与 override 类分列两账）
+      ANTHROPIC_API_KEY: 'sk-secret-should-not-appear',
+    });
+    const result = await setup.registrar.register(makeJob('envsnap', 'daily@08:30'));
+    expect(result.ok).toBe(true);
+    const content = readFileSync(join(setup.launchAgentsDir, 'tick.envsnap.plist'), 'utf8');
+    // 定位双变量恒注入
+    expect(content).toContain('<key>APP_DATA_DIR</key>');
+    expect(content).toContain(`<string>${setup.dataDir}</string>`);
+    // override 类有值才注：两值注入（含值本体）、无值的 APP_LOG_LEVEL 不造空键
+    expect(content).toContain('<key>APP_MODEL</key>');
+    expect(content).toContain('<string>provider/m1</string>');
+    expect(content).toContain('<key>APP_BASH_PATH</key>');
+    expect(content).toContain('<string>/custom/bin/bash</string>');
+    expect(content).not.toContain('<key>APP_LOG_LEVEL</key>');
+    // 凭证族维持零注入（不复制进系统注册面——明文二次落盘是新泄漏面）
+    expect(content).not.toContain('ANTHROPIC_API_KEY');
+    expect(content).not.toContain('sk-secret-should-not-appear');
+    // 回执披露快照语义（时窗差指引）
+    expect(result.message).toContain('注册时快照');
+    expect(result.message).toContain('重新 /tick enable');
+  });
+
   it('every 任务 → StartInterval 秒数', async () => {
     const setup = makeSetup('darwin');
     const job = makeJob('poll', 'every@2h');
@@ -299,6 +327,28 @@ describe('OS 注册器 linux：crontab 标记行面', () => {
     expect(state).toContain('morning');
     expect(state.trimEnd().endsWith('# tick:morning')).toBe(true);
     expect(await setup.registrar.isRegistered('morning')).toBe(true);
+  });
+
+  it('【回归锁 20260902-c #13】cron 行 env 前缀注入：定位双变量恒注 + override 快照（有值才注）+ 凭证族零注入', async () => {
+    const setup = makeSetup('linux', {
+      APP_MODEL: 'provider/m1',
+      ANTHROPIC_API_KEY: 'sk-secret-should-not-appear',
+    });
+    const result = await setup.registrar.register(makeJob('envcron', 'daily@08:30'));
+    expect(result.ok).toBe(true);
+    const installed = readFileSync(setup.crontab.stateFile, 'utf8');
+    const line = installed.split('\n').find((l) => l.endsWith('# tick:envcron'))!;
+    // 前缀注入：定位双变量恒注（cron 无 EnvironmentVariables 等价物——命令行
+    // 前缀是唯一通道，缺注即非缺省数据目录下读错库）
+    expect(line).toContain(`APP_DATA_DIR=${setup.dataDir}`);
+    expect(line).toContain(`APP_DB_PATH=${join(setup.dataDir, 'db.sqlite')}`);
+    // override 类有值才注：APP_MODEL 注入、APP_LOG_LEVEL 无值不造空串
+    expect(line).toContain('APP_MODEL=provider/m1');
+    expect(line).not.toContain('APP_LOG_LEVEL=');
+    // 凭证族零注入 + 命令本体仍在前缀之后
+    expect(line).not.toContain('ANTHROPIC_API_KEY');
+    expect(line).toContain('run --tick envcron --read-only --background');
+    expect(result.message).toContain('注册时快照');
   });
 
   it('覆盖注册去旧行（不重复）+ 保留他行', async () => {

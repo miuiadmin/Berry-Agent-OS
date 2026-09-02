@@ -1,7 +1,9 @@
 /**
  * L5 app — `berry run --tick <name>` 到点编排入口（headless：OS 调度器〔K2-d
  * launchd/crontab 注册〕唤起的形态——本进程就是被调起的那个进程，跑在本地
- * 不再 spawn；/tick run 手动路走 scheduler 件 spawn 子进程，两路同闸同账）。
+ * 不再 spawn；/tick run 手动路走 scheduler 件 spawn 子进程，非 goal 行两路
+ * 同闸同账——goal 挂钟行手动路拒执〔遗漏大扫 20260902-c #12：执法面 OS 路
+ * 专属，手动 spawn 绕归因/帽/收窄全账〕）。
  *
  * 编排序（内核边界篇 §4.1 席 13 第二刀拍板①④ + 复盘 C-2 双开预闸）：
  *   boot 前预读任务行 → due 判定（未到/已终/迟到超窗——不烧钱即退）→

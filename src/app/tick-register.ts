@@ -17,10 +17,11 @@
  * 触发 + 库内锚判定双闸——OS 侧漂移由 evaluateDue 兜底）。
  *
  * 凭证边界：OS 调起的进程**不继承**宿主 shell env（launchd 只给最小
- * env）——plist/cron 只注入定位双变量（APP_DATA_DIR/APP_DB_PATH），凭证
- * 走数据目录凭证库正路（persist 凭证表）；宿主 env 凭证（代理 key 等）
- * 不复制进系统注册面（明文凭证二次落盘是新的泄漏面，不做——enable 回执
- * 披露此边界）。
+ * env）——plist/cron 注入定位双变量（APP_DATA_DIR/APP_DB_PATH 恒注入）+
+ * 宿主覆盖类三变量（HOST_OVERRIDE_ENV_NAMES 单源名单——注册时快照、有值
+ * 才注，遗漏大扫 20260902-c #13），凭证走数据目录凭证库正路（persist 凭证
+ * 表）；宿主 env 凭证（代理 key 等）不复制进系统注册面（明文凭证二次落盘
+ * 是新的泄漏面，不做——enable 回执披露此边界与快照语义）。
  */
 
 import { mkdirSync, existsSync, rmSync } from 'node:fs';
@@ -32,7 +33,8 @@ import type { RunResult } from '../exec/index.js';
 import { parseSchedule, evaluateDue } from '../scheduler/index.js';
 import type { JobRecord } from '../scheduler/index.js';
 // 重放基座公式单源（20260901-d #6 勘正——与 runner 两消费面同源，勿各自内联）
-import { tickRelaunchBaseArgv } from './scheduler-runner.js';
+// + 宿主覆盖类名单单源（20260902-c #13——plist/cron 注入面与 runner 传值面复用）
+import { tickRelaunchBaseArgv, HOST_OVERRIDE_ENV_NAMES } from './scheduler-runner.js';
 
 /** 注册/注销结果（人读回执直用——件面不做二次措辞） */
 export interface TickOsResult {
@@ -165,7 +167,18 @@ export function createTickOsRegistrar(opts: TickOsOptions): TickOsRegistrar {
   // 缺省基座 = 重放宿主入口三律公式（20260901-d #6 勘正——写进 plist/crontab 的
   // 是 OS 到点调起面，宿主形态旗标/execArgv 缺失都会造出加载即死或拒启的坏注册）
   const baseArgv = opts.baseArgv ?? tickRelaunchBaseArgv();
-  const env = buildChildEnv(opts.env ?? process.env);
+  // 宿主 env 源（注入式——测试冻结）：plist/cron 注入面读**原始宿主值**
+  // （override 类注册时快照）。与 buildChildEnv 的产物（launchctl/crontab
+  // 子进程 env——白名单清洗后）分立两账：渲染面不消费清洗产物
+  const hostEnv = opts.env ?? process.env;
+  // 宿主覆盖类注册时快照（20260902-c #13——与 runner 同名单单源；有值才注
+  // 不造空串，与凭证族同款纪律）。构造期算一次：值固定即快照语义本体
+  const overrideSnapshot: Array<readonly [name: string, value: string]> = [];
+  for (const name of HOST_OVERRIDE_ENV_NAMES) {
+    const value = hostEnv[name];
+    if (value !== undefined && value !== '') overrideSnapshot.push([name, value]);
+  }
+  const env = buildChildEnv(hostEnv);
   const launchctlBin = opts.launchctlBin ?? 'launchctl';
   const crontabBin = opts.crontabBin ?? 'crontab';
 
@@ -190,10 +203,15 @@ export function createTickOsRegistrar(opts: TickOsOptions): TickOsRegistrar {
 
   /* ---------------- darwin：launchd plist 面 ---------------- */
 
-  /** 渲染 plist 全文（ProgramArguments + 定位双变量 + 调度形状 + 日志路径） */
+  /** 渲染 plist 全文（ProgramArguments + 定位双变量 + override 快照 + 调度形状 + 日志路径） */
   const renderPlist = (job: JobRecord, schedule: LaunchdSchedule): string => {
     const programArgs = tickArgv(job.name)
       .map((part) => `        <string>${xmlEscape(part)}</string>`)
+      .join('\n');
+    // 宿主覆盖类快照段（20260902-c #13——plist EnvironmentVariables 追加项；
+    // 空快照零段 = 与原 dict 逐字节同形）
+    const overrideXml = overrideSnapshot
+      .map(([name, value]) => `        <key>${name}</key>\n        <string>${xmlEscape(value)}</string>`)
       .join('\n');
     const scheduleXml =
       schedule.kind === 'interval'
@@ -217,7 +235,7 @@ ${programArgs}
         <string>${xmlEscape(opts.dataDir)}</string>
         <key>APP_DB_PATH</key>
         <string>${xmlEscape(opts.dbPath)}</string>
-    </dict>
+${overrideXml === '' ? '' : `${overrideXml}\n`}    </dict>
 ${scheduleXml}
     <key>StandardOutPath</key>
     <string>${xmlEscape(tickLogPath(opts.dataDir, job.name))}</string>
@@ -249,7 +267,7 @@ ${scheduleXml}
     }
     return {
       ok: true,
-      message: `已注册 OS 定时（launchd）：${plist}\n注意：OS 调起的进程不继承宿主 env——定时轮凭证取数据目录凭证库（宿主 env 代理 key 不随调起传递）`,
+      message: `已注册 OS 定时（launchd）：${plist}\n注意：OS 调起的进程不继承宿主 env——定时轮凭证取数据目录凭证库（宿主 env 代理 key 不随调起传递）；APP_MODEL/APP_BASH_PATH/APP_LOG_LEVEL 以注册时快照注入，改动后需重新 /tick enable 生效`,
     };
   };
 
@@ -291,7 +309,16 @@ ${scheduleXml}
     if (typeof fields !== 'string') return { ok: false, message: fields.error };
     const current = await readCrontab();
     const { kept } = stripMarker(current, job.name);
-    const command = tickArgv(job.name).map(shellQuote).join(' ');
+    // env 前缀注入（20260902-c #13——plist EnvironmentVariables 的 cron 等价
+    // 物）：定位双变量恒注（OS 调起进程不继承宿主 env，非缺省数据目录下不注
+    // 即读错库）+ override 类快照（有值才注）；cron 命令段经 sh 执行，
+    // `VAR=value cmd` 前缀是合法语法
+    const envPrefix = [
+      `APP_DATA_DIR=${shellQuote(opts.dataDir)}`,
+      `APP_DB_PATH=${shellQuote(opts.dbPath)}`,
+      ...overrideSnapshot.map(([name, value]) => `${name}=${shellQuote(value)}`),
+    ].join(' ');
+    const command = `${envPrefix} ${tickArgv(job.name).map(shellQuote).join(' ')}`;
     // 标记行 = 命令 + 行尾注释（cron 的 % 在命令段有特殊义——prompt 不进命令段无此患）
     const line = `${fields} ${command} ${cronMarker(job.name)}`;
     const next = kept === '' ? line : `${kept.replace(/\n$/, '')}\n${line}`;
@@ -304,7 +331,7 @@ ${scheduleXml}
     }
     return {
       ok: true,
-      message: `已注册 OS 定时（crontab）：${fields} → ${job.name}\n注意：OS 调起的进程不继承宿主 env——定时轮凭证取数据目录凭证库`,
+      message: `已注册 OS 定时（crontab）：${fields} → ${job.name}\n注意：OS 调起的进程不继承宿主 env——定时轮凭证取数据目录凭证库；APP_MODEL/APP_BASH_PATH/APP_LOG_LEVEL 以注册时快照注入，改动后需重新 /tick enable 生效`,
     };
   };
 

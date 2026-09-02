@@ -65,8 +65,11 @@ const CREDENTIAL_ENV_NAMES: readonly string[] = [
  * 则 bash 工具重走四级发现序（win32 显式覆盖失效）；APP_LOG_LEVEL 丢则
  * 轮账日志降级（宿主 debug 时子进程排障面缺）。APP_* 是禁运保留前缀，
  * 不在此显式列名的 APP_* 变量一律剥掉（不隐式扩面）。
+ *
+ * 导出单源（遗漏大扫 20260902-c #13）：OS 注册面（tick-register 的 plist/cron
+ * 注入）复用同一名单——两消费面（spawn 传值 / 注册快照）不各持副本名单。
  */
-const HOST_OVERRIDE_ENV_NAMES: readonly string[] = ['APP_MODEL', 'APP_BASH_PATH', 'APP_LOG_LEVEL'];
+export const HOST_OVERRIDE_ENV_NAMES: readonly string[] = ['APP_MODEL', 'APP_BASH_PATH', 'APP_LOG_LEVEL'];
 
 /** runner 构造选项（argv/env 注入式——公式可单测） */
 export interface TickRunnerOptions {
