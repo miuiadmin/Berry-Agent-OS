@@ -620,6 +620,10 @@ let migrationMax = 0;
   // 聚合链（collectBuiltinMigrations 拖全 app 依赖面）也不 import 四散 schema 模块
   // （登记清单会漏新文件）——源扫描对「新增迁移文件」结构性可见。
   const versions = [];
+  // 模块分组真值（遗漏大扫 20260902-c U1）：按 src/<模块>/ 目录桶装——供模块行
+  // 版本集合锚对照（族 7 下半）。同模块迁移可散多文件（memory = schema.ts +
+  // session-fts.ts），分组以目录为单位天然聚合
+  const moduleVersions = new Map();
   for (const file of files) {
     const declRe = /:\s*MigrationSpec\s*=\s*\{/g;
     for (const m of file.code.matchAll(declRe)) {
@@ -630,6 +634,12 @@ let migrationMax = 0;
         continue;
       }
       versions.push(Number(vm[1]));
+      const mod = /^src\/([^/]+)\//.exec(file.rel);
+      if (mod !== null) {
+        const bucket = moduleVersions.get(mod[1]) ?? new Set();
+        bucket.add(Number(vm[1]));
+        moduleVersions.set(mod[1], bucket);
+      }
     }
   }
   migrationMax = Math.max(0, ...versions);
@@ -676,6 +686,38 @@ let migrationMax = 0;
       );
     }
   }
+  // 模块行版本集合锚（遗漏大扫 20260902-c U1+活漂移——批判第五起计数锚漂移标本
+  // 根治）：末行锚只护全链尾，「迁移 v2-v11」/「jobs 表 v7」这类模块行区间/单点
+  // 锚此前无人执法——AGENTS 与 docs/架构总览 双文档各持旧值且互相矛盾（memory
+  // 双处 v2-v11 实含 v15；scheduler 两处 v7/v9 各取一值实含 v7+v9+v14）。执法面：
+  // 凡两文档模块行今日携带版本锚的模块（memory/goal/scheduler——persist 行锚
+  // 无版本数字不入册），集合串 `v<n>/<n>/…` ≡ 代码真值按模块分组，两文档模块行
+  // 必含——新迁移落码不滚锚即红（ratchet，同末行锚语义）；模块行缺席 fail-loud
+  // （锚面模块搬家/改名结构漂移）；src/<模块>/ 下零声明同样 fail-loud。镜像面随
+  // CHECK_ROOT 随移（缺席跳过——两态同构）
+  const PROSE_ANCHOR_MODULES = ['memory', 'goal', 'scheduler'];
+  for (const mod of PROSE_ANCHOR_MODULES) {
+    const bucket = moduleVersions.get(mod);
+    if (bucket === undefined || bucket.size === 0) {
+      v(`模块 ${mod} 版本集合锚：src/${mod}/ 下零 MigrationSpec 声明——锚面模块搬家或拆分 fail-loud`);
+      continue;
+    }
+    const needle = `v${[...bucket].sort((a, b) => a - b).join('/')}`;
+    for (const relPath of ['AGENTS.md', 'docs/架构总览.md']) {
+      const source = readMirrorFile(relPath);
+      if (source === undefined) continue; // 镜像根缝：夹具缺席跳过（两态同构）
+      const line = new RegExp(`^${mod}\\s.*$`, 'm').exec(source);
+      if (line === null) {
+        v(`[镜像] ${relPath} 模块行（^${mod}）缺席——锚面结构漂移 fail-loud`);
+        continue;
+      }
+      if (!line[0].includes(needle)) {
+        v(
+          `[镜像] ${relPath} ${mod} 模块行版本锚 ≠ 代码真值 ${needle}——区间锚滞后（遗漏大扫 20260902-c U1 活漂移标本：新迁移落码须同笔滚锚）`,
+        );
+      }
+    }
+  }
 }
 
 // ---- 汇总 ----
@@ -685,5 +727,5 @@ if (violations.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-events ✓ 总线 ${liveCatalog.length} 项（另应用声明 ${declaredByName.size} 词）/ AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量 / 错误码 ${errorsMod.listErrorCodes().length} 册，七族双向一致（含公开面镜像 + 迁移末行 v${migrationMax} 锚）`,
+  `check-events ✓ 总线 ${liveCatalog.length} 项（另应用声明 ${declaredByName.size} 词）/ AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量 / 错误码 ${errorsMod.listErrorCodes().length} 册，七族双向一致（含公开面镜像 + 迁移末行 v${migrationMax} 锚 + 模块集合锚 memory/goal/scheduler）`,
 );
