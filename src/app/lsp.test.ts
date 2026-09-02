@@ -60,6 +60,8 @@ interface FakeServerBehavior {
   readonly locations?: { uri: string; line: number; character: number }[];
   /** initialize 永不应答（握手窗观察用——spawn 即写测试的聋形态） */
   readonly hangInitialize?: boolean;
+  /** initialize 到达后挂起、gate 放行才应答（死竞态用例——握手完成时刻可精确控在行回卷之后） */
+  readonly initializeGate?: Promise<unknown>;
 }
 
 /** 全部假服务器登记（afterEach 统一 die——让关停宽限即刻结算不留 3s 计时器） */
@@ -138,6 +140,13 @@ function makeFakeLspServer(behavior: FakeServerBehavior, pid: number): FakeLspSe
     const params = (frame['params'] ?? {}) as Record<string, unknown>;
     if (method === 'initialize') {
       if (behavior.hangInitialize === true) return; // 聋形态：握手窗内永不应答
+      if (behavior.initializeGate !== undefined) {
+        // 门控形态：initialize 到达即挂起，gate 放行才应答——握手完成时刻外控
+        void behavior.initializeGate.then(() =>
+          sendResult(id, { capabilities: {}, serverInfo: { name: 'fake-lsp', version: '0' } }),
+        );
+        return;
+      }
       sendResult(id, { capabilities: {}, serverInfo: { name: 'fake-lsp', version: '0' } });
       return;
     }
@@ -600,4 +609,37 @@ describe('lsp 件 — 熔断与 effect 回卷', () => {
     // 回卷后工具面同步消失（四工具件级寿命）
     expect(env.tools.list().some((t) => t.name.startsWith('lsp_'))).toBe(false);
   });
+
+  // 死竞态回归锁（全面复盘 20260902 L-1）：握手窗（跨异步边界）期间行作用域回卷
+  // ——完成点须查 scope 活。修前：握手照常成功返回 → state.conn 写进已死作用域
+  //（无人再读）+ spawn 即写登记簿条目永不清 + onExit 首行 disposed 旗短路
+  //——子进程泄漏至宿主退出（daemon 常驻即直到重启），且工具腿照常成功零信号。
+  it('死竞态收口：握手完成落在回卷后——协议化关停 + 登记簿对称删行 + 不置活（修前：连接泄漏 + 工具照常成功）', async () => {
+    const env = makeEnv();
+    let releaseHandshake!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseHandshake = resolve));
+    const harness = makeHarness({ initializeGate: gate });
+    await applyLsp(env, harness, { servers: serversConfig() });
+    writeFileSync(join(harness.workspace, 'race.ts'), 'x\n', 'utf8');
+    // 工具腿真跑：拉起在飞、initialize 悬在 gate 上（握手成功但时刻外控）
+    const toolPromise = runTool(env, 'lsp_symbols', { path: 'race.ts' });
+    await vi.waitFor(() => expect(harness.registry.adds).toHaveLength(1)); // spawn 即写已入簿
+    const childPid = harness.registry.adds[0]!.childPid;
+    await env.scope.dispose(); // 握手窗内回卷——在飞连接 state.conn 尚 undefined，回卷清单收不进
+    releaseHandshake(); // 握手成功返回——落在已死作用域（死竞态点）
+    // 修法路径：登记簿对称删行 + 协议化关停（shutdown/exit 帧可见——修前永不见）
+    await vi.waitFor(() => {
+      const frames = harness.servers[0]!.frames;
+      expect(frames.some((f) => f['method'] === 'shutdown')).toBe(true);
+      expect(frames.some((f) => f['method'] === 'exit')).toBe(true);
+    });
+    expect(harness.registry.removes).toContain(childPid);
+    harness.servers[0]!.die(0); // close 即刻结算——dispose 的 close 等待即刻赢（不等宽限兜底）
+    const out = await toolPromise;
+    expect(out.isError).toBe(true); // 修前：连接照常置活、工具照常返回符号
+    expect(textOf(out)).toContain('不可用');
+    expect(textOf(out)).toContain('行已回卷');
+    // 不计熔断：死竞态不是服务器故障——零 notify（修前同样零 notify，此断言锁语义不回退）
+    expect(env.notifies).toHaveLength(0);
+  }, 10_000);
 });

@@ -245,6 +245,8 @@ async function applyLspApp(
     }
     if (state.promise !== undefined) return state.promise;
     const config = servers[name]!;
+    /** 死竞态旗：握手窗内行作用域已回卷——该路抛错不计熔断计数（见 catch 首行） */
+    let scopeDead = false;
     state.promise = (async () => {
       const conn = await connectLspServer(name, config, deps.rootPhysicalRoot(), {
         spawnServer: deps.spawnServer,
@@ -259,6 +261,19 @@ async function applyLspApp(
           return () => deps.registry.remove(childPid);
         },
       });
+      // 死竞态双点查活（契约篇 §6.7，全面复盘 20260902 L-1——§6.6 后台续段护栏的
+      // 惰性拉起镜像，MCP discoverAll 同款纪律的缺半边补齐）：握手窗跨异步边界，
+      // 完成时行作用域可能已回卷——回卷 effect 只处置当时已置活的 conn（在飞完成者
+      // state.conn 尚 undefined 收不进清单）。照常置活 = 写死作用域 + onExit 首行
+      // disposed 旗短路 + spawn 即写登记簿条目永不清三连，子进程泄漏至宿主退出
+      // （daemon 常驻即直到重启）。死即：协议化关停（shutdown→exit→宽限→killTree
+      // 同回卷编舞）+ 登记簿对称删行，不置活不接线。
+      if (disposed || ctx.signal.aborted) {
+        scopeDead = true;
+        if (conn.childPid !== undefined) deps.registry.remove(conn.childPid);
+        await conn.dispose();
+        throw new AppError(LSP_CONNECT_FAILED, `LSP 服务器 ${name} 握手完成时行已回卷——已协议化关停（不泄漏）`);
+      }
       // 先置活再接线（同段同步——close 事件不可能插入；置活后 onExit 的
       // state.conn === conn 判断在任意竞速下都能正确清活）
       state.conn = conn;
@@ -280,6 +295,9 @@ async function applyLspApp(
       return conn;
     })()
       .catch((err: unknown) => {
+        // 死竞态路不计熔断（全面复盘 20260902 L-1）：作用域回卷不是服务器故障
+        // ——计进「连败」使熔断阈值漂移、把 /reload 后的首次拉起误熔断
+        if (scopeDead) throw err;
         // connect 失败同样计败（起不来的连败与活过即死的连败同账）
         state.failures += 1;
         if (state.failures >= CIRCUIT_BREAK_THRESHOLD) {
