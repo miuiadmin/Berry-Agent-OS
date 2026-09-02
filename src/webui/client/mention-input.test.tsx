@@ -1,0 +1,128 @@
+/**
+ * MentionInput 测试（遗漏大扫 20260902 #10——@-mention 两段补全在新 jsdom+RTL
+ * 轨的零覆盖补面；fd 接线小刀公开面宣称的 SPA 呈现行为回归锁）。
+ *
+ * mock 边界（纪律：mock 只停 IO 腿）：`./api` 只桩 fetchFiles/fetchSymbols 两件
+ * （本组件仅消费这两件——app.test.tsx 才是全件面 + 面同步执法位）；React 全真。
+ * 防抖（DEBOUNCE_MS = 150ms）用假钟推进——advanceTimersByTimeAsync 连
+ * microtasks 一并 flush，取数 promise 链收束后再断言（RTL waitFor 与假钟不睦，
+ * 本文件不用 waitFor）。
+ */
+
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
+import { MentionInput } from './mention-input';
+import type { SymbolQuery } from './types';
+
+/* ---------------- mock 边界 ---------------- */
+
+/** ./api 本件消费面（只有两件——MentionInput 的 import 面） */
+const api = vi.hoisted(() => ({
+  fetchFiles: vi.fn(),
+  fetchSymbols: vi.fn(),
+}));
+
+vi.mock('./api', () => ({ fetchFiles: api.fetchFiles, fetchSymbols: api.fetchSymbols }));
+
+/* ---------------- 夹具 ---------------- */
+
+/**
+ * 受控 harness（MentionInput 是受控 value + onChange 上抛——不持状态会被 React
+ * 拉回空串；harness 持 state，断言读 DOM input.value 即代换结果，行为级不刺内部）
+ */
+function Harness(): React.ReactElement {
+  const [value, setValue] = useState('');
+  return <MentionInput value={value} onChange={setValue} onSubmit={vi.fn()} disabled={false} placeholder="输入消息" />;
+}
+
+/** 符号应答素材（SymbolQuery 形状——symbols + 行号） */
+function symbolsOf(names: Array<[name: string, line: number]>): SymbolQuery {
+  return { symbols: names.map(([name, line]) => ({ name, line })) };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.useFakeTimers();
+  api.fetchFiles.mockResolvedValue([]);
+  api.fetchSymbols.mockResolvedValue(null);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+/** 键入并过防抖（change 设值后 jsdom 光标在末尾——caretRef 镜像正确；async 推进连取数 promise 链一起收） */
+async function typePastDebounce(input: HTMLInputElement, text: string): Promise<void> {
+  await act(async () => {
+    fireEvent.change(input, { target: { value: text } });
+    await vi.advanceTimersByTimeAsync(150);
+  });
+}
+
+describe('MentionInput 第一段：@ 文件补全', () => {
+  it("键入 '@s' → fetchFiles('s') 取数 + 候选渲染（弹层开 + 计数头）", async () => {
+    api.fetchFiles.mockResolvedValue(['src/app.ts', 'README.md']);
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@s');
+    expect(api.fetchFiles).toHaveBeenCalledWith('s');
+    expect(api.fetchFiles).toHaveBeenCalledTimes(1); // 防抖收敛：一次 change 一次取数
+    expect(screen.getByText('工作区文件（2）')).toBeTruthy(); // 弹层计数头
+    expect(screen.getByText('src/app.ts')).toBeTruthy();
+    expect(screen.getByText('README.md')).toBeTruthy();
+  });
+
+  it("无 '@' 前缀不触发（'新消息' 零取数——弹层不开）", async () => {
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '新消息');
+    expect(api.fetchFiles).not.toHaveBeenCalled();
+    expect(api.fetchSymbols).not.toHaveBeenCalled();
+    expect(screen.queryByText(/工作区文件/)).toBeNull();
+  });
+
+  it('点击候选：代换 token + 尾空格 + 收弹（受控值即断言面）', async () => {
+    api.fetchFiles.mockResolvedValue(['src/app.ts']);
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@s');
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByText('src/app.ts')); // mousedown（组件 preventDefault 不夺焦点）
+    });
+    expect(input.value).toBe('@src/app.ts '); // 代换 '@src/app.ts' + 尾空格断 token
+    expect(screen.queryByText(/工作区文件/)).toBeNull(); // 代换即收弹
+  });
+});
+
+describe('MentionInput 第二段：@path# 符号补全', () => {
+  it("键入 '@src/app.ts#' → fetchSymbols('src/app.ts') 取数 + 符号候选（名 + 行号）+ Enter 接受代换", async () => {
+    api.fetchSymbols.mockResolvedValue(
+      symbolsOf([
+        ['MentionInput', 68],
+        ['parseMention', 36],
+      ]),
+    );
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@src/app.ts#');
+    expect(api.fetchSymbols).toHaveBeenCalledWith('src/app.ts');
+    expect(api.fetchFiles).not.toHaveBeenCalled(); // 档别正确（符号段不走文件腿）
+    expect(screen.getByText('MentionInput')).toBeTruthy();
+    expect(screen.getByText(':68')).toBeTruthy(); // 行号徽标
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' }); // 弹层开时 Enter 接受候选（不冒泡成提交）
+    });
+    expect(input.value).toBe('@src/app.ts#MentionInput ');
+    expect(screen.queryByText(/的符号/)).toBeNull(); // 代换即收弹（caretRef 同步先行——修前旧光标位重开弹层）
+  });
+
+  it('404 降级（null 应答）：诚实提示行非空列表', async () => {
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@gone.ts#');
+    expect(screen.getByText('无符号（文件不在盘或语言不支持）')).toBeTruthy();
+    expect(screen.queryByText(/:6/)).toBeNull(); // 无行号徽标（零符号列表）
+  });
+});

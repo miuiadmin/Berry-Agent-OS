@@ -230,8 +230,11 @@ describe('loadOfficialApps：官方目录装载', () => {
     expect(loadOfficialApps(join(tmpdir(), '不存在的目录-防御位')).size).toBe(0);
   });
 
-  it('官方目录常量锚定仓库根 apps/（src 与 dist 同为上溯两级）', () => {
-    expect(OFFICIAL_APPS_DIR.endsWith('apps')).toBe(true);
+  it('官方目录常量锚定仓库根 apps/（cwd 独立派生——上溯层级算错一级必红，遗漏大扫 20260902 U10）', () => {
+    // 旧形 endsWith('apps') 弱断言：上溯错一级（../../ → ../../../）落仓外也
+    // 绿。cwd 派生是独立第二真相源（vitest root = 仓库根），与实现侧
+    // import.meta.url 相对解理互证
+    expect(OFFICIAL_APPS_DIR).toBe(join(process.cwd(), 'apps'));
   });
 });
 

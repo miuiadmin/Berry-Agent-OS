@@ -129,9 +129,15 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
     const next = `${value.slice(0, q.start)}${insertion} ${value.slice(q.end)}`;
     onChange(next);
     const caret = q.start + insertion.length + 1;
+    // caretRef 同步先行（遗漏大扫 20260902 #10 测试暴露的真缺陷）：value 变化
+    // 触发的重解析 effect（宏任务）先于 rAF（render 阶段）跑——若 caretRef 仍
+    // 是旧光标位，新值按旧位切片（如 '@s'）重命中 token，弹层立即重开 +
+    // 防抖后重复取数，「代换即收弹（尾空格断 token）」落空。同步更新后
+    // effect 以新光标切片（代换串 + 尾空格）断 token 收弹；rAF 只留 DOM 光
+    // 标移动（受控值重渲染会重置光标，须下一帧拨回）
+    caretRef.current = caret;
     requestAnimationFrame(() => {
       input.setSelectionRange(caret, caret);
-      caretRef.current = caret;
     });
     setQuery(null); // 代换即收弹（尾空格断 token——再 @ 再触发）
   }

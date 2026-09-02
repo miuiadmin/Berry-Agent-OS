@@ -84,9 +84,13 @@ export default defineConfig({
       {
         test: {
           name: 'webui-client',
-          // SPA 组件测试轨（P1-3）：只收 client 子树 .test.tsx；环境 jsdom（DOM 面）
-          // 不挂 setupFiles——jsdom 轨零宿主运行时依赖，数据目录钉扎与本轨无关
-          include: ['src/webui/client/**/*.test.tsx'],
+          // SPA 组件测试轨（P1-3）：client 子树 .test.tsx + .test.ts 两形态；
+          // 环境 jsdom（DOM 面）不挂 setupFiles——jsdom 轨零宿主运行时依赖，
+          // 数据目录钉扎与本轨无关。include 收 .test.ts（遗漏大扫 20260902
+          // U11）：旧形只收 .tsx 时 client 下 .test.ts 落双轨夹缝（node 轨
+          // exclude 整树、jsdom 轨不收）——静默盲区文件零执行零报错；收进
+          // jsdom 轨后要么跑绿要么响亮红，盲区类缺陷在收集面消灭
+          include: ['src/webui/client/**/*.test.{ts,tsx}'],
           environment: 'jsdom',
         },
       },

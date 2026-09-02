@@ -12,7 +12,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-// 仅 ApiError 值导入（:204 构造用——vi.mock 工厂同源类；其余七件只在 mock 工厂内
+// 仅 ApiError 值导入（:204 构造用——vi.mock 工厂同源类；其余十一件只在 mock 工厂内
 // 出现，测试体零直接引用，不导入——noUnusedLocals 绿）
 import { ApiError } from './api';
 import { App, previewOf, relTime } from './app';
@@ -20,7 +20,7 @@ import type { ProjectedMessage, SessionSummary } from './types';
 
 /* ---------------- mock 边界 ---------------- */
 
-/** ./api 全件 mock 面（hoisted——vi.mock 工厂引用） */
+/** ./api 全件 mock 面（hoisted——vi.mock 工厂引用；件数须随 api.ts 导出面同步） */
 const api = vi.hoisted(() => ({
   fetchSessions: vi.fn(),
   fetchMessages: vi.fn(),
@@ -31,9 +31,21 @@ const api = vi.hoisted(() => ({
   authBootstrap: vi.fn(),
   interruptSession: vi.fn(),
   decideApproval: vi.fn(),
+  fetchFiles: vi.fn(),
+  fetchSymbols: vi.fn(),
 }));
 
-vi.mock('./api', () => {
+vi.mock('./api', async (importOriginal) => {
+  // 面同步执法（遗漏大扫 20260902 #10）：App 渲染 MentionInput（app.tsx footer），
+  // 其 import 的每个 ./api 导出都从本工厂取——api.ts 新增导出而桩未跟，缺席导出
+  // 以 undefined 静默进组件，直到某条测试触发才 TypeError（面漂移假绿家族：
+  // 注释自称「全件 mock 面」无人执法）。importOriginal 取真面键集对照，缺席
+  // 即 throw——vi.mock 工厂抛错使本文件全部用例红（响亮早红非延迟炸）。
+  const actual = await importOriginal<Record<string, unknown>>();
+  const missing = Object.keys(actual).filter((k) => !(k in api) && k !== 'ApiError');
+  if (missing.length > 0) {
+    throw new Error(`./api mock 面缺席导出（补桩或核面）：${missing.join(', ')}`);
+  }
   // ApiError 类在工厂内实现（App 的 instanceof 判据消费本类——测试同 import 即同源）
   class ApiError extends Error {
     constructor(
@@ -77,6 +89,10 @@ function primeHappyLoad(): void {
   api.submitMessage.mockResolvedValue(undefined);
   api.decideApproval.mockResolvedValue({ accepted: true });
   api.authBootstrap.mockResolvedValue(undefined);
+  // @-mention 两段缺省（App footer 的 MentionInput 消费——本文件用例不触发 '@'，
+  // 缺省应答是防未来输入文本含 '@' 时 undefined 桩 TypeError）
+  api.fetchFiles.mockResolvedValue([]);
+  api.fetchSymbols.mockResolvedValue(null);
 }
 
 /** 驱动一条 SSE 信封帧（onmessage 直灌——act 包裹 React 状态更新） */
