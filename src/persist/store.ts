@@ -22,6 +22,7 @@ import {
   DROP_PROJECTION_CHECKPOINTS_MIGRATION,
   SCHEMA_VERSION,
   SESSION_APP_COLUMN_MIGRATION,
+  SESSION_APP_RETIRED_ID_MIGRATION,
   SESSION_IMPORTER_COLUMN_MIGRATION,
 } from './schema.js';
 
@@ -107,14 +108,16 @@ export function openStore(options: StoreOptions): Store {
   // persist 自注入，与业务迁移项合并排序。版本空间共享——内核占用 v6（sessions
   // +app 列）与 v10（sessions +importer 列，会话篇 §5.1 导入者归因；v8/v9 已被
   // goal-needs-write / scheduler-jobs-v9 业务件占用）与 v12（DROP
-  // projection_checkpoints 挂账⑤销账——会话篇 §5.3 checkpoint 纵切），业务模块
-  // 声明面不得撞号（normalizeMigrations 严格递增校验即执法面）
+  // projection_checkpoints 挂账⑤销账——会话篇 §5.3 checkpoint 纵切）与 v16
+  // （sessions.app 退役 id 归一——契约篇 §5.4 补裁，纯数据迁移无 schema 产物），
+  // 业务模块声明面不得撞号（normalizeMigrations 严格递增校验即执法面）
   const chain = normalizeMigrations(
     [
       ...(options.migrations ?? []),
       SESSION_APP_COLUMN_MIGRATION,
       SESSION_IMPORTER_COLUMN_MIGRATION,
       DROP_PROJECTION_CHECKPOINTS_MIGRATION,
+      SESSION_APP_RETIRED_ID_MIGRATION,
     ],
     SCHEMA_VERSION,
   );
@@ -521,11 +524,12 @@ export class Store {
    * 某工作区（cwd）的最新会话 id（TUI 启动续接策略的取数面，技术栈篇 §5）。
    * created_at 毫秒可同值——同刻并列时 rowid 兜底取后建者（自增近似时序）。
    *
-   * 应用域过滤（契约篇 §5.4 第二纵切——冷读裁决两形）：
-   * - chat 域（默认入口）`includeNullApp: true`：`app IS NULL OR app = 'chat'`
-   *   ——NULL 是 builtin:chat 落地前的存量会话，对话应用续接它们（存量不回填、
-   *   但默认入口的域含历史全量）；
-   * - 第三方应用严格域：仅 `app = <id>`——不吞他域会话。
+   * 应用域过滤（契约篇 §5.4 默认应用键条款——判据随默认应用换人自动正确）：
+   * - 默认域（无参入口）`includeNullApp: true`：`(app IS NULL OR app = <默认id>)`
+   *   ——NULL 是打标机制落地前的存量会话，默认入口的域含历史全量（NULL 无标
+   *   面归默认兜底认领）；退役 id 的历史打标已随 v16 归一进新 id，查询无需
+   *   旧 id 分支（契约篇 §5.4「退役 id 打标面数据归一」）；
+   * - 非默认应用严格域：仅 `app = <id>`——不吞他域会话。
    * @returns 无匹配返回 undefined
    */
   latestSessionId(cwd: string, domain?: { app: string; includeNullApp?: boolean }): string | undefined {

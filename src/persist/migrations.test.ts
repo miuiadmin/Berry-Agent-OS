@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { openStore } from './index.js';
 import { normalizeMigrations, type MigrationSpec } from './migrations.js';
-import { SESSION_APP_COLUMN_MIGRATION, DROP_PROJECTION_CHECKPOINTS_MIGRATION } from './schema.js';
+import { SESSION_APP_COLUMN_MIGRATION, SESSION_APP_RETIRED_ID_MIGRATION } from './schema.js';
 
 /** 临时库目录（全文件共享，结束后整体清除） */
 let dir: string;
@@ -28,8 +28,8 @@ afterAll(() => {
 /**
  * 最小可用迁移项素材（不动业务表——框架测试只关心框架行为；表名随版本变防链内冲突）。
  * 版本一律取内核链尾之上（内核恒自注入 v6〔sessions +app〕、v10〔sessions
- * +importer〕与 v12〔DROP projection_checkpoints〕——见下方内核迁移组用例），
- * 业务缺口模拟才可能与内核共存于同一条链。
+ * +importer〕、v12〔DROP projection_checkpoints〕与 v16〔sessions.app 退役 id
+ * 归一〕——见下方内核迁移组用例），业务缺口模拟才可能与内核共存于同一条链。
  */
 const spec = (version: number, name = `m${version}`): MigrationSpec => ({
   version,
@@ -39,8 +39,8 @@ const spec = (version: number, name = `m${version}`): MigrationSpec => ({
 
 /** 内核链首版本（sessions +app 列，v6） */
 const KERNEL_FIRST = SESSION_APP_COLUMN_MIGRATION.version;
-/** 内核链尾版本（DROP projection_checkpoints，v12——业务链版本的起算锚点） */
-const KERNEL_TAIL = DROP_PROJECTION_CHECKPOINTS_MIGRATION.version;
+/** 内核链尾版本（sessions.app 退役 id 归一，v16——业务链版本的起算锚点） */
+const KERNEL_TAIL = SESSION_APP_RETIRED_ID_MIGRATION.version;
 
 describe('normalizeMigrations 链校验（装配期即抛，不动库）', () => {
   it('version 必须大于基线且为整数', () => {
@@ -109,7 +109,7 @@ describe('内核迁移自注入（sessions 是内核表——DDL 演进不归业
         migrations: [{ version: KERNEL_FIRST, name: 'claim-kernel-slot', sql: 'CREATE TABLE k (a INTEGER) STRICT;' }],
       }),
     ).toThrowError(/重复/);
-    // 链尾同律：撞 v12（drop-projection-checkpoints）同样拒绝——版本空间共享对整条内核链生效
+    // 链尾同律：撞内核链尾（v16 退役 id 归一）同样拒绝——版本空间共享对整条内核链生效
     expect(() =>
       openStore({
         path,
@@ -180,6 +180,83 @@ describe('v12 内核迁移：DROP projection_checkpoints（挂账⑤销账，会
     raw.close();
     expect(has.n).toBe(0); // 旧表已清
     expect(events.n).toBe(1); // 基线数据完好
+  });
+});
+
+describe('v16 内核迁移：sessions.app 退役 id 归一（契约篇 §5.4 补裁——更名批遗漏大扫 R-1）', () => {
+  /** 造一个带三方打标（coder/chat/NULL）+ 诚实历史事件的 v15 形态库，回拨后重开 */
+  function makeLegacyLibrary(path: string): void {
+    const base = openStore({ path });
+    const reg = (id: string, app?: string) => ({
+      sessionId: id,
+      origin: 'user' as const,
+      seedLength: 0,
+      delegationDepth: 0,
+      cwd: '/ws/r1',
+      ...(app === undefined ? {} : { app }),
+    });
+    // 插入序：s-coder 最后建（created_at 同毫秒时 rowid 兜底取后建者——
+    // latestSessionId 必须命中 coder 行才能锁住续接故事）
+    base.appendCore(
+      reg('s-null'),
+      [{ type: 'user/message', seq: 0, time: 1755900000000, data: { content: 'x' } }],
+      'inc-1',
+    );
+    base.appendCore(
+      reg('s-chat', 'chat'),
+      [{ type: 'user/message', seq: 0, time: 1755900000000, data: { content: 'x' } }],
+      'inc-1',
+    );
+    base.appendCore(
+      reg('s-coder', 'coder'),
+      [{ type: 'request/header', seq: 0, time: 1755900000000, data: { app: 'coder', cwd: '/ws/r1' } }],
+      'inc-1',
+    );
+    base.close();
+    // 原生回拨 user_version 至 15（模拟 v16 落地前的库——数据行原样保留）
+    const rewind = new Database(path);
+    rewind.pragma('user_version = 15');
+    rewind.close();
+  }
+
+  it('存量 coder 打标行重开归一为 berrycode；chat/NULL 行不动；durable 事件字面保持原样', () => {
+    const path = nextPath();
+    makeLegacyLibrary(path);
+    openStore({ path }).close();
+    const raw = new Database(path);
+    const rows = Object.fromEntries(
+      (raw.prepare('SELECT id, app FROM sessions').all() as Array<{ id: string; app: string | null }>).map((r) => [
+        r.id,
+        r.app,
+      ]),
+    );
+    const headerEvent = raw.prepare("SELECT data FROM events WHERE type = 'request/header'").get() as { data: string };
+    const uv = raw.pragma('user_version', { simple: true });
+    raw.close();
+    expect(uv).toBe(SESSION_APP_RETIRED_ID_MIGRATION.version); // 链尾前进
+    expect(rows['s-coder']).toBe('berrycode'); // 归一（修前必红锚：无 v16 时重开即降级拒绝）
+    expect(rows['s-chat']).toBe('chat'); // 别家域不动
+    expect(rows['s-null']).toBeNull(); // NULL 无标面不动（认领语义不碰）
+    expect(headerEvent.data).toContain('"app":"coder"'); // 事件载荷诚实历史
+  });
+
+  it('归一后续接取数面自愈：默认域查询命中原 coder 行（R-1 用户故事半边）', () => {
+    const path = nextPath();
+    makeLegacyLibrary(path);
+    const reopened = openStore({ path });
+    // 无参 boot 的取数形态（chat/app.ts open() → latestSessionId 默认域含 NULL 回退）
+    const hit = reopened.latestSessionId('/ws/r1', { app: 'berrycode', includeNullApp: true });
+    reopened.close();
+    expect(hit).toBe('s-coder'); // 修前该查询静默排除 coder 行——续接链切断即本缺陷
+  });
+
+  it('全新库/幂等重开 no-op：无 coder 行可归，链尾直达不炸', () => {
+    const path = nextPath();
+    openStore({ path }).close();
+    const raw = new Database(path);
+    expect(raw.pragma('user_version', { simple: true })).toBe(SESSION_APP_RETIRED_ID_MIGRATION.version);
+    raw.close();
+    expect(() => openStore({ path })).not.toThrow(); // 重开不重跑炸库
   });
 });
 

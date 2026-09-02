@@ -1250,8 +1250,10 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         };
         const serialized = JSON.stringify(payload);
         if (serialized === headerState.last) return; // 组装参数未变——不落新快照
-        // app 腿在序列化基线之外追加（会话域打标的载荷腿——会话内恒定，不参与 diff；
-        // 与 sessions.app 同源，血缘显式打标的证据腿，契约篇 §5.4）
+        // app 腿在序列化基线之外追加（会话域打标的载荷腿——与本驱动生命周期内
+        // 恒定，不参与 diff；与 sessions.app 同源，血缘显式打标的证据腿，契约篇
+        // §5.4。跨代不恒定：退役 id 归一（v16）后续接的旧会话史 header 载旧 id
+        // 字面、新 header 载新 id——append-only 诚实历史两代并存是合法形态）
         session.append('request/header', { ...payload, app: appId, reason: headerState.next });
         headerState.last = serialized;
         headerState.next = 'change';

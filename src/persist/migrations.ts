@@ -17,7 +17,7 @@ export interface MigrationSpec {
   readonly version: number;
   /** 迁移名（诊断清单用，如 'memory'——与业务模块对应） */
   readonly name: string;
-  /** DDL 文本（单事务执行；含表/索引/触发器全部对象，比对指纹覆盖全部产物） */
+  /** DDL/数据迁移文本（单事务执行；DDL 须含表/索引/触发器全部对象——比对指纹覆盖全部产物；纯数据迁移〔UPDATE/DELETE〕无 schema 产物、指纹零差合法——首例 v16 退役 id 归一） */
   readonly sql: string;
 }
 

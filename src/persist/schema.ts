@@ -137,3 +137,27 @@ export const DROP_PROJECTION_CHECKPOINTS_MIGRATION: MigrationSpec = {
   name: 'drop-projection-checkpoints',
   sql: 'DROP TABLE IF EXISTS projection_checkpoints',
 };
+
+/**
+ * v16 迁移：sessions.app 退役 id 归一（契约篇 §5.4「退役 id 打标面数据归一」
+ * ——2026-09-02 更名批遗漏大扫 R-1，规范先行 + 冷读闸回写后稿）。
+ *
+ * 原委：官方默认应用 2026-08-30 组装批落定 id `coder`、2026-09-02 更名
+ * `berrycode`（纯改名）。窗口期（两笔之间）经默认入口开的会话被打标
+ * `app='coder'`——更名后旧 id 身份消亡（清单不再声明），默认域续接查询
+ * `(app IS NULL OR app = 'berrycode')` 静默排除这批行，「默认入口的域含
+ * 历史全量」被切断。同一应用改 id ≠ 换默认应用（后者旧 id 仍在册有活路、
+ * 过渡断层注记适用）：旧 id 打标就是本应用自身的历史会话，随迁移链一次性
+ * 归一——单发 UPDATE = 单次原子数据改名，非读侧扩查询、非双轨 shim。
+ *
+ * 语义边界（规范同条「持久面清点」）：durable 事件载荷 / obs rollup 四表 /
+ * sessions.importer 归因列的旧 id 字面一律保持原样（append-only 诚实历史、
+ * 观测面按事件时点字面记账）；归一仅及 sessions.app 列。bare 'coder' 只可能
+ * 是官方件打标（第三方 id 强制 `/` 前缀），UPDATE 无误伤面。幂等安全：
+ * 重跑无 coder 行 = no-op；全新库基线建库后同样前滚 no-op。
+ */
+export const SESSION_APP_RETIRED_ID_MIGRATION: MigrationSpec = {
+  version: 16,
+  name: 'sessions-app-retired-id-normalize',
+  sql: "UPDATE sessions SET app = 'berrycode' WHERE app = 'coder'",
+};

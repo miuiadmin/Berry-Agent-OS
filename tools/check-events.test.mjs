@@ -13,7 +13,7 @@
  * 测试（vitest.config include 显式列举）——tsc 视门外纯 node 语义直跑。
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
@@ -21,6 +21,33 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /** 仓库根（本文件在 tools/ 下） */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * 代码真值链尾（动态推导——与 check-events.mjs 同法扫 src 非测试面的
+ * MigrationSpec 声明取最大 version）。硬编码「当前 vN」会随每次新增迁移
+ * 漂移假红（v16 落地即实证一次）；推导后夹具随身带锚、永续免滚。
+ */
+function deriveMigrationTail() {
+  const versions = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(p);
+        continue;
+      }
+      if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) continue;
+      const text = readFileSync(p, 'utf8');
+      for (const m of text.matchAll(/: MigrationSpec = \{/g)) {
+        const vm = /version:\s*(\d+)/.exec(text.slice(m.index, m.index + 400));
+        if (vm) versions.push(Number(vm[1]));
+      }
+    }
+  };
+  walk(join(ROOT, 'src'));
+  return Math.max(0, ...versions);
+}
 
 describe('check-events 机器闸（含应用声明层，第四十六批）', () => {
   it('全绿：七族双向一致 + 汇总行报应用声明计数、错误码册数与迁移末行锚（exit 0 由 execFileSync 非零即抛保证）', () => {
@@ -101,9 +128,10 @@ describe('check-events 锚负例（遗漏大扫 20260901 O-4②）', () => {
 describe('check-events 迁移版本锚负例（全面复盘 20260902 G-1/G-3①）', () => {
   /**
    * 夹具树只造 docs/ 两锚面（迁移表止于 v14 + 运维手册标题写 14），真值恒读真仓
-   * src（当前 v15）→ 三路漂移逐一点名（readMirrorFile 以 relPath 含 docs/ 前缀拼
-   * MIRROR_ROOT，故夹具文件须落 docs/ 子目录）。族 7 被整块删除（或镜像面根缝被
-   * 静默退化）时本测必红——闸的闸。
+   * src（链尾动态推导，见 deriveMigrationTail——滚表日夹具自动跟锚不再假红）→
+   * 三路漂移逐一点名（readMirrorFile 以 relPath 含 docs/ 前缀拼 MIRROR_ROOT，
+   * 故夹具文件须落 docs/ 子目录）。族 7 被整块删除（或镜像面根缝被静默退化）时
+   * 本测必红——闸的闸。
    */
   it('夹具两表止于 v14 / 标题写 14 → exit 1 三路点名末行与标题漂移', () => {
     const fixRoot = mkdtempSync(join(tmpdir(), 'berry-check-events-mig-'));
@@ -147,8 +175,9 @@ describe('check-events 迁移版本锚负例（全面复盘 20260902 G-1/G-3①�
         encoding: 'utf8',
       });
       expect(run.status).toBe(1);
-      expect(run.stderr).toContain('迁移表末行 v14 ≠ 代码真值 v15');
-      expect(run.stderr).toContain('标题 user_version = 14 ≠ 代码真值 v15');
+      // 真值侧不硬编码（v16 滚表日实证过漂移假红）——推导链尾拼进期望串
+      expect(run.stderr).toContain(`迁移表末行 v14 ≠ 代码真值 v${deriveMigrationTail()}`);
+      expect(run.stderr).toContain(`标题 user_version = 14 ≠ 代码真值 v${deriveMigrationTail()}`);
     } finally {
       rmSync(fixRoot, { recursive: true, force: true });
     }
