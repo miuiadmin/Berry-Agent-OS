@@ -25,3 +25,7 @@ tmp-*.jpeg
 
 # 覆盖率诊断报告（基建大扫 #18）——本地即用即弃产物禁入库
 coverage/
+
+# 治理文档本地自持（AGENTS.md 真身 + CLAUDE.md symlink 指向它）——不入公开库（2026-09-03 历史洗净）
+AGENTS.md
+CLAUDE.md

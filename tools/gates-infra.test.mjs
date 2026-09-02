@@ -15,7 +15,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -169,9 +169,14 @@ test('build 链 bin 执行位：copy-app-assets 尾步对 bin 入口 chmod 0755�
 });
 
 test('AGENTS.md 行数预算棘轮：≤175 行（工程纪律「并发协作与本文档治理」——先例 dsh verify-doc-budgets）', () => {
+  // 治理文档本地自持、不入公开库（2026-09-03 公开仓历史洗净批）：本闸执法面 =
+  // 本地开发机——文件在场即执法；CI fresh clone 形态文件缺席 = 合规态（缺席
+  // 本身即洗净的目标态），skip 非红——readFileSync 裸读会 ENOENT 炸 CI。
+  const agentsPath = join(repoRoot, 'AGENTS.md');
+  if (!existsSync(agentsPath)) return; // 公开仓/CI 形态：治理文档缺席即合规
   // 预算棘轮只减不增（基线 175，含治理节本身）；事故追加新规则须同次修订合并
   // 或删减等量旧内容——本闸防无声超支。口径与 wc -l 一致（换行计数，尾部空行不计）。
-  const text = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
+  const text = readFileSync(agentsPath, 'utf8');
   const lines = (text.match(/\n/g) ?? []).length;
   assert.ok(
     lines <= 175,
