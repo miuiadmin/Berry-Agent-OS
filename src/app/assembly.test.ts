@@ -1220,7 +1220,7 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
       workspace,
       streamFn: scriptedStream([textMessage('答')]).streamFn,
     });
-    const coderId = first.session!.header.sessionId;
+    const berrycodeId = first.session!.header.sessionId;
     const hermesEntry = first.drivers.open({ app: first.apps.get('hermes')! })!;
     const hermesId = hermesEntry.session.header.sessionId;
     await first.shutdown();
@@ -1251,7 +1251,7 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
     try {
       expect(third.appGaps.has('berrycode')).toBe(true); // 前置：berrycode 缺场成立
       expect([...third.drivers.entries.values()].at(-1)!.appId).toBe('chat'); // 前置：boot 默认位已回落 chat
-      const resumed = third.drivers.open({ resume: coderId })!;
+      const resumed = third.drivers.open({ resume: berrycodeId })!;
       expect(resumed.appId).toBe('berrycode'); // 血缘标记如实（不谎称 chat 域）
     } finally {
       await third.shutdown();
