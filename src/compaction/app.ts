@@ -145,6 +145,39 @@ function newState(): SessionCompactionState {
   return { lastBeforeTokens: null, lowSavingsCount: 0, suppressAtTokens: null, pendingReseed: false };
 }
 
+/**
+ * 分账 Map 空闲保留帽（遗漏大扫 20260902-b #8，第六十四批——会话与存储篇
+ * M-3 条款勘正）：daemon 常驻下 webui 每新会话各建档永不回收 = 无界累积
+ * （jobs 终态帽 L-4 同族）。超帽按**建档序**（Map 迭代序 = 插入序）逐出最旧
+ * **空闲**条——两类结构性免逐：
+ * - 在飞（inFlight 持键——互斥压缩进行中，条目正被本次 run 消费）；
+ * - 持播种义务（pendingReseed 置位——压缩已落账播种未成，逐出 = 压缩对
+ *   活时间线永不生效，这是唯一有正确性后果的状态位）。
+ * 被逐条目的防抖/计数态重触时重置重来（启发式判据，丢了至多多压一轮）；
+ * 冷却/迭代链是 durable 派生面，本就不在 Map 内。
+ */
+export const STATES_RETENTION_CAP = 256;
+
+/**
+ * 超帽逐出（纯函数——导出面供回归锁直测语义；states 迭代序即建档序）。
+ * @param states per-session 分账 Map（就地删除）
+ * @param inFlight 在飞互斥键集（持键条目免逐）
+ * @param cap 保留帽（≤0 时清空全部空闲条——不用于产品配置，测试便利）
+ */
+export function evictIdleStates(
+  states: Map<string, { pendingReseed: boolean }>,
+  inFlight: { has(key: string): boolean },
+  cap: number,
+): void {
+  for (const key of states.keys()) {
+    if (states.size <= cap) break; // 已收帽——停（新建档在迭代序末位永不被自己触发）
+    const entry = states.get(key);
+    if (entry === undefined) continue; // 迭代中途已被删（并发安全形态，防御位）
+    if (inFlight.has(key) || entry.pendingReseed) continue; // 两类免逐（见帽常量 JSDoc）
+    states.delete(key);
+  }
+}
+
 /** 从 AssistantMessage content 提取纯文本（摘要结果——text 块拼接） */
 function extractText(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -202,13 +235,16 @@ export function createCompactionApp(): BuiltinAppModule {
         fallbackWindowTokens: (cfgRaw.fallbackWindowTokens as number) ?? 200_000,
       };
 
-      /** per-session 分账（冷读 M-3） */
+      /** per-session 分账（冷读 M-3）——带空闲保留帽（见 STATES_RETENTION_CAP：新建档点即逐出执法点，不另设周期面） */
       const states = new Map<string, SessionCompactionState>();
       const stateOf = (sessionId: string): SessionCompactionState => {
         let s = states.get(sessionId);
         if (s === undefined) {
           s = newState();
           states.set(sessionId, s);
+          // 建档是 Map 唯一增长点——就地执法（引用下方 inFlight 闭包变量，
+          // 调用时机恒在 apply 体执行完毕之后，无 TDZ 风险）
+          evictIdleStates(states, inFlight, STATES_RETENTION_CAP);
         }
         return s;
       };

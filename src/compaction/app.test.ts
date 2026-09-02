@@ -16,7 +16,7 @@ import type { ContextScope } from '../context/types.js';
 import { Session } from '../session/session.js';
 import type { SessionEvent } from '../contracts/events.js';
 import type { ProjectedMessage } from '../session/derive.js';
-import { createCompactionApp } from './app.js';
+import { createCompactionApp, evictIdleStates, STATES_RETENTION_CAP } from './app.js';
 import type { BuiltinAppModule } from '../contracts/app.js';
 import { SUMMARY_PREFIX } from './policy.js';
 
@@ -35,8 +35,8 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
 interface Harness {
   ctx: ContextScope;
   session: Session;
-  /** 模拟一次 run 结算（派发 onRunSettled 订阅者） */
-  fire: () => void;
+  /** 模拟一次 run 结算（派发 onRunSettled 订阅者；可指定归属 sessionId——分账键控） */
+  fire: (sessionId?: string) => void;
   /** reseedTimeline 调用计数 */
   reseedCalls: () => number;
   /** 控制 reseedTimeline 返回值（false = run 进行中拒改） */
@@ -128,8 +128,8 @@ function setup(opts?: { agent?: boolean }): Harness {
   return {
     ctx,
     session,
-    fire: () => {
-      for (const cb of [...settledCbs]) cb({ sessionId: session.header.sessionId });
+    fire: (sessionId?: string) => {
+      for (const cb of [...settledCbs]) cb({ sessionId: sessionId ?? session.header.sessionId });
     },
     reseedCalls: () => reseedCalls.length,
     setReseed: (ok) => {
@@ -369,5 +369,54 @@ describe('compaction 溢出面 compactForOverflow', () => {
     h.fire();
     await until(() => h.reseedCalls() >= 0);
     expect(h.session.events.filter((e) => e.type === 'compaction/start')).toHaveLength(1); // 仅溢出那一轮
+  });
+});
+
+/* ---------------- 分账保留帽（遗漏大扫 20260902-b #8，第六十四批） ---------------- */
+
+describe('compaction 分账 Map 空闲保留帽', () => {
+  it('纯函数语义：超帽按建档序逐出最旧空闲条——在飞与持播种义务免逐、新建档在末位不自杀', () => {
+    // 红先形态说明：修复前 evictIdleStates/STATES_RETENTION_CAP 导出面缺席，
+    // 本套件导入即红（fail-loud）；语义面在此钉死。
+    const states = new Map<string, { pendingReseed: boolean }>();
+    // s-0..s-9 依建档序灌入（Map 迭代序 = 插入序——逐出的「最旧」判据）
+    for (let i = 0; i < 10; i++) states.set(`s-${i}`, { pendingReseed: false });
+    states.get('s-3')!.pendingReseed = true; // 持播种义务（压缩已落账播种未成）
+    const inFlight = new Set(['s-1']); // 在飞（互斥压缩进行中）
+    evictIdleStates(states, inFlight, 5);
+    // 帽 5：s-0/s-2 逐、s-1 在飞跳、s-3 义务跳、s-4/s-5/s-6 逐（恰收帽），余者保序保留
+    expect([...states.keys()]).toEqual(['s-1', 's-3', 's-7', 's-8', 's-9']);
+  });
+
+  it('在帽内零动作：size ≤ cap 时不删任何条（建档不缩水）', () => {
+    const states = new Map<string, { pendingReseed: boolean }>([
+      ['a', { pendingReseed: false }],
+      ['b', { pendingReseed: false }],
+    ]);
+    evictIdleStates(states, new Set(), STATES_RETENTION_CAP);
+    expect([...states.keys()]).toEqual(['a', 'b']);
+  });
+
+  it('集成：超帽逐出潮中持播种义务的最旧条目存活——义务跨 258 条压力仍可兑现', async () => {
+    const h = setup();
+    h.setReseed(false); // 播种恒拒 → 首轮压缩后 pendingReseed 置位（本测的义务载体）
+    for (let i = 0; i < 5; i++) h.addTurn();
+    h.setUsage(150_000);
+    h.fire();
+    await until(() => h.session.events.some((e) => e.type === 'compaction/end'));
+    expect(h.reseedCalls()).toBe(1); // 试播被拒——义务已记在首会话条目上
+
+    // 前置冷却（durable failed 笔）——后续全部填充腿在 ④ 冷却闸早退：
+    // 只建档（stateOf）不进五步，灌 257 条会话账目全程同步零模型调用
+    h.session.append('compaction/failed', { reason: 'threshold', error: '填充前置冷却' });
+    for (let i = 0; i <= STATES_RETENTION_CAP; i++) h.fire(`fill-${i}`);
+    // 首会话 + 257 填充 = 258 条 > 帽 256——最旧两条空闲被逐；首会话因持义务免逐
+
+    // 补播窗口开：再结算首会话——义务仍在（若被逐则 pendingReseed 归零、试播不再发生）
+    h.setReseed(true);
+    h.fire();
+    await until(() => h.reseedCalls() === 2);
+    // 冷却闸拦住新触（上面临界笔在窗内）——全程序恰一轮五步
+    expect(h.session.events.filter((e) => e.type === 'compaction/start')).toHaveLength(1);
   });
 });
