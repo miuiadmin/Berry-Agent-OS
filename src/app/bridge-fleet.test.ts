@@ -184,7 +184,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
   // 【遗漏大扫 20260901-d #20】桥注册的 D1 应用域路由回归锁：分域行 apps:[a]
   // 的桥工具须落应用域层 appDomains[a]（listFor(a) 可见），不落全局层、不进
   // 别家域；域死随行回卷摘除。背景：smoke-carrier 曾是此链路的唯一守护且静默
-  // 过期（boot-open 首会话默认应用 coder 化后组成面判据错位）——本锁把守护
+  // 过期（boot-open 首会话默认应用 berrycode 化后组成面判据错位）——本锁把守护
   // 收进门禁内（免 key、真 worker 桥全链）。
   it('分域行工具 D1 应用域路由：apps:[a] 行桥注册落应用域层——listFor(a) 可见/全局层与别家域不在场/域死回卷随摘', async () => {
     const dir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'fleet-')));

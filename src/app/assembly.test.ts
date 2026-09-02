@@ -594,9 +594,9 @@ describe('ConversationDriver + durable 接线', () => {
       'todo',
     ]);
     // request/header 载荷带应用域腿（血缘显式打标的证据面——契约篇 §5.4；
-    // 组装批：无参 open 走默认应用解析（coder 带标在场）→ 首会话打标 coder 域）
+    // 组装批：无参 open 走默认应用解析（berrycode 带标在场）→ 首会话打标 berrycode 域）
     const header = runtime.session!.events.find((e) => e.type === 'request/header');
-    expect((header?.data as { app?: string }).app).toBe('coder');
+    expect((header?.data as { app?: string }).app).toBe('berrycode');
     // 投影回读
     const projected = deriveMessages(runtime.session!.events);
     expect(projected.map((m) => m.type)).toEqual(['user', 'assistant']);
@@ -1143,7 +1143,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
 describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认应用）', () => {
   it('兜底态全栈：带标与 chat 均缺场 → boot open 防御降级（无驱动壳照启 + appGaps 披露 + /app new 示因）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    // 禁 web+memory：coder 组件含两者 → 缺场；chat/hermes 组件含 memory → 同缺
+    // 禁 web+memory：berrycode 组件含两者 → 缺场；chat/hermes 组件含 memory → 同缺
     //（全官方清单都声明 memory——两跳全落空的真组合）；chat 件本身在场（boot
     // open 走得到默认解析位——测的是解析无果的降级，不是件缺位）
     writeFileSync(
@@ -1155,7 +1155,7 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
     expect(runtime.conversation).toBeUndefined();
     expect(runtime.drivers.entries.size).toBe(0);
     // 缺场投影（gaps 值 = 清单声明序内的缺失清单——dump-config 披露同源）
-    expect(runtime.appGaps.get('coder')).toEqual(['builtin:web', 'builtin:memory']);
+    expect(runtime.appGaps.get('berrycode')).toEqual(['builtin:web', 'builtin:memory']);
     expect(runtime.appGaps.get('chat')).toEqual(['builtin:memory']);
     // 壳照启半边：命令面活——/app new 失败文案示明默认应用不可用（M7 链路读侧）
     const { backend, notifies } = recordingBackend();
@@ -1166,10 +1166,10 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
     runtimes.pop(); // 已手动关停——让位登记表防二次关停
   });
 
-  it('默认域续接含 NULL 存量（includeNullApp 随默认域）：无参启动认领 NULL 会话且投影 coder；显式 hermes 域不认领', async () => {
+  it('默认域续接含 NULL 存量（includeNullApp 随默认域）：无参启动认领 NULL 会话且投影 berrycode；显式 hermes 域不认领', async () => {
     const dbFile = join(realpathSync(tmpdir()), `app-null-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
     const workspace = makeWorkspace();
-    // 首程：boot 建 coder 会话 + 手造 NULL 标签存量会话（打标机制落地前的旧世界）
+    // 首程：boot 建 berrycode 会话 + 手造 NULL 标签存量会话（打标机制落地前的旧世界）
     const first = await createRuntime({
       dbPath: dbFile,
       workspace,
@@ -1180,8 +1180,8 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
     const legacyId = legacy.header.sessionId;
     await first.shutdown();
 
-    // 二程：无参启动续接——默认域（coder ∪ NULL）最新 = legacy 会话；NULL 标签
-    // → 保持默认投影（entry 打标 coder，会话标签不被改写）
+    // 二程：无参启动续接——默认域（berrycode ∪ NULL）最新 = legacy 会话；NULL 标签
+    // → 保持默认投影（entry 打标 berrycode，会话标签不被改写）
     const second = await createRuntime({
       dbPath: dbFile,
       workspace,
@@ -1190,7 +1190,7 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
     });
     try {
       expect(second.session!.header.sessionId).toBe(legacyId); // NULL 存量被默认域认领续接
-      expect(second.drivers.entries.get(legacyId)!.appId).toBe('coder'); // 默认投影打标（NULL → 默认应用）
+      expect(second.drivers.entries.get(legacyId)!.appId).toBe('berrycode'); // 默认投影打标（NULL → 默认应用）
     } finally {
       await second.shutdown();
     }
@@ -1214,7 +1214,7 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
   it('string resume 归属改钉（m4）：目标会话标签在场且应用在场 → 改钉该域；标签在场但应用缺场 → 打标记血缘、装配面维持解析域', async () => {
     const dbFile = join(realpathSync(tmpdir()), `app-m4-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
     const workspace = makeWorkspace();
-    // 首程：boot coder 会话 + 经 drivers.open 开 hermes 域会话（标签 hermes）
+    // 首程：boot berrycode 会话 + 经 drivers.open 开 hermes 域会话（标签 hermes）
     const first = await createRuntime({
       dbPath: dbFile,
       workspace,
@@ -1238,8 +1238,8 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
       await second.shutdown();
     }
 
-    // 三程：禁 web → coder 缺场、chat 回落为默认；string resume 到旧 coder 会话 →
-    // 标签在场但应用缺场 → appId 打标血缘 coder、装配面维持解析域（chat 清单）
+    // 三程：禁 web → berrycode 缺场、chat 回落为默认；string resume 到旧 berrycode 会话 →
+    // 标签在场但应用缺场 → appId 打标血缘 berrycode、装配面维持解析域（chat 清单）
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: web\n    disabled: true\n');
     const third = await createRuntime({
@@ -1249,26 +1249,26 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
       streamFn: scriptedStream([textMessage('答')]).streamFn,
     });
     try {
-      expect(third.appGaps.has('coder')).toBe(true); // 前置：coder 缺场成立
+      expect(third.appGaps.has('berrycode')).toBe(true); // 前置：berrycode 缺场成立
       expect([...third.drivers.entries.values()].at(-1)!.appId).toBe('chat'); // 前置：boot 默认位已回落 chat
       const resumed = third.drivers.open({ resume: coderId })!;
-      expect(resumed.appId).toBe('coder'); // 血缘标记如实（不谎称 chat 域）
+      expect(resumed.appId).toBe('berrycode'); // 血缘标记如实（不谎称 chat 域）
     } finally {
       await third.shutdown();
     }
   });
 
-  it('dump-config 默认应用披露（M7）：健康态「默认应用：coder」；兜底态披露回落原因链', async () => {
+  it('dump-config 默认应用披露（M7）：健康态「默认应用：berrycode」；兜底态披露回落原因链', async () => {
     const chunks: string[] = [];
     const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
       chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
       return true;
     }) as typeof process.stdout.write);
     try {
-      // 健康态：默认层全在场 → 带标 coder 直取
+      // 健康态：默认层全在场 → 带标 berrycode 直取
       const emptyDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
       expect(await dumpConfigMain({ compositionDir: emptyDir })).toBe(0);
-      expect(chunks.join('')).toContain('默认应用：coder\n');
+      expect(chunks.join('')).toContain('默认应用：berrycode\n');
 
       // 兜底态：禁 web+memory → 两跳全落空 → 披露无果 + 两缺场原因（诊断自助面）
       chunks.length = 0;
@@ -1280,7 +1280,7 @@ describe('组装批默认应用键（契约篇 §5.4：无参 open 解析默认�
       expect(await dumpConfigMain({ compositionDir: gapDir })).toBe(0);
       const out = chunks.join('');
       expect(out).toContain('默认应用：（无——默认解析无果');
-      expect(out).toContain('coder 缺场（缺组件：builtin:web、builtin:memory）');
+      expect(out).toContain('berrycode 缺场（缺组件：builtin:web、builtin:memory）');
       expect(out).toContain('chat 缺场（缺组件：builtin:memory）');
     } finally {
       spy.mockRestore();
@@ -1454,7 +1454,7 @@ describe('应用前台入口（第三纵切：boot 打标 / 应用进入 / deleg
     expect(err).toBeInstanceOf(AppError);
     expect(err.code).toBe(APP_NOT_FOUND);
     expect(err.message).toContain('no-such');
-    expect(err.message).toContain('chat、coder、hermes'); // 在册清单随错披露（coder = 组装批新册应用）
+    expect(err.message).toContain('berrycode、chat、hermes'); // 在册清单随错披露（berrycode = 组装批新册应用）
   });
 
   it('/app <id> [首条消息]：应用进入 + 聚焦切换 + 尾随消息落应用域（chat 域不串）', async () => {
@@ -1479,14 +1479,14 @@ describe('应用前台入口（第三纵切：boot 打标 / 应用进入 / deleg
     expect(JSON.stringify(runtime.drivers.entries.get(bootId)!.session.events)).not.toContain('首条消息');
   });
 
-  it('/new 透传聚焦条目 app（B 案，D1-d）：同应用新开——默认域恒 coder、hermes 域开在 hermes', async () => {
+  it('/new 透传聚焦条目 app（B 案，D1-d）：同应用新开——默认域恒 berrycode、hermes 域开在 hermes', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ streamFn });
-    // 默认域聚焦（boot 缺省 = 默认应用 coder——组装批后默认位解析带标应用）：
-    // /new 后新会话仍 coder 域（透传不改变缺省行为半边）
+    // 默认域聚焦（boot 缺省 = 默认应用 berrycode——组装批后默认位解析带标应用）：
+    // /new 后新会话仍 berrycode 域（透传不改变缺省行为半边）
     runtime.channels.commands.lookup('new')!.handler('');
     let current = runtime.front.focus.sessionId!;
-    expect(runtime.drivers.entries.get(current)!.appId).toBe('coder');
+    expect(runtime.drivers.entries.get(current)!.appId).toBe('berrycode');
     // 进入 hermes → 聚焦切应用域 → /new 开在 hermes 域（恒默认域过渡态收口）
     runtime.channels.commands.lookup('app')!.handler('hermes');
     current = runtime.front.focus.sessionId!;
@@ -1522,9 +1522,9 @@ describe('应用前台入口（第三纵切：boot 打标 / 应用进入 / deleg
     const { backend, notifies } = recordingBackend();
     runtime.ui.attach(backend);
     runtime.channels.commands.lookup('app')!.handler('');
-    // 可用应用披露行（在册且组件齐备——chat/coder/hermes 默认树全在场；缺场应用
-    // 不披露；组装批默认应用带标——coder 行缀「(默认)」）
-    expect(notifies.join('\n')).toContain('可用应用：chat、coder(默认)、hermes');
+    // 可用应用披露行（在册且组件齐备——chat/berrycode/hermes 默认树全在场；缺场应用
+    // 不披露；组装批默认应用带标——berrycode 行缀「(默认)」）
+    expect(notifies.join('\n')).toContain('可用应用：berrycode(默认)、chat、hermes');
     // delegable 自动注册（boot 组合根）：hermes 声明 entry.delegable → 双面
     const subagents = runtime.ctx.get<SubagentsServiceFace>('subagents');
     expect(subagents.list().map((info) => info.name)).toContain('hermes');
@@ -1756,7 +1756,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [coder]\n    sandbox: { carrier: main }\n    config:\n      tag: 装载\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [berrycode]\n    sandbox: { carrier: main }\n    config:\n      tag: 装载\n`,
     );
 
     const { streamFn, contexts } = scriptedStream([
@@ -1850,7 +1850,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       'browser_screenshot',
       'browser_console',
       'agent_hermes', // delegable 注册在 ⑨ 装载后——全局层殿后一位
-      'plug-echo', // D2 触发②：第三方行挂 app: coder（默认应用域——组装批后 boot 会话域）→ 隐式路由落 coder 应用域层（全局层之后、驱动层之前）
+      'plug-echo', // D2 触发②：第三方行挂 app: berrycode（默认应用域——组装批后 boot 会话域）→ 隐式路由落 berrycode 应用域层（全局层之后、驱动层之前）
       'read',
       'write',
       'edit',
@@ -1909,12 +1909,12 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       // 隐式路由落 chat 应用域层：该应用作用域域视角独见
       expect(runtime.tools.listFor('chat').map((t) => t.name)).toContain('app-echo');
       // 全局口径（诊断面/裸 list）不可见；别应用作用域域不可见（跨应用零泄漏
-      //——coder = 默认应用域：boot 会话即此域，chat 挂载行对它同样不可见）
+      //——berrycode = 默认应用域：boot 会话即此域，chat 挂载行对它同样不可见）
       expect(runtime.tools.list().map((t) => t.name)).not.toContain('app-echo');
-      expect(runtime.tools.listFor('coder').map((t) => t.name)).not.toContain('app-echo');
+      expect(runtime.tools.listFor('berrycode').map((t) => t.name)).not.toContain('app-echo');
       expect(runtime.tools.listFor('hermes').map((t) => t.name)).not.toContain('app-echo');
       // 正半边（断言 6 注册面码半边）：挂 chat 应用的行能力进 chat 应用组成面
-      //——组装批后默认驱动 = coder 域（boot 会话不见 chat 挂载行），chat 域组成
+      //——组装批后默认驱动 = berrycode 域（boot 会话不见 chat 挂载行），chat 域组成
       // 面经 /app 进入取聚焦会话验证（组成面 = 全局 ∪ 该应用域 ∪ 驱动层）
       runtime.channels.commands.lookup('app')!.handler('chat');
       const chatSessionId = runtime.front.focus.sessionId!;
@@ -2680,7 +2680,7 @@ describe('/reload 组合树重载', () => {
     const appDir = writeAppDir(compositionDir, versionedAppSource('v1'));
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [coder]\n    sandbox: { carrier: main }\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [berrycode]\n    sandbox: { carrier: main }\n`,
     );
     // 脚本两轮齐全：每轮 toolCall+text（scriptedStream 只前进不回绕——缺项会钳在末条）
     const { streamFn } = scriptedStream([

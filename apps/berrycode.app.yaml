@@ -1,5 +1,8 @@
 # 官方应用清单：代码智能体应用（组装批 2026-08-30，契约篇 §5.4 默认应用键条款）
 #
+# 2026-09-02 用户拍板更名：id coder → berrycode（纯改名——定位/机制/清单内容
+# 零变化；应用 id 属用户面字符串，命名归位见技术栈篇 §8 定名表第 7 行）。
+#
 # 预装默认应用（第十七批拍板 20 兑现）：default: true = 无显式 app 的会话打开
 # 目标域（TUI boot 续接/新建、/app new、CLI run 缺省——三入口结构性收敛于 open
 # 缺省位一处）。全局唯一性由装载期执法（在册 >1 带标清单 = APP_INVALID 拒启）。
@@ -9,7 +12,7 @@
 # 不在新增运行机器。components 按装载身份串解析，在场断言装载期执行、
 # 缺场 = 应用级隔离不拒启（禁任一 Ring 2 件 → 本应用缺场 → 默认位回落 chat，
 # 回落原因 dump-config 披露）。
-id: coder
+id: berrycode
 label: 代码
 default: true
 components:

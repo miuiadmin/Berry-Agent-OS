@@ -375,13 +375,13 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
         (f) => f.kind === 'status' && (f.payload as { status?: string })?.status === 'connected',
       );
 
-      // ③ sessions：boot 已开默认应用（coder）会话——活条目腿在场
+      // ③ sessions：boot 已开默认应用（berrycode）会话——活条目腿在场
       const sessions = await getJson(`${base}/api/sessions`);
       expect(sessions.status).toBe(200);
       const list = sessions.body as { id: string; appId: string; active: boolean }[];
       expect(list.length).toBeGreaterThanOrEqual(1);
       const boot = list.find((s) => s.active);
-      expect(boot?.appId).toBe('coder');
+      expect(boot?.appId).toBe('berrycode');
       const bootId = boot!.id;
 
       // ④ 拉投影腿：boot 会话消息面在册（空会话 = 空数组也是合法形状）
@@ -469,12 +469,12 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
       // ④ 已闭 submit：404（只读——复活面挂刀三）
       expect((await postSubmit(portB, sessionA, 'x')).status).toBe(404);
 
-      // ⑤ 开新：201 + 默认应用 coder + 驻留（B 的 boot 条目仍 active）
+      // ⑤ 开新：201 + 默认应用 berrycode + 驻留（B 的 boot 条目仍 active）
       const opened = await postJson(portB, '/api/sessions', '{}');
       expect(opened.status).toBe(201);
       const summary = opened.body as { id: string; appId: string; active: boolean };
       expect(summary.active).toBe(true);
-      expect(summary.appId).toBe('coder');
+      expect(summary.appId).toBe('berrycode');
       const activeIds = ((await getJson(`${baseB}/api/sessions`)).body as { id: string; active: boolean }[])
         .filter((s) => s.active)
         .map((s) => s.id);
@@ -577,7 +577,7 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
         return entries.length === 1 && entries[0]?.approvalId === id1 && entries[0]?.ownership?.sessionId === bootId;
       });
       const pending1 = await pendingList();
-      expect(pending1[0]?.ownership?.appId).toBe('coder'); // 驱动归属闭包（S5 织入面全栈透传）
+      expect(pending1[0]?.ownership?.appId).toBe('berrycode'); // 驱动归属闭包（S5 织入面全栈透传）
       expect(pending1[0]?.suggestedEntry).toBeUndefined(); // 管道命令剥不出词干 → 无草案
       // 值域执法三连：闭集外（cancel）400 / always 无草案 400 / unknown id 404
       expect(

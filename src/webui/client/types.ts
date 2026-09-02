@@ -11,7 +11,7 @@
 export interface SessionSummary {
   /** 会话 id */
   readonly id: string;
-  /** 应用域键（coder / chat / 第三方应用 id） */
+  /** 应用域键（berrycode / chat / 第三方应用 id） */
   readonly appId: string;
   /** 工作目录（sessions 行直出；store 行迟到时可缺省） */
   readonly cwd?: string;

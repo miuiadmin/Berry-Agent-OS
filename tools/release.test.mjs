@@ -160,7 +160,7 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     'dist/admin/skills/admin/SKILL.md',
     'examples/tool-echo/index.ts',
     'examples/tool-echo/README.md',
-    'apps/coder.app.yaml',
+    'apps/berrycode.app.yaml',
     'skills/commit-checklist/SKILL.md',
   ];
   it('合法清单 → 绿', () => {
@@ -301,7 +301,7 @@ beforeEach(() => {
   // 断言串自 readDefaultAppId(workDir) 动态拼出——夹具须与真实仓 apps/ 形态
   // 对齐（default 键真源），否则 green 路径误报「清单缺席」
   mkdirSync(join(workDir, 'apps'), { recursive: true });
-  writeFileSync(join(workDir, 'apps', 'coder.app.yaml'), 'id: coder\nlabel: 代码\ndefault: true\n');
+  writeFileSync(join(workDir, 'apps', 'berrycode.app.yaml'), 'id: berrycode\nlabel: 代码\ndefault: true\n');
 });
 afterEach(() => {
   rmSync(workDir, { recursive: true, force: true });
@@ -389,7 +389,7 @@ function greenBase(version) {
             'dist/admin/skills/admin/SKILL.md',
             'examples/tool-echo/index.ts',
             'examples/tool-echo/README.md',
-            'apps/coder.app.yaml',
+            'apps/berrycode.app.yaml',
             'skills/commit-checklist/SKILL.md',
           ],
         },
@@ -406,8 +406,8 @@ function greenBase(version) {
     // `<semver> "<代号>"`（VERSION_WITH_CODENAME）——罐头面失真 = 断言形态回退
     // 时测试照绿的假绿（O-10 即该形态实证：断言错成裸 semver 精确比较测试仍全绿）
     'smoke:run': () => ({ code: 0, stdout: `${version} "Peiligang"\n`, stderr: '' }),
-    // 真握手（复盘 G-1）：dump-config 断言官方应用清单在场（默认应用 = coder）
-    'smoke:apps': () => ({ code: 0, stdout: '默认应用：coder\n', stderr: '' }),
+    // 真握手（复盘 G-1）：dump-config 断言官方应用清单在场（默认应用 = berrycode）
+    'smoke:apps': () => ({ code: 0, stdout: '默认应用：berrycode\n', stderr: '' }),
     publish: () => ({ code: 0, stdout: '', stderr: '' }),
   };
 }
@@ -590,7 +590,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     expect(ran).not.toContain('publish'); // 装机产物不可装配即止
   });
 
-  it('smoke-apps-missing：dump-config 未见「默认应用：coder」拒——publish 永不触达（G-1 真握手闸红例，遗漏大扫 20260901-b #25）', async () => {
+  it('smoke-apps-missing：dump-config 未见「默认应用：berrycode」拒——publish 永不触达（G-1 真握手闸红例，遗漏大扫 20260901-b #25）', async () => {
     const version = '1.0.0-alpha.3';
     const base = greenBase(version);
     const { io, calls } = scriptedIo(base);
@@ -599,7 +599,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
         workDir,
         pkg: { name: 'berry-agent-os', version, binName: 'berry' },
       }),
-    ).rejects.toThrow(/未见「默认应用：coder」/);
+    ).rejects.toThrow(/未见「默认应用：berrycode」/);
     const ran = labels(calls);
     expect(ran).toContain('smoke:run'); // 冒烟段真到过（smoke:apps 本尊被注入器接管不进记录）
     expect(ran).not.toContain('publish');
@@ -763,7 +763,7 @@ describe('安装冒烟两断言负例（遗漏大扫 20260901 O-10 + L-6——�
     ).rejects.toThrow(/版本漂移/);
   });
 
-  it('smoke:apps 未见「默认应用：coder」→ 拒（dump-config 真握手探针的执行锁——探针被删/断言放空必红）', async () => {
+  it('smoke:apps 未见「默认应用：berrycode」→ 拒（dump-config 真握手探针的执行锁——探针被删/断言放空必红）', async () => {
     // L-6 锁体：greenBase 只供应答不锁探针在岗——本例罐头应答取「合法退出码但
     // 无标记」形态，若探针步骤或其断言被整块拆除，本测必红（O-10 即该假绿实证）
     const version = '1.0.0-alpha.3';

@@ -63,9 +63,9 @@ class FakeEventSource {
 
 /* ---------------- 夹具 ---------------- */
 
-/** 活会话 coder 条目（首载自动选中目标） */
+/** 活会话 berrycode 条目（首载自动选中目标） */
 function liveSession(): SessionSummary {
-  return { id: 'live-1', appId: 'coder', cwd: '/w/proj', active: true, updatedAt: Date.now() };
+  return { id: 'live-1', appId: 'berrycode', cwd: '/w/proj', active: true, updatedAt: Date.now() };
 }
 
 /** 首载缺省应答（清单一条活会话 + 一条用户消息 + todo 一项） */
@@ -86,7 +86,7 @@ function sendFrame(es: FakeEventSource, env: unknown): void {
   });
 }
 
-/** 等到首载收束（用户行 '你好' 上屏——fetchMessages 应答锚；'coder' 双命中不可作锚） */
+/** 等到首载收束（用户行 '你好' 上屏——fetchMessages 应答锚；'berrycode' 双命中不可作锚） */
 async function untilLoaded(): Promise<void> {
   await waitFor(() => {
     expect(screen.getByText('你好')).toBeTruthy();
@@ -110,9 +110,9 @@ afterEach(() => {
 describe('App 首载与选中', () => {
   it('清单 → 自动选第一条活会话（闭会话跳过）+ 投影/todo 双拉渲染', async () => {
     render(<App />);
-    // 用户行 + todo 面板两面上屏（loadView 双拉收束）；顶栏与清单行 'coder' 双命中点数断言
+    // 用户行 + todo 面板两面上屏（loadView 双拉收束）；顶栏与清单行 'berrycode' 双命中点数断言
     await untilLoaded();
-    expect(screen.getAllByText('coder')).toHaveLength(2);
+    expect(screen.getAllByText('berrycode')).toHaveLength(2);
     expect(screen.getByText(/正在做任务一/)).toBeTruthy();
     expect(api.fetchMessages).toHaveBeenCalledWith('live-1');
     expect(api.fetchTodo).toHaveBeenCalledWith('live-1');

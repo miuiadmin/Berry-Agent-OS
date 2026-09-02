@@ -152,7 +152,7 @@ export async function answerApproval(
 
 /**
  * 对话应用 id（apps/chat.app.yaml 清单的 id——回落链锚点 + 字面量共用源）。
- * 组装批（2026-08-30）起默认应用 = coder（清单 default 键解析，契约篇 §5.4
+ * 组装批（2026-08-30）起默认应用 = berrycode（清单 default 键解析，契约篇 §5.4
  * 默认应用键条款）；chat 保持回落链第二跳锚点——卸默认应用后系统仍有可对话入口。
  */
 export const CHAT_APP_ID = 'chat';

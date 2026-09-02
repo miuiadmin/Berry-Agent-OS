@@ -416,7 +416,7 @@ describe('daemon 组合根全栈：审批三腿与协议面', () => {
     runtimes.push(rt);
     const auth = { authorization: `Bearer ${token}` };
 
-    // boot coder 会话（daemon 形态 webui 常开——清单可达即鉴权/开面双证）
+    // boot berrycode 会话（daemon 形态 webui 常开——清单可达即鉴权/开面双证）
     const sessions = (await getJson(port, '/api/sessions', auth)).body as { id: string; active: boolean }[];
     const sid = sessions.find((s) => s.active)!.id;
 

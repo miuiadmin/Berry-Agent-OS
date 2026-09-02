@@ -149,7 +149,7 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
   if (firstBoot) {
     runtime.ui.notify(
       `欢迎使用 Berry ${VERSION}——跑 AI 应用的操作系统。\n` +
-        '· 首启即用：直接说需求即可（默认进入 coder 代码智能体应用；/app chat 换纯对话）\n' +
+        '· 首启即用：直接说需求即可（默认进入 berrycode 代码智能体应用；/app chat 换纯对话）\n' +
         '· /help 看全部命令 · /guide 快速上手参考\n' +
         '· 模型配置：APP_MODEL 环境变量覆盖缺省模型；凭证与数据目录见 docs/使用指南',
     );

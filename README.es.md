@@ -29,7 +29,7 @@ Esto no es ciencia ficción. Es el objetivo de diseño de Berry: **un sistema op
 
 El kernel mínimo de Berry hace exactamente **instalar, ejecutar, proteger, almacenar**; todo lo demás — conversación, agente de código, memoria, objetivos largos, tareas programadas, MCP, LSP, observabilidad, interfaz web — se carga como **aplicación** sobre el árbol de composición. **Instalable, desinstalable, reemplazable** — mientras las cinco líneas de vida de tu Agent (credenciales, memoria, historial de confianza, presupuestos, libros de cuenta) se acumulan una sola vez. **Cerebro nuevo, mismo cuerpo.**
 
-**27** módulos (todos con código) · **27** ganchos de ciclo de vida · **25** tipos de eventos durables · **15** piezas oficiales (14 de Ring 2 + la aplicación por defecto coder, todas desinstalables) · **2.700+** pruebas · **0** telemetría.
+**27** módulos (todos con código) · **27** ganchos de ciclo de vida · **25** tipos de eventos durables · **15** piezas oficiales (14 de Ring 2 + la aplicación por defecto berrycode, todas desinstalables) · **2.700+** pruebas · **0** telemetría.
 
 **Objetivo mínimo: la capa por defecto de fábrica alcanza el nivel de uso diario de Codex / Claude Code.**
 
@@ -87,12 +87,12 @@ Bien, basta de romance. **Ahora el acero y el hierro.**
             │  de 27 módulos, vigilado por máquina        │
             └──────────────────┬──────────────────────────┘
                                │ árbol de composición (capa por defecto + overlay.yaml)
-        ┌──────────┬──────────┼──────────────┬───────────┐
-        ▼          ▼          ▼              ▼           ▼
-     coder       chat      memory         goal      …11 piezas
+        ┌─────────────┬──────────┬──────────────┬───────────┐
+        ▼             ▼          ▼              ▼           ▼
+      berrycode      chat      memory         goal      …11 piezas
    (app por     (conver-  (estado del    (objetivos  (cada una
     defecto)    sación)    operador)     largos)   desinstalable)
-        └──────────┴──────────┴──────────────┴───────────┘
+        └─────────────┴──────────┴──────────────┴───────────┘
                                │ origen en eventos (registro append-only = fuente de verdad)
                                ▼
                  SQLite WAL: sesiones · credenciales · memoria · libros de cuenta · historial de confianza
@@ -113,7 +113,7 @@ git clone <este repositorio> && cd Berry-Agent-OS && npm install && npm run buil
 ```
 
 ```bash
-berry             # TUI interactivo (por defecto entra en la app coder, retoma la última sesión; el primer arranque muestra una guía de bienvenida)
+berry             # TUI interactivo (por defecto entra en la app berrycode, retoma la última sesión; el primer arranque muestra una guía de bienvenida)
 berry run "hi"    # ejecución única (el código de salida es el resultado)
 berry dump-config # diagnóstico de la composición efectiva (modelo / árbol / estado de carga, sin escribir en la base)
 berry upgrade     # verbo de actualización (consulta el registry y se autoactualiza; /guide muestra la referencia rápida)
@@ -139,7 +139,7 @@ El primer arranque crea el directorio de datos en `~/.berry/`. El modelo por def
 
 | Pieza        | Función                                                                                                        |
 | ------------ | -------------------------------------------------------------------------------------------------------------- |
-| `coder`      | App de agente de código por defecto (manifiesto puro, `/app` para cambiar)                                     |
+| `berrycode`  | App de agente de código por defecto (manifiesto puro, `/app` para cambiar)                                     |
 | `chat`       | App de conversación (ancla de repliegue)                                                                       |
 | `memory`     | Memoria: extracción/fusión/inyección doble/búsqueda entre sesiones/evolución/TTL/cadenas de versiones          |
 | `subagent`   | Delegación de subagentes + subagentes declarativos                                                             |

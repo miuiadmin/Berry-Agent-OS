@@ -34,7 +34,7 @@ function detail(over: Partial<WebuiApprovalDetail> = {}): WebuiApprovalDetail {
     summary: '写文件',
     reason: 'workspace-write 档',
     suggestedEntry: { tool: 'write_file', pattern: '/tmp/a.txt' },
-    ownership: { appId: 'coder', sessionId: 'sess-1' },
+    ownership: { appId: 'berrycode', sessionId: 'sess-1' },
     priority: 'background',
     ...over,
   };
@@ -100,7 +100,7 @@ describe('pending 审批登记簿：claim', () => {
     expect(promise).toBeInstanceOf(Promise);
     const pending = reg.pending('a1');
     expect(pending?.suggestedEntry).toEqual({ tool: 'write_file', pattern: '/tmp/a.txt' });
-    expect(pending?.ownership).toEqual({ appId: 'coder', sessionId: 'sess-1' });
+    expect(pending?.ownership).toEqual({ appId: 'berrycode', sessionId: 'sess-1' });
     expect(pending?.priority).toBe('background');
     expect(pending?.reason).toBe('workspace-write 档');
   });
@@ -138,7 +138,7 @@ describe('pending 审批登记簿：claim', () => {
       approvalId: 'a9',
       summary: '写文件',
       suggestedEntry: { tool: 'write_file', pattern: '/tmp/a.txt' },
-      ownership: { appId: 'coder', sessionId: 'sess-1' },
+      ownership: { appId: 'berrycode', sessionId: 'sess-1' },
     });
   });
 

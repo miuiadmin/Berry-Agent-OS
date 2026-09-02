@@ -78,7 +78,7 @@ ok "berry $(berry --version)"
 # ---------- 欢迎横幅 + 下一步 ----------
 printf '\n%s\n' "${GREEN}${BOLD}安装完成！${RESET}"
 printf '%s\n' "${DIM}下一步：${RESET}
-  ${BOLD}berry${RESET}            进入 TUI 对话（首启即用——默认进入 coder 代码智能体应用）
+  ${BOLD}berry${RESET}            进入 TUI 对话（首启即用——默认进入 berrycode 代码智能体应用）
   ${BOLD}berry --help${RESET}     全部命令（run 单发 / daemon 常驻 / attach 接上 / upgrade 升级）
   ${BOLD}/guide${RESET}           TUI 内快速上手参考（首启欢迎块也会自动出现）
 ${DIM}上手：TUI 内 /guide · 升级：berry upgrade · 卸载：npm rm -g berry-agent-os + rm -rf ~/.berry${RESET}

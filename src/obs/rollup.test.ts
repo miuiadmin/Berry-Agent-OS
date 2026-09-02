@@ -51,10 +51,10 @@ describe('obs 聚合核：口径锁（契约篇 §6.9 冷读回写全量）', ()
     let [turn] = ofTable(take(agg), 'turn');
     expect(turn?.dims).toEqual(['host']);
     // header 到达：其后事件归 app 桶（此前已计贡献不回改——口径注记）
-    agg.ingest(env('s2', 1, 'request/header', { app: 'coder', reason: 'initial' }));
+    agg.ingest(env('s2', 1, 'request/header', { app: 'berrycode', reason: 'initial' }));
     agg.ingest(env('s2', 2, 'user/message', { content: '晚' }));
     [turn] = ofTable(take(agg), 'turn');
-    expect(turn?.dims).toEqual(['coder']);
+    expect(turn?.dims).toEqual(['berrycode']);
   });
 
   it('tool 配对分类五桶：成功/守门拦截/失败/超时 + 时长归调用时刻小时桶（M4）', () => {
@@ -325,9 +325,9 @@ describe('obs 聚合核：复盘 20260901 R-4/D-3 回归锁（内存有界三律
 
   it('R-4② 会话归因空窗修剪：7 日无事件会话的 app 归因回落 host 桶（归因近似窗）', () => {
     const agg = createAggregator();
-    agg.ingest(env('ra', 0, 'request/header', { app: 'coder' }));
+    agg.ingest(env('ra', 0, 'request/header', { app: 'berrycode' }));
     agg.ingest(env('ra', 1, 'user/message', { content: '活跃期' }));
-    expect(ofTable(take(agg), 'turn')[0]?.dims).toEqual(['coder']);
+    expect(ofTable(take(agg), 'turn')[0]?.dims).toEqual(['berrycode']);
     // 会话 B 8 日后活跃 → drain 时修剪 A（空窗 > 7 日）
     agg.ingest(env('rb', 0, 'user/message', { content: '八日后' }, T0 + 8 * 24 * 3_600_000));
     expect(ofTable(take(agg), 'turn')[0]?.dims).toEqual(['host']);

@@ -35,7 +35,7 @@ describe('SessionList（会话清单侧栏）', () => {
   it('行信息拼装：appId / cwd 尾段 · 相对时间（updatedAt 缺席则时间省）', () => {
     const now = Date.now();
     const sessions = [
-      row({ id: 's1', appId: 'coder', cwd: '/Users/x/Documents/code/berry', updatedAt: now }),
+      row({ id: 's1', appId: 'berrycode', cwd: '/Users/x/Documents/code/berry', updatedAt: now }),
       row({ id: 's2', appId: 'chat' }), // cwd/updatedAt 双缺——尾段空 + 无时间后缀
     ];
     render(
@@ -47,7 +47,7 @@ describe('SessionList（会话清单侧栏）', () => {
         onOpen={() => {}}
       />,
     );
-    expect(screen.getByText('coder')).toBeTruthy();
+    expect(screen.getByText('berrycode')).toBeTruthy();
     expect(screen.getByText(/^berry · 刚刚$/)).toBeTruthy();
     expect(screen.getByText('chat')).toBeTruthy();
   });

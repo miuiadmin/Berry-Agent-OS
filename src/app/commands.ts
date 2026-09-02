@@ -34,7 +34,7 @@ import type { AppStatusRow } from './composition.js';
 const GUIDE_TEXT = [
   `Berry ${VERSION}（${CODENAME}）— 快速上手`,
   '',
-  '· 直接说需求即可——默认进入 coder 代码智能体应用（/app chat 换纯对话）',
+  '· 直接说需求即可——默认进入 berrycode 代码智能体应用（/app chat 换纯对话）',
   '· 核心命令：/help 全命令 · /guide 本引导 · /usage 用量 · /skills 技能 ·',
   '  /apps 应用管理 · /memory-export 记忆导出 · /rewind 工作区回退',
   '· 模型与凭证：APP_MODEL 环境变量覆盖缺省模型；凭证走 pi-ai 授权链',

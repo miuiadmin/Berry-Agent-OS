@@ -22,7 +22,7 @@ import type { CompositionReport } from './composition.js';
 
 /** 最小合法清单素材（逐用例覆写单字段造坏形状） */
 const base = {
-  id: 'acme/coder',
+  id: 'acme/berrycode',
   label: 'Acme 代码助手',
   components: ['builtin:chat'],
 };
@@ -42,7 +42,7 @@ function expectCode(fn: () => unknown, code: string): AppError {
 describe('validateAppManifest：schema 拒绝式校验', () => {
   it('最小合法清单通过（budget 可选）', () => {
     const m = validateAppManifest(base, '测试');
-    expect(m.id).toBe('acme/coder');
+    expect(m.id).toBe('acme/berrycode');
     expect(m.budget).toBeUndefined();
   });
 
@@ -137,14 +137,14 @@ describe('loadOfficialApps：官方目录装载', () => {
     expect(apps.get('hermes')?.budget?.dailyTokens).toBeGreaterThan(0);
   });
 
-  it('组装批：coder 默认应用在册带标（全仓唯一 default: true）+ persona 人格段 + 六组件', () => {
+  it('组装批：berrycode 默认应用在册带标（全仓唯一 default: true）+ persona 人格段 + 六组件', () => {
     const apps = loadOfficialApps();
     // 恰一执法的正半边：带标清单恰一份（chat/hermes 不带标——chat 是回落锚点非带标者）
-    expect(apps.get('coder')?.default).toBe(true);
+    expect(apps.get('berrycode')?.default).toBe(true);
     expect(apps.get('chat')?.default).toBeUndefined();
     expect(apps.get('hermes')?.default).toBeUndefined();
     // 纯清单应用零自有行为件（组装批收敛判定）：能力面全走 components 声明
-    expect(apps.get('coder')?.components).toEqual([
+    expect(apps.get('berrycode')?.components).toEqual([
       'builtin:chat',
       'builtin:tools',
       'builtin:web',
@@ -153,7 +153,7 @@ describe('loadOfficialApps：官方目录装载', () => {
       'builtin:goal',
     ]);
     // persona 人格段（m10：人格非任务指令段——open 装配消费于代理默认位）
-    expect(apps.get('coder')?.agent?.persona).toContain('软件工程');
+    expect(apps.get('berrycode')?.agent?.persona).toContain('软件工程');
   });
 
   it('恰一执法：>1 份 default: true = APP_INVALID 拒启（全局唯一属性，发版事故级）', () => {
@@ -231,13 +231,13 @@ describe('resolveDefaultApp：默认应用解析（组装批默认应用键—�
     new Map(ms.map((m) => [m.id, m])) as Parameters<typeof resolveDefaultApp>[0];
 
   it('第一跳：带标在场（不在缺场表）→ 带标应用', () => {
-    const apps = table(manifest('coder', true), manifest('chat'));
-    expect(resolveDefaultApp(apps, new Map())?.id).toBe('coder');
+    const apps = table(manifest('berrycode', true), manifest('chat'));
+    expect(resolveDefaultApp(apps, new Map())?.id).toBe('berrycode');
   });
 
   it('带标缺场 → 第二跳 chat 在场 → chat（回落锚点：卸默认应用仍有可对话入口）', () => {
-    const apps = table(manifest('coder', true), manifest('chat'));
-    const gaps = new Map([['coder', ['builtin:web']]]);
+    const apps = table(manifest('berrycode', true), manifest('chat'));
+    const gaps = new Map([['berrycode', ['builtin:web']]]);
     expect(resolveDefaultApp(apps, gaps)?.id).toBe('chat');
   });
 
@@ -247,10 +247,10 @@ describe('resolveDefaultApp：默认应用解析（组装批默认应用键—�
   });
 
   it('chat 也缺场 / 缺席 → undefined（兜底态——调用方防御降级，不认领任意在册应用）', () => {
-    const apps = table(manifest('coder', true), manifest('chat'), manifest('hermes'));
+    const apps = table(manifest('berrycode', true), manifest('chat'), manifest('hermes'));
     // 带标缺场 + chat 缺场：hermes 在场也不认领（认领任意在册 = 静默换域，裁死）
     const gaps = new Map([
-      ['coder', ['builtin:web']],
+      ['berrycode', ['builtin:web']],
       ['chat', ['builtin:memory']],
     ]);
     expect(resolveDefaultApp(apps, gaps)).toBeUndefined();
@@ -261,9 +261,9 @@ describe('resolveDefaultApp：默认应用解析（组装批默认应用键—�
   });
 
   it('缺场判定按 gaps 键在场性（gaps 只收有缺口的应用——空缺场表 = 全在场）', () => {
-    const apps = table(manifest('coder', true));
+    const apps = table(manifest('berrycode', true));
     // 他应用缺场不影响带标者（per-open 投影互不牵连）
-    expect(resolveDefaultApp(apps, new Map([['chat', ['builtin:memory']]]))?.id).toBe('coder');
+    expect(resolveDefaultApp(apps, new Map([['chat', ['builtin:memory']]]))?.id).toBe('berrycode');
   });
 });
 

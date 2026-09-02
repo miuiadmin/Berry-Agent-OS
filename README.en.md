@@ -29,7 +29,7 @@ This is not science fiction. This is Berry's design goal: **an operating system 
 
 Berry's minimal kernel does exactly **install, run, guard, store**; everything else — conversation, coding agent, memory, long goals, scheduled tasks, MCP, LSP, observability, web UI — loads as an **application** on the composition tree. **Installable, unloadable, replaceable** — while your Agent's five lifelines (credentials, memory, trust history, budgets, ledgers) accumulate only once. Every app grows on the same state — **new brain, same body**.
 
-**27** modules (all implemented) · **27** lifecycle hooks · **25** durable event types · **15** official bundle pieces (14 Ring 2 + default coder app, each unloadable) · **2,700+** tests · **0** telemetry.
+**27** modules (all implemented) · **27** lifecycle hooks · **25** durable event types · **15** official bundle pieces (14 Ring 2 + default berrycode app, each unloadable) · **2,700+** tests · **0** telemetry.
 
 **Floor goal: the factory default layer ships at the daily-usable level of Codex / Claude Code.**
 
@@ -88,12 +88,12 @@ Alright, enough romance. **Now the steel and iron.**
             │  machine-gated, not unloadable              │
             └──────────────────┬──────────────────────────┘
                                │ composition tree (default layer + overlay.yaml)
-        ┌──────────┬──────────┼──────────────┬───────────┐
-        ▼          ▼          ▼              ▼           ▼
-     coder       chat      memory         goal      …11 pieces
+        ┌─────────────┬──────────┬──────────────┬───────────┐
+        ▼             ▼          ▼              ▼           ▼
+      berrycode      chat      memory         goal      …11 pieces
    (default     (conver-  (operator     (long       (each
      app)       sation)    state)       goals)    unloadable)
-        └──────────┴──────────┴──────────────┴───────────┘
+        └─────────────┴──────────┴──────────────┴───────────┘
                                │ event sourcing (append-only log = source of truth)
                                ▼
                  SQLite WAL: sessions · credentials · memory · ledgers
@@ -114,7 +114,7 @@ git clone <this repo> && cd Berry-Agent-OS && npm install && npm run build && np
 ```
 
 ```bash
-berry             # interactive TUI (defaults to the coder app, resumes the latest session; first launch shows a welcome guide)
+berry             # interactive TUI (defaults to the berrycode app, resumes the latest session; first launch shows a welcome guide)
 berry run "hi"    # one-shot run (exit code is the result)
 berry dump-config # effective-composition diagnostics (model / composition tree / app load state, no database writes)
 berry upgrade     # upgrade verb (checks the registry, self-upgrades npm installs; /guide shows the quick reference anytime)
@@ -140,7 +140,7 @@ First launch creates the data directory at `~/.berry/`. The default model is `an
 
 | Piece        | Role                                                                                                              |
 | ------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `coder`      | Default coding-agent app (pure manifest, `/app` to switch)                                                        |
+| `berrycode`  | Default coding-agent app (pure manifest, `/app` to switch)                                                        |
 | `chat`       | Conversation app (fallback anchor)                                                                                |
 | `memory`     | Memory store: extraction/merging/dual-path injection/cross-session retrieval/utility evolution/TTL/version chains |
 | `subagent`   | Sub-agent delegation + declarative sub-agents                                                                     |
