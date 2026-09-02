@@ -12,6 +12,7 @@ import {
   SANDBOX_UNAVAILABLE,
 } from '../contracts/errors.js';
 import type { SandboxBackend } from './types.js';
+import { canonicalPath } from './roots.js';
 import { bwrapArgs, createBwrapBackend } from './bwrap.js';
 import { seatbeltProfile, seatbeltReadOnlyProfile, createSeatbeltBackend } from './seatbelt.js';
 import {
@@ -377,11 +378,12 @@ describe('bwrap 后端（纯函数参数生成）', () => {
     expect(tmpfsAt).toBeGreaterThanOrEqual(0);
     expect(bindAt).toBeGreaterThan(tmpfsAt);
     // 该 /tmp 子路径根在 tmpfs 之上 bind 露出（宿主可写映射）。只锁「在场」
-    // 不锁根集合精确值：deriveWritableRoots 的档位推导多根（macOS 还会把
-    // 存在的 /tmp 归一为 /private/tmp 追加）——集合是推导实现细节，顺序
+    // 不锁根集合精确值：deriveWritableRoots 的档位推导多根且逐根 canonical 化
+    // （F-1 修后**不存在的**根也父目录递归解析——macOS /tmp/proj-x 归一
+    // /private/tmp/proj-x，字面值平台相关）——集合是推导实现细节，顺序
     // 才是本回归锁的猎物。
     const bindTargets = args.filter((_, i) => args[i - 1] === '--bind');
-    expect(bindTargets).toContain('/tmp/proj-x');
+    expect(bindTargets).toContain(canonicalPath('/tmp/proj-x'));
   });
 
   it('read-only + 显式根（e1 宿主形态）：刚需根真实 bind（字段覆盖契约恢复生效）', () => {

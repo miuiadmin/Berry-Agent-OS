@@ -278,9 +278,13 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
       );
     }
     // 第二道·实化后复验（R1 P0-5，契约篇 §1.7 增补 2 R1 复盘批立法 2026-08-29）：
-    // 词法归一只挡词法层越界声明——末段组件不存在时 realpath 整体 ENOENT
+    // 词法归一只挡词法层越界声明——修前末段组件不存在时 realpath 整体 ENOENT
     // 原样返回、**中间 symlink 组件不被解析**，mkdirSync 预建会跟随 symlink
-    // 实化出越基线真身。预建（幂等——derivePmFlags 推导内还会再建，recursive
+    // 实化出越基线真身。〔2026-09-02 运行时探针 F-1 修法注记：canonicalPath
+    // 缺失路径已改「最近存在祖先解析」——已存在的 symlink 祖先组件在第一道
+    // 词法验即被解析拒载，此攻击形态提前死于第一道；本复验的必要性收窄至
+    // 「词法验与预建之间换 symlink 的竞态窗」，保留为防御深度〕预建（幂等
+    // ——derivePmFlags 推导内还会再建，recursive
     // 无害）后全链存在、realpath 解析真身，逐一复验在基线内、越界同码拒。
     // 诚实边界：预建本身可能已落越基线空目录（痕迹残留，域死随行清扫覆盖
     // 不到基线外）+ 复验与预建间换 symlink 的竞态窗（堵死需 openat 级原语，

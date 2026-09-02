@@ -695,7 +695,7 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
     },
   );
 
-  it('闩二实化后复验（R1 P0-5 回归锁）：workspace 内 symlink 指基线外 + 末段不存在声明——词法验过、预建实化越基线真身即拒载', async () => {
+  it('闩二第一道词法验（F-1 修后收窄）：workspace 内 symlink 指基线外 + 末段不存在声明——canonicalPath 父目录递归解析 symlink 祖先，词法验即拒载', async () => {
     const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-symlink');
     const fleet = createBridgeFleet({
       root,
@@ -703,10 +703,11 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
       external: { workspace, dataDir, sandbox: sandboxStub, osLayer: false },
     });
     // 攻击形态：workspace 内 symlink 指向基线外目录；声明走「symlink 下不
-    // 存在的子路径」——canonicalPath 对 ENOENT 整体原样返回（中间 symlink
-    // 组件不被解析），词法形在 workspace 内 → 第一道词法验放行；mkdirSync
-    // 预建跟随 symlink 在基线外实化出真身（修复前：实化根直接进 PM 白名单
-    // ——越基线授权）
+    // 存在的子路径」。修前 canonicalPath 对 ENOENT 整体原样返回（中间
+    // symlink 组件不被解析）——词法形在 workspace 内 → 第一道放行、死于
+    // 第二道实化复验（R1 P0-5 回归锁原形态）；运行时探针 20260902 F-1 修后
+    // canonicalPath 缺失路径改「最近存在祖先解析」——symlink 祖先在第一道
+    // 词法验即解析出越基线真身，攻击提前死于第一道（更优：零实化残留）
     const victim = join(dir, 'victim');
     mkdirSync(victim);
     symlinkSync(victim, join(workspace, 'link'));
@@ -718,7 +719,7 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
     };
     await expect(async () => fleet.loader.load(row)).rejects.toMatchObject({
       code: COMPOSITION_ROW_INVALID,
-      message: expect.stringContaining('实化越界'),
+      message: expect.stringContaining('声明越界'),
     });
     // 拒载零域产出（spawn 前执法——与词法拒绝式同款收口）
     expect(fleet.stats()).toMatchObject({ spawned: 0, live: 0 });

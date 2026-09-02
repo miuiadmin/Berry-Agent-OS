@@ -9,7 +9,7 @@
 
 import { readdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
 import type { SandboxMode, WritableRootsInput } from './types.js';
 
 /** carve-out 例外条目：pattern 相对 workspace（或以 / 起的绝对路径）；层叠=最具体（最长路径）匹配胜出 */
@@ -28,8 +28,12 @@ export interface CarveOutEntry {
 
 /**
  * 路径 canonical 化（符号链解析到真实位置）。
- * 解析失败（路径或前缀不存在）原样返回——缺失的根匹配不到任何东西，
- * 正是保守结果；虚构回退路径反而会授权调用方从未指名的位置。
+ * 路径或前缀不存在时：回退**最近存在祖先**解析符号链再拼回尾部段（与写侧
+ * fs.ts canonicalize 同律——运行时探针 20260902 F-1 修死：原「ENOENT 原样
+ * 返回=保守」论断被证伪——别名工作区下**新建**敏感文件的绝对别名路径
+ * 〔如 macOS /var/.../ws/.env〕原样返回，与 canonical 化的根比较恒 miss →
+ * 守门判 outside-roots 跳过审批，而写侧父目录递归判在根内放行——两层
+ * canonical 化分歧乘出 carve-out 审批绕过、敏感文件直接落盘）。
  */
 export function canonicalPath(path: string): string {
   try {
@@ -37,7 +41,11 @@ export function canonicalPath(path: string): string {
     // JS 实现在部分平台会先做词法折叠再解析符号链，与强制层判定不一致
     return realpathSync.native(path);
   } catch {
-    return path;
+    // 不存在：父目录递归解析（父到达文件系统根仍失败即回退原样——绝对
+    // 病理形态不虚构路径，与原语义的兜底一致）
+    const parent = dirname(path);
+    if (parent === path) return path;
+    return join(canonicalPath(parent), basename(path));
   }
 }
 

@@ -36,7 +36,18 @@ describe('canonicalPath', () => {
     expect(canonicalPath(link)).toBe(canonicalPath(real));
   });
 
-  it('不存在路径原样返回（保守：缺失的根匹配不到任何东西）', () => {
+  it('不存在路径回退最近存在祖先解析（符号链别名下新建文件不再裸回退——运行时探针 20260902 F-1）', () => {
+    const ws = makeWorkspace();
+    const real = join(ws, 'real');
+    mkdirSync(real);
+    const link = join(ws, 'link');
+    symlinkSync(real, link);
+    // 尚不存在的新建文件：父目录（别名）解析符号链，尾部段拼回——守门/写侧
+    // 两层 canonical 化同律（修前原样返回别名路径，与 canonical 根比较恒 miss）
+    expect(canonicalPath(join(link, '.env'))).toBe(join(canonicalPath(real), '.env'));
+  });
+
+  it('祖先全不存在回退原样（不虚构路径——文件系统根兜底）', () => {
     expect(canonicalPath('/definitely/not/exist/path')).toBe('/definitely/not/exist/path');
   });
 });
@@ -179,7 +190,8 @@ describe('externalEffectiveRoots（行有效白名单单源——R1 P0-4，契�
     const sub = join(ws, 'sub');
     mkdirSync(appData);
     mkdirSync(sub);
-    // 基线外声明：workspace 兄弟目录（不创建——canonicalPath 容缺形原样返回）
+    // 基线外声明：workspace 兄弟目录（不创建——F-1 修后缺失路径走父目录递归
+    // 解析到真实 tmpdir 祖先、拼回叶子段；不在盘上即无真身可越，词法形越基线即滤）
     const evil = join(ws, '..', 'safety-evil-escape');
     const effective = externalEffectiveRoots(ws, appData, [sub, evil]);
     // 基线内子目录进有效白名单；越基线声明被滤掉（交集语义——运行期行已过

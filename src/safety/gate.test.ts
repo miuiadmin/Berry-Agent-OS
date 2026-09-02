@@ -6,7 +6,7 @@
  * 与 allowlist 免问（题1a）也在此验证。
  */
 
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -26,8 +26,10 @@ function rig(opts: {
   allowlist?: readonly AllowlistEntry[];
   /** always 应答的条目写入回调（活数组联动测试——装配 persistAllowlist） */
   persist?: (draft: { tool: string; pattern: string }) => void;
+  /** 外部指定工作区（缺省 mkdtemp）；别名工作区测试传符号链形态（F-1） */
+  ws?: string;
 }) {
-  const ws = mkdtempSync(join(tmpdir(), 'safety-gate-'));
+  const ws = opts.ws ?? mkdtempSync(join(tmpdir(), 'safety-gate-'));
   opts.pre?.(ws);
   const ctx = createContext({ name: 'test' });
   let mode: SandboxMode = opts.mode;
@@ -130,6 +132,22 @@ describe('守门行 × carve-out（workspace-write 档）', () => {
     const { run, decided } = rig({ mode: 'workspace-write' }); // 不注册 answerer
     await expectToolError(() => run('write', { path: '.env', content: 'SECRET=1' }), TOOL_BLOCKED);
     expect(decided[0]!.decision).toBe('unavailable');
+  });
+
+  it('别名工作区 + 绝对别名路径写新建敏感文件：carve-out 必须拦（运行时探针 20260902 F-1，修前红）', async () => {
+    // 自造符号链别名（不依赖平台 tmpdir 形态——macOS /var→/private/var 常态命中）：
+    // workspace 以别名形态传入，写目标用别名前缀的绝对路径指向**尚不存在**的 .env
+    const real = canonicalPath(mkdtempSync(join(tmpdir(), 'safety-alias-')));
+    const linkParent = mkdtempSync(join(tmpdir(), 'safety-alias-p-'));
+    const alias = join(linkParent, 'ws');
+    symlinkSync(real, alias);
+    const { run, asked } = rig({ mode: 'workspace-write', answer: 'reject', ws: alias });
+    // 修前实证：守门侧 canonicalPath 对 ENOENT 裸回退别名路径 → 与 canonical 根
+    // 比较恒 miss → 判 outside-roots 跳过审批（asked 0）；写侧 canonicalize 父目录
+    // 递归判在根内放行——两层分歧乘出绕过，.env 带 SECRET 落盘
+    await expectToolError(() => run('write', { path: join(alias, '.env'), content: 'SECRET=1' }), TOOL_BLOCKED);
+    expect(asked).toHaveLength(1); // 审批真的发起过（修前 0——审批零调用即绕过实证）
+    expect(existsSync(join(real, '.env'))).toBe(false); // 未落盘
   });
 
   it('edit 补丁夹带 carve-out 目标：block 短路在执行段之前（CAS 都不会碰）', async () => {
