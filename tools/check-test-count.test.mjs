@@ -62,6 +62,21 @@ describe('check-test-count 机器闸（全面复盘 20260902 G-3④）', () => {
     expect(r.stdout).toContain('实测 2600 ≥ README 四语下限 2500（余量 +100）');
   });
 
+  it('绿路（CI 色码形态）：日志带 ANSI 色码 → 剥离后照常提取（CI 三连红回归锁 20260903）', () => {
+    const { root, log } = fixture();
+    // 仿真 GitHub Actions tee 日志实录形态：chalk 检 CI=true 强制色档，汇总行
+    // 数字前插 ESC 序列——`Tests ^[[22m^[[32m2600 passed`，不剥码则「Tests␣␣数字」
+    // 正则断在色码上、整锚误报「零汇总行」（公开仓 CI 三连红实证）
+    writeFileSync(
+      log,
+      ' \x1b[2m Test Files \x1b[22m \x1b[1m\x1b[32m178 passed\x1b[39m\x1b[22m\x1b[90m (178)\x1b[39m\n' +
+        '      \x1b[2m      Tests \x1b[22m \x1b[1m\x1b[32m2600 passed\x1b[39m\x1b[22m\x1b[90m (2600)\x1b[39m\n',
+    );
+    const r = run(root, log);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('实测 2600 ≥ README 四语下限 2500');
+  });
+
   it('红路①下限失真：宣称 3000 > 实测 2600 → exit 1 点名缩测须滚四语', () => {
     const line3000 = '**27** módulos · **3,000+** pruebas · **0** telemetría.';
     const { root, log } = fixture({

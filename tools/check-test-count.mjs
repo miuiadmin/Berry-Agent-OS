@@ -37,7 +37,12 @@ const parseFloor = (raw) => {
 /* ---------- 主流程：读日志 → 提实测 → 读四语 → 三面红对照 ---------- */
 
 const logPath = process.argv[2];
-const log = logPath !== undefined ? readFileSync(logPath, 'utf8') : readFileSync(0, 'utf8');
+// 原始日志先剥 ANSI 色码再进正则：CI 形态下 chalk 检 CI=true/GITHUB_ACTIONS
+// 强制色档，tee 留档日志的汇总行带 ESC 序列（`Tests ^[[22m^[[32m2600 passed`），
+// 不剥码则「Tests␣␣数字」正则断在色码上、整锚误报零汇总行（公开仓 CI 三连红
+// 实证，run 33660838131）——本地直跑无色码、剥离为无操作，两形态同构
+const rawLog = logPath !== undefined ? readFileSync(logPath, 'utf8') : readFileSync(0, 'utf8');
+const log = rawLog.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 
 // vitest 汇总行形态：`      Tests  2883 passed (2883)`（多段时取最后一段 =
 // 终局总表——失败混排形 `3 failed | 2882 passed` 取 passed 位不变义）
