@@ -101,7 +101,7 @@ Berry 用操作系统的方式回答这个问题。你的 Agent 的每一天都�
 要求 Node.js ≥ 22.19。三种安装方式（详路见 [docs/使用指南](docs/使用指南.md) §1）：
 
 ```bash
-# 方式一：安装脚本（两段式——先下载再执行，防连接中段断裂时 sh 收到半截脚本；分步状态显示；<仓库 URL> 待发布定档后回填）
+# 方式一：安装脚本（两步式——先下载再执行，防连接中段断裂时 sh 收到半截脚本；分步状态显示）
 curl -fsSL -o install.sh https://raw.githubusercontent.com/miuiadmin/Berry-Agent-OS/feat-new/scripts/install.sh
 sh install.sh
 # 方式二：npm 直装（发布后可用）
