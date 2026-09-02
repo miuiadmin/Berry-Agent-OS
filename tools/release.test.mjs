@@ -150,7 +150,7 @@ describe('契约 5 planTagOperations / assertDistTagTerminal：终态统一律',
 });
 
 describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
-  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + LICENSE + 教学例 + 官方应用清单 + 出厂技能） */
+  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + LICENSE + 教学例 + 官方应用清单 + 出厂技能 + 构建溯源面） */
   const CLEAN = [
     'package.json',
     'README.md',
@@ -158,6 +158,9 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     'dist/app/main.js',
     'dist/webui/index.html',
     'dist/admin/skills/admin/SKILL.md',
+    // 构建溯源面（遗漏大扫 20260902 #4）：build 链尾步写的 commit 元数据——缺席
+    // 时运行侧 readBuildMeta=null 静默降级，检视面显式锚定
+    'dist/.build-meta.json',
     'examples/tool-echo/index.ts',
     'examples/tool-echo/README.md',
     'apps/berrycode.app.yaml',
@@ -183,6 +186,13 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     expect(v.ok).toBe(false);
     expect(v.missing.join(' ')).toMatch(/apps\/\*\.app\.yaml/);
     expect(v.missing.join(' ')).toMatch(/skills\/\*\/SKILL\.md/);
+  });
+  it('缺 dist/.build-meta.json 构建溯源面 → 检视不过（遗漏大扫 20260902 #4：此前仅靠 files 含 dist 整目录隐式随包）', () => {
+    // 溯源面缺席时运行侧 readBuildMeta=null 静默降级（warnIfStaleDist 永不触发），
+    // files 白名单或 npm 打包行为漂移时无机器红——检视面显式锚定后此测锁死
+    const v = inspectPackEntries(CLEAN.filter((p) => p !== 'dist/.build-meta.json'));
+    expect(v.ok).toBe(false);
+    expect(v.missing.join(' ')).toMatch(/dist\/\.build-meta\.json/);
   });
   it('测试/声明/映射/源码/构建配置混入 → 违禁（violations 逐个点名）', () => {
     const v = inspectPackEntries([
@@ -387,6 +397,9 @@ function greenBase(version) {
             'dist/app/main.js',
             'dist/webui/index.html',
             'dist/admin/skills/admin/SKILL.md',
+            // 溯源面（遗漏大扫 20260902 #4）：greenBase 罐头面与必在清单同步——
+            // 缺行会让契约 3 检视在管线测里红（夹具随身带新锚面）
+            'dist/.build-meta.json',
             'examples/tool-echo/index.ts',
             'examples/tool-echo/README.md',
             'apps/berrycode.app.yaml',

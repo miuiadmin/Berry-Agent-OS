@@ -23,13 +23,15 @@ import { test } from 'vitest';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** 四门禁 npm script 名（与 package.json / AGENTS 工程纪律同源） */
-const FOUR_GATES = ['typecheck', 'lint:topology', 'format:check'];
+/** 三静态门禁 npm script 名（test 门禁另行断言——npm test 在 CI/钩子里以
+ * vitest run 直呼或 npm test 形态出现，无法统一进同一数组断言；曾名
+ * FOUR_GATES 实列 3 项——遗漏大扫 20260902 U9 名实归位） */
+const STATIC_GATES = ['typecheck', 'lint:topology', 'format:check'];
 
 test('CI 工作流在场：四门禁全数执法 + fetch-depth 0（#19）', () => {
   const yml = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
   // 测试门以 npm test 形态出现（script 名）；其余三门 run 行直呼其名
-  for (const gate of FOUR_GATES) {
+  for (const gate of STATIC_GATES) {
     assert.ok(yml.includes(`npm run ${gate}`), `ci.yml 缺门禁 ${gate}`);
   }
   assert.ok(yml.includes('npm test') || yml.includes('npm run test'), 'ci.yml 缺测试门');
@@ -198,6 +200,11 @@ test('公开仓配套面三件在场（成熟度扫描 20260901 P0-2）', () => 
 test('build 链尾步写 dist/.build-meta.json：真跑两腿 + 接线形态锁（成熟度扫描 20260901 P1-13）', () => {
   const script = join(repoRoot, 'tools', 'write-build-meta.mjs');
   const distTmp = mkdtempSync(join(tmpdir(), 'build-meta-dist-'));
+  // 跑脚本前先读 headBefore（U12 竞速消除：脚本内部在 T1 读 HEAD、测试侧在 T2
+  // 再 rev-parse 属非同刻两读——本仓常态多并发提交 session，窗口内 tip 前移即
+  // flake 红。双值集判据：meta.commit ∈ {headBefore, headAfter} 在合法 tip
+  // 前移下不红，仍锁「commit 必为真 HEAD 形」的接线语义）
+  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
   try {
     // 场景一：真仓形态——DIST_ROOT 根缝注入临时目录，commit 位 = 本仓 HEAD 40 位哈希
     const r1 = spawnSync(process.execPath, [script], {
@@ -207,9 +214,12 @@ test('build 链尾步写 dist/.build-meta.json：真跑两腿 + 接线形态锁�
     });
     assert.equal(r1.status, 0, `write-build-meta 应退出 0（stderr: ${r1.stderr}）`);
     const meta = JSON.parse(readFileSync(join(distTmp, '.build-meta.json'), 'utf8'));
-    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+    const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
     assert.match(meta.commit, /^[0-9a-f]{40}$/, 'commit 位须为 40 位十六进制哈希');
-    assert.equal(meta.commit, head, 'commit 位须等于本仓 HEAD（build 溯源面失真即红）');
+    assert.ok(
+      meta.commit === headBefore || meta.commit === headAfter,
+      `commit 位须等于本仓 HEAD（build 溯源面失真即红；got ${meta.commit}，窗口 [${headBefore}, ${headAfter}]）`,
+    );
     // 场景二：git 缺席形态（PATH 掏空）——写 null 不炸 build
     const r2 = spawnSync(process.execPath, [script], {
       cwd: distTmp, // 非 git 目录 + PATH 空——git 探针双重必败

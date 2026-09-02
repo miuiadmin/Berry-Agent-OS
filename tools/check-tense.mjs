@@ -30,6 +30,7 @@
  * 3. 退役词清零（D36「一切皆应用」词汇翻转的收口执法——审读 A2 实证三批
  *    同位置掉队，根因②的机器面）：
  *    - 现行公开面（AGENTS/README/CONTRIBUTING/docs）出现任一退役词即红；
+ *    - 退役应用 id 子表（词边界正则——berrycode 改名退役旧 id 等英文标识）；
  *    - 规范面（01-规范/02-计划）不查——规范正文有「原称插件」式历史勘正
  *      语境，词面机器查会误伤，语义层归冷读闸。
  *
@@ -195,6 +196,17 @@ function checkPaths(files) {
  */
 const RETIRED_WORDS = ['插件', '母体', '系统组合', '应用组合', '挂载目标', '后台服务'];
 
+/**
+ * 退役应用 id 词表（berrycode 改名批 2026-09-02 退役旧官方应用 id 'coder'——遗漏大扫
+ * 20260902 #3 收词）。id 表独立于中文词表走 **词边界正则**：RETIRED_WORDS 的
+ * line.includes 子串匹配裸收 'coder' 会误伤 encoder/decoder 等含 coder 的英文词，
+ * \b 边界形态只命中独立成词的旧 id。收词前提与中文词表同律——入册前已验证现行
+ * 公开面零残留（berrycode 不含 coder 子串，encoder/decoder 在扫描面零在场）。
+ */
+const RETIRED_APP_IDS = ['coder'];
+/** id 词表的预编译边界正则（每词一条——\b 对 ASCII 词字符有效） */
+const RETIRED_APP_ID_RES = RETIRED_APP_IDS.map((id) => new RegExp(`\\b${id}\\b`));
+
 /** 规则 3 断言：现行公开面退役词计数必须为零 */
 function checkRetired(files) {
   const bad = [];
@@ -206,6 +218,13 @@ function checkRetired(files) {
         checked++;
         if (line.includes(w)) {
           bad.push(`${rel(file)}:${i + 1} 退役词「${w}」（现行正名见 D36 词汇方案档）`);
+        }
+      }
+      // 退役应用 id 子表（词边界形态——见 RETIRED_APP_IDS 头注）
+      for (let k = 0; k < RETIRED_APP_IDS.length; k++) {
+        checked++;
+        if (RETIRED_APP_ID_RES[k].test(line)) {
+          bad.push(`${rel(file)}:${i + 1} 退役应用 id「${RETIRED_APP_IDS[k]}」（已更名——现行 id 见仓库 apps/ 清单）`);
         }
       }
     });

@@ -218,6 +218,10 @@ export function inspectPackEntries(files) {
   mustHave('examples/*（教学例三件套）', (p) => p.startsWith('examples/') && p !== 'examples/');
   mustHave('apps/*.app.yaml（官方应用清单）', (p) => /^apps\/[^/]+\.app\.yaml$/.test(p));
   mustHave('skills/*/SKILL.md（出厂技能）', (p) => /^skills\/[^/]+\/SKILL\.md$/.test(p));
+  // 构建溯源面（遗漏大扫 20260902 #4）：build 链尾步写的 commit 元数据——此前仅靠
+  // files 含 dist 整目录隐式随包，缺席时运行侧 readBuildMeta=null 静默降级无机器红
+  //（G-1 apps/skills 缺席同型风险），显式锚定后 files 面漂移即检视红
+  mustHave('dist/.build-meta.json（构建溯源面）', (p) => p === 'dist/.build-meta.json');
   const violations = paths.filter(
     (p) =>
       /\.test\.js$/.test(p) ||

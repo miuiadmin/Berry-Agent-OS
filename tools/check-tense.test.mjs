@@ -38,6 +38,13 @@ beforeAll(() => {
       '',
       '旧机制曾名插件（规则 3：退役词）。',
       '',
+      // #3 锚（遗漏大扫 20260902）：退役应用 id 子表——独立成词的旧 id 被点名，
+      // 同行的 encoder/decoder 含 coder 子串但非独立词不被误伤（边界正则退化回
+      // 子串匹配时 encoder 先误报、断言「不含」必红；子表整体被拆掉时 coder 行
+      // 点名缺席、下断言必红）
+      '旧应用 id 是 coder，新 id 是 berrycode（规则 3：退役应用 id——词边界形态）。',
+      'encoder 与 decoder 是普通英文词（规则 3 负例：含 coder 子串不误伤）。',
+      '',
       '已落码 `src/ghost.ts`（规则 2：完成时态引用不存在路径）。',
       '',
       // #16 锚（遗漏大扫 20260901-c）：中文命名路径此前被 \w 字符类排除在
@@ -102,6 +109,11 @@ describe('check-tense 机器闸（复盘 20260901 T-3）', () => {
     expect(run.stderr).toContain('完成时态引用路径不存在「docs/中文幽灵.md」');
     // 规则 3：退役词
     expect(run.stderr).toContain('退役词「插件」');
+    // 规则 3（#3 锚）：退役应用 id 被点名（子表被拆掉时缺席先红）；
+    // 同夹具 encoder/decoder 行未被误伤（边界正则退化回子串时「不含」先红）
+    expect(run.stderr).toContain('退役应用 id「coder」');
+    expect(run.stderr).not.toContain('退役应用 id「encoder」');
+    expect(run.stderr).not.toContain('退役应用 id「decoder」');
     // O-4③：README glob 展开在岗——外国语镜像（README.en.md）与中文同查，
     // 各自的规则 2 违规都被点名（glob 退化时 en 断言先红——G-2 锚）
     expect(run.stderr).toContain('README.md:3 完成时态引用路径不存在「src/never-zh.md」');
