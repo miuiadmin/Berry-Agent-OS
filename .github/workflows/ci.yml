@@ -57,8 +57,13 @@ jobs:
         run: npm ci
       - name: 门禁一 typecheck
         run: npm run typecheck
-      - name: 门禁二 test
-        run: npm test
+      - name: 门禁二 test（输出 tee 留存——测试计数锚消费）
+        # pipefail 必须：管道出口默认取末位 tee 的 0，测试红会被吞绿
+        run: set -o pipefail && npm test 2>&1 | tee "$RUNNER_TEMP/vitest.log"
+      - name: 测试计数锚（README 四语下限对照——全面复盘 20260902 G-3④）
+        # 宣称「2,700+ 测试」纯人工维护——缩测时四门禁照绿、宣称静默失真；本步
+        # 把汇总行 passed 数对四语下限（zh/en 2,700+ / es 2.700+ / fr 2 700+）。
+        run: node tools/check-test-count.mjs "$RUNNER_TEMP/vitest.log"
       - name: 门禁三 lint:topology（拓扑 DAG / 事件目录 / 时态词汇三器）
         run: npm run lint:topology
       - name: 门禁四 format:check
@@ -75,9 +80,11 @@ jobs:
   release-dry-run:
     runs-on: ubuntu-latest
     permissions:
-      # id-token: write = provenance 预演（P0-5 条件位）：CI 环境检出
-      # GITHUB_ACTIONS 时 release 机自动挂 --provenance，dry-run 下 OIDC 请求
-      # 仍真发——缺 id-token 权限即红。此 job 即「发布面若迁 CI」的持续演习。
+      # id-token: write = provenance 预演（P0-5 条件位）：CI 环境检出 GITHUB_ACTIONS
+      # 时 release 机自动挂 --provenance。注（全面复盘 20260902 驳倒勘正）：npm 在
+      # --dry-run 下从不触达 provenance 生成（npm 10.9.8/11.16.0 源码 + 双形态实测
+      # 核实），fork PR 缺 id-token 也不会红——权限声明为「发布面若迁 CI」真跑形
+      # 态预置，非 dry-run 的红条件。此 job 即发布链的持续演习。
       id-token: write
       contents: read
     steps:

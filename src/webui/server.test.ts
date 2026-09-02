@@ -10,9 +10,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import { connect } from 'node:net';
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import type { AppLogger } from '../contracts/app.js';
 import { createWebuiServer } from './server.js';
@@ -932,5 +933,55 @@ describe('webui 服务面：daemon 形态鉴权与协议正确性层', () => {
     expect(JSON.parse(hit.text)).toEqual({ interrupted: true });
     const miss = await send(port, { method: 'POST', path: '/api/sessions/ghost/interrupt', headers: AUTH });
     expect(miss.status).toBe(404);
+  });
+});
+
+/* ---------------- 端点计数锚（全面复盘 20260902 G-3③） ---------------- */
+
+describe('端点计数锚（全面复盘 20260902 G-3③——公开面「微路由 N 端点」宣称对照）', () => {
+  it('路由分发面端点数与两公开文档宣称同源一致（增删端点不滚文案即红）', () => {
+    // 代码真值 = server.ts 分发面两形路由声明：字面量形（pathname === '/api/x'
+    // && req.method === 'M'）与正则形（const n = /…/.exec(pathname) 紧随
+    // if (n !== null && req.method === 'M')）——新增端点必然落两形之一，
+    // 结构性可见、零登记清单。每形零命中 = 声明面写法漂移，锚失效 fail-loud
+    const src = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+    const literals = [...src.matchAll(/pathname === '(\/api\/[a-z/]+)' && req\.method === '([A-Z]+)'/g)];
+    const regexes = [
+      ...src.matchAll(
+        /const (\w+) = \/[^;\n]+\.exec\(pathname\);\n\s*if \(\1 !== null && req\.method === '([A-Z]+)'\)/g,
+      ),
+    ];
+    expect(literals.length).toBeGreaterThan(0);
+    expect(regexes.length).toBeGreaterThan(0);
+    const total = literals.length + regexes.length;
+    // 中文数字映射（端点数 20 内——超界即此数组越 IndexError 红出，改锚时醒目）
+    const cn = [
+      '一',
+      '二',
+      '三',
+      '四',
+      '五',
+      '六',
+      '七',
+      '八',
+      '九',
+      '十',
+      '十一',
+      '十二',
+      '十三',
+      '十四',
+      '十五',
+      '十六',
+      '十七',
+      '十八',
+      '十九',
+      '二十',
+    ][total - 1]!;
+    // 两公开文档的「微路由 N 端点」宣称——计数控件随端点增删同笔滚
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    for (const doc of ['docs/架构总览.md', 'docs/使用指南.md']) {
+      const text = readFileSync(join(root, doc), 'utf8');
+      expect(text, doc).toContain(`微路由${cn}端点`);
+    }
   });
 });

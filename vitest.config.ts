@@ -44,6 +44,9 @@ export default defineConfig({
             // 冒烟代理 provider 共享层回归锁（基建大扫 #34）：两炮样板收编单点后的
             // 构造面形态锁——真模型炮 CI 无 key 跑不了，漂移先在此红
             'tools/smoke-provider.test.mjs',
+            // 测试计数锚自测（全面复盘 20260902 G-3④）：check-test-count 机器闸的
+            // 绿路 + 四红路点名——锚正则/四语宣称写法改形先在此红（闸的闸）
+            'tools/check-test-count.test.mjs',
           ],
           // client 子树本轨排除（CR-7 落轨——jsdom 轨收编后排除仍在：域不同不混跑）。
           // coverage 相容性（基建大扫 #18）：排除形态必须走 exclude 显式条目，
