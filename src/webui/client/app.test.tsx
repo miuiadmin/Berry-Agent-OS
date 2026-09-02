@@ -229,6 +229,44 @@ describe('App 引导闸（复盘 #45——daemon 401 → token 屏 → 放行重
   });
 });
 
+describe('App 审批卡恢复（遗漏大扫 20260902-b #3——刷新/重连补挂应答卡）', () => {
+  it('首载在册未决：查看中会话的 inline 应答卡恢复（非查看会话仍只角标档不渲染）', async () => {
+    // 刷新形态：GET /api/approvals 已有在册未决（ask 发生在刷新前——asked 帧从未到达本端）
+    api.fetchApprovals.mockResolvedValue([
+      { approvalId: 'ap-r1', sessionId: 'live-1', summary: '刷新前遗留审批' },
+      { approvalId: 'ap-r2', sessionId: 'other-9', summary: '他会话在册审批' },
+    ]);
+    render(<App />);
+    await untilLoaded();
+    // 修复前：恢复只喂角标面（approvals 状态），liveCards 空 → 整屏无应答控件
+    expect(await screen.findByText('刷新前遗留审批')).toBeTruthy();
+    expect(screen.getByText('待审批')).toBeTruthy(); // 卡面呈现（应答按钮在内）
+    expect(screen.queryByText('他会话在册审批')).toBeNull(); // 非查看会话卡不渲染（渲染层过滤不变）
+  });
+
+  it('重连对账双向：断线窗内错过的在册审批补挂 + 他端已决摘除（-d #11 反向保序）', async () => {
+    render(<App />);
+    await untilLoaded();
+    const es = FakeEventSource.instances[0]!;
+    // 断线前本端挂过一张卡（asked 帧驱动）
+    sendFrame(es, {
+      kind: 'session',
+      sessionId: 'live-1',
+      payload: { type: 'approval/asked', data: { approvalId: 'ap-gone', summary: '断线窗内他端已决' } },
+    });
+    expect(await screen.findByText('断线窗内他端已决')).toBeTruthy();
+    // 重连（onopen）：清单只剩 ap-r1——ap-gone 已决须摘、ap-r1 是断线窗内新 ask 须补挂
+    api.fetchApprovals.mockResolvedValue([{ approvalId: 'ap-r1', sessionId: 'live-1', summary: '断线窗内新审批' }]);
+    act(() => {
+      es.onopen?.();
+    });
+    expect(await screen.findByText('断线窗内新审批')).toBeTruthy(); // 补挂方向（#3）
+    await waitFor(() => {
+      expect(screen.queryByText('断线窗内他端已决')).toBeNull(); // 摘除方向（-d #11）不回归
+    });
+  });
+});
+
 describe('App 审批应答 superseded（刀三——TUI 先决幂等回执）', () => {
   it('accepted:false 如实示警 + 卡面乐观摘除（decided 帧迟到幂等）', async () => {
     render(<App />);

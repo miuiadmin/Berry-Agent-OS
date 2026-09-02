@@ -118,6 +118,31 @@ export function relTime(ms: number | undefined): string {
 }
 
 /**
+ * 审批卡面对账合并（纯函数——首载/onopen 两恢复路共用，契约篇 §6.8 审批卡条
+ * 2026-09-02 勘正）：卡面状态与 asked 帧同模型（挂卡不分会话、渲染按查看会话
+ * 过滤），恢复对账因此双向——
+ * - **摘除**：清单不在册的卡 = 断线窗内他端（TUI/另一 web 会话）已决（SSE 无
+ *   回放，decided 帧错过后别无收场路径——20260901-d #11）；
+ * - **补挂**：清单在册而卡面未挂 = 刷新/断线窗错过的 asked（20260902-b #3）
+ *   ——不补挂则刷新蒸发应答入口：daemon 形态 web 卡是唯一应答腿，run 悬挂无
+ *   兜底；
+ * - **富化**：asked 帧先挂的薄卡以清单富字段合并（信封 sessionId 优先——durable
+ *   载荷只有两键，suggestedEntry/reason 等在服务端簿面富化，帧载荷永远不带）。
+ */
+function reconcileCards(prev: readonly PendingApproval[], list: readonly PendingApproval[]): PendingApproval[] {
+  const next: PendingApproval[] = [];
+  for (const card of prev) {
+    const rich = list.find((x) => x.approvalId === card.approvalId);
+    if (rich === undefined) continue; // 清单不在册——摘除（他端已决）
+    next.push({ ...rich, sessionId: card.sessionId ?? rich.sessionId });
+  }
+  for (const entry of list) {
+    if (!next.some((c) => c.approvalId === entry.approvalId)) next.push(entry); // 在册未挂——补挂
+  }
+  return next;
+}
+
+/**
  * 引导屏（复盘 #45——daemon 形态 401 检出时接管全屏）：贴 daemon token 走
  * POST /api/auth 换 HttpOnly cookie，成功后回调放行。token 从环境读、
  * 输入框 type=password 不回显明文复述。
@@ -197,8 +222,10 @@ export function App() {
    */
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   /**
-   * 未决审批·inline 卡面（刀三）：asked 帧驱动 only（恢复面不挂 inline——
-   * 非当前会话卡无处挂，冷读 #5/#13）；decided 帧摘除。
+   * 未决审批·inline 卡面（刀三）：asked 帧驱动挂卡 + 恢复路对账（首载/onopen
+   * 的 GET /api/approvals 双向合并——20260902-b #3 补挂 + 20260901-d #11 摘除，
+   * reconcileCards 单点）；decided 帧摘除。渲染按查看会话过滤（非当前会话卡
+   * 不入当前视图——切会话即现）。
    */
   const [liveCards, setLiveCards] = useState<PendingApproval[]>([]);
   /** checkpoint 转录行（刀三）：rewind 帧活体 only——surface 词不进投影 */
@@ -269,9 +296,13 @@ export function App() {
         noteError(err);
       }
     })();
-    // 审批恢复面静默失败（非致命——角标缺席只是少一层提醒，不打扰状态条）
+    // 审批恢复面（角标 + 卡面双向对账——#3：不补挂则刷新蒸发应答入口）。静默
+    // 失败（非致命——恢复缺席只是少一层提醒/少一张卡，不打扰状态条）
     fetchApprovals()
-      .then(setApprovals)
+      .then((list) => {
+        setApprovals(list);
+        setLiveCards((prev) => reconcileCards(prev, list));
+      })
       .catch(() => undefined);
   }, [gate, authEpoch, select, noteError]);
 
@@ -291,11 +322,12 @@ export function App() {
       fetchApprovals()
         .then((list) => {
           setApprovals(list);
-          // 卡面对账（20260901-d #11，契约篇 §6.8 审批卡条勘正）：重拉的全量
-          // 未决清单不止修角标面——清单不在册的卡 = 断线窗内他端（TUI/另一
-          // web 会话）已决（SSE 无回放，decided 帧错过后卡面别无收场路径），
-          // 摘除防滞留可点恒置底误导。与 asked 帧富化合并（挂卡路径）互补
-          setLiveCards((prev) => prev.filter((c) => list.some((x) => x.approvalId === c.approvalId)));
+          // 卡面对账双向（reconcileCards 单点——20260901-d #11 摘除 + 20260902-b #3
+          // 补挂）：清单不在册的卡 = 断线窗内他端（TUI/另一 web 会话）已决（SSE 无
+          // 回放，decided 帧错过后卡面别无收场路径），摘除防滞留可点恒置底误导；
+          // 在册未挂的补挂 = 断线窗内错过的 asked（daemon 形态 web 卡是唯一应答腿
+          // ——漏挂 = 应答入口蒸发、run 悬挂无兜底）
+          setLiveCards((prev) => reconcileCards(prev, list));
         })
         .catch(() => undefined);
     };
