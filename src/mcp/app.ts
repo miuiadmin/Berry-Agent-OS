@@ -32,6 +32,17 @@ import { MCP_APP_CONFIG_SCHEMA, MCP_SERVER_NAME_PATTERN, type McpRemoteTool, typ
 /** 目录降级阈值（过滤 enabled/disabled 之后**全局合计**——契约篇 §6.6 冷读 #3） */
 export const CATALOG_THRESHOLD = 20;
 
+/**
+ * 逐服务器调用预算（毫秒）：tool_timeout_sec 用户配置面，缺省 60s。
+ * 两注册形态同码单源（定向复扫 20260902 第七轮 L-4）：原生形态逐件 def、目录
+ * 形态 def 帽（取活服务器最大值）与 call 落桥预算（按目标服务器条目）三消费面
+ * 共用——修前三面里目录两消费面硬编码 DEFAULT_TOOL_TIMEOUT_MS，配置在目录
+ * 形态被静默忽略（原生形态随其它服务器工具数漂移，违「没生效必须有信号」纪律）。
+ */
+function timeoutMsFor(config: McpServerConfig): number {
+  return (config.tool_timeout_sec ?? DEFAULT_TOOL_TIMEOUT_MS / 1000) * 1000;
+}
+
 /** ui 通知面（连接失败/运行期退出/注册拒件的人读出口——channels 服务结构子集） */
 interface UiNotifyFace {
   notify(message: string, opts?: { level?: 'info' | 'warn' | 'error' }): void;
@@ -98,8 +109,11 @@ async function applyMcpApp(
 
   /** 活服务器簿（运行期退出撤件 + 回卷批量关停的遍历对象） */
   const live = new Map<string, LiveServer>();
-  /** 全 row 已注册工具名集合（目录形态的检索面） */
-  const catalog = new Map<string, { server: string; tool: McpRemoteTool; conn: McpServerConnection }>();
+  /** 全 row 已注册工具名集合（目录形态的检索面；timeoutMs = 目标服务器逐台调用预算——call 落桥腿用） */
+  const catalog = new Map<
+    string,
+    { server: string; tool: McpRemoteTool; conn: McpServerConnection; timeoutMs: number }
+  >();
   /**
    * 目录工具句柄（件级寿命盒）：单服务器退出只清自己的 catalog 条目不撤目录
    * （其余服务器的工具仍可路由）——目录工具随 effect 回卷撤，不随单服退出撤。
@@ -136,8 +150,8 @@ interface DiscoverCtx {
   readonly logger: Pick<AppLogger, 'debug' | 'warn'>;
   readonly registry: ChildRegistry;
   readonly live: Map<string, LiveServer>;
-  /** 目录面（全局阈值判定后的检索/路由数据） */
-  readonly catalog: Map<string, { server: string; tool: McpRemoteTool; conn: McpServerConnection }>;
+  /** 目录面（全局阈值判定后的检索/路由数据；timeoutMs = 目标服务器逐台调用预算） */
+  readonly catalog: Map<string, { server: string; tool: McpRemoteTool; conn: McpServerConnection; timeoutMs: number }>;
   /** 目录工具句柄盒（件级寿命——注册时写盒，回卷时撤） */
   readonly catalogBox: { dispose?: Disposer };
   /** 回卷/卸行已发生（续段硬停） */
@@ -230,14 +244,18 @@ async function discoverAll(
   const tools = ctx.get<ToolsService>('tools');
   // 全局阈值二择（冷读 #3：过滤后合计 >20 全降目录；≤20 逐件原生注册）
   if (totalCount > CATALOG_THRESHOLD) {
+    /** 目录 def 管道帽 = 活服务器逐台预算最大值（第七轮 L-4）：单件目录工具须覆盖全部路由目标——任何一台配置 300s，60s 硬编码帽都会把合法调用提前截杀 */
+    let catalogBudgetMs = 0;
     for (const { name, conn, tools: serverTools } of filtered) {
+      const serverTimeoutMs = timeoutMsFor(servers[name]!);
+      catalogBudgetMs = Math.max(catalogBudgetMs, serverTimeoutMs);
       for (const tool of serverTools) {
         // 目录寻址键 = <server>__<tool> 复合名（契约篇 §6.6 勘正〔20260901-d #10〕）：
         // 防跨服务器同名工具静默遮蔽——裸原名键下后连服务器恒胜、前者结构性不可达，
         // 违「没生效必须有信号」纪律。复合名恒含 '__'，与目录工具自身的名字 'mcp'
         // 结构性不可能相撞，旧 'mcp' 字面 guard 随之退役；call 落桥时换回服务器侧
         // 原名（item.tool.name——复合名只是目录寻址面，不上线协议）
-        bag.catalog.set(`${name}__${tool.name}`, { server: name, tool, conn });
+        bag.catalog.set(`${name}__${tool.name}`, { server: name, tool, conn, timeoutMs: serverTimeoutMs });
       }
     }
     const serversLine = filtered.map((it) => it.name).join(', ');
@@ -256,8 +274,10 @@ async function discoverAll(
         }),
         // 目录内含可写调用——fail-closed 恒 write（契约篇 §6.6）
         effect: 'write',
-        // 调用预算与原生形态一致（管道按 def.timeoutMs 执法——结构化 TOOL_TIMEOUT）
-        timeoutMs: DEFAULT_TOOL_TIMEOUT_MS,
+        // 调用预算与原生形态一致（管道按 def.timeoutMs 执法——结构化 TOOL_TIMEOUT）；
+        // 帽 = 活服务器逐台预算最大值（第七轮 L-4——覆盖全部路由目标，不再硬编码 60s
+        // 缺省静默忽略 tool_timeout_sec）
+        timeoutMs: catalogBudgetMs,
         execute: (callArgs) => runCatalogAction(callArgs, bag),
       },
       (toolName) => ui.notify(`MCP 工具 ${toolName} 注册被拒：仅目录工具跳过`, { level: 'warn' }),
@@ -308,7 +328,8 @@ function buildRemoteToolDef(
   conn: McpServerConnection,
   config: McpServerConfig,
 ): ToolDefinition {
-  const timeoutMs = (config.tool_timeout_sec ?? DEFAULT_TOOL_TIMEOUT_MS / 1000) * 1000;
+  // 逐服务器调用预算（与目录形态同码单源——timeoutMsFor，第七轮 L-4）
+  const timeoutMs = timeoutMsFor(config);
   return {
     name: `mcp__${server}__${tool.name}`,
     description: tool.description ?? `MCP 服务器 ${server} 的工具 ${tool.name}`,
@@ -360,12 +381,14 @@ async function runCatalogAction(args: Record<string, unknown>, bag: DiscoverCtx)
     const item = bag.catalog.get(target);
     if (item === undefined) return { content: [{ type: 'text', text: `未知工具：${target}` }], isError: true };
     try {
-      // 桥侧预算 +500ms 让管道先执法（目录工具 def.timeoutMs = 60s 同码）；
-      // 落桥换回服务器侧原名（target 是复合名——只是目录寻址面，不上线协议）
+      // 桥侧预算 +500ms 让管道先执法（按目标服务器逐台预算同码计算——第七轮 L-4：
+      // 修前硬编码 60s 缺省静默忽略 tool_timeout_sec；「帽取最大值」只抬管道帽，
+      // 落桥仍逐服务器执法）；落桥换回服务器侧原名（target 是复合名——只是目录
+      // 寻址面，不上线协议）
       const out = await item.conn.call(
         item.tool.name,
         (args.args as Record<string, unknown>) ?? {},
-        DEFAULT_TOOL_TIMEOUT_MS + 500,
+        item.timeoutMs + 500,
       );
       return { content: [{ type: 'text', text: out.text }], ...(out.isError ? { isError: true } : {}) };
     } catch (err) {

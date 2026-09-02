@@ -19,7 +19,7 @@ import type { ContextScope } from '../context/index.js';
 import { createToolPipeline } from '../tools/pipeline.js';
 import { registerToolsService } from '../tools/registry.js';
 import type { AgentToolResult, ToolsService } from '../contracts/tools.js';
-import { APP_CONFIG_INVALID } from '../contracts/errors.js';
+import { APP_CONFIG_INVALID, TOOL_TIMEOUT } from '../contracts/errors.js';
 import { createMcpApp, CATALOG_THRESHOLD } from '../mcp/index.js';
 import type { McpAppDeps } from '../mcp/index.js';
 import type { SpawnedChild } from '../mcp/client.js';
@@ -53,6 +53,10 @@ interface FakeServer {
   child: SpawnedChild;
   /** 模拟子进程退出（guarded：stdout 只真关一次，可重复触发） */
   die: (code: number | null) => void;
+  /** holdCall 模式下滞留中的调用（id + wire 名——releaseCalls 逐条应答） */
+  heldCalls: Array<{ id: unknown; name: string }>;
+  /** 应答全部滞留调用（仅 holdCall 模式有实际内容；普通模式空操作） */
+  releaseCalls: () => void;
 }
 
 /** 全部假服务器登记（afterEach 统一 die 让关停宽限即刻结算，不留 3s 挂起计时器） */
@@ -68,8 +72,8 @@ afterEach(async () => {
   fakes.length = 0;
 });
 
-/** 造一台假服务器：应答握手/发现（带 readOnlyHint 与自定义描述）/调用；deaf = 收帧永不应答（握手窗观察用） */
-function makeFakeServer(specs: readonly FakeToolSpec[], pid: number, deaf = false): FakeServer {
+/** 造一台假服务器：应答握手/发现（带 readOnlyHint 与自定义描述）/调用；deaf = 收帧永不应答（握手窗观察用）；holdCall = tools/call 滞留不应答（调用超时观察用——releaseCalls 释放） */
+function makeFakeServer(specs: readonly FakeToolSpec[], pid: number, deaf = false, holdCall = false): FakeServer {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   stdout.on('error', () => undefined); // 重复 end 的无害化（die 可多次触发）
@@ -90,6 +94,8 @@ function makeFakeServer(specs: readonly FakeToolSpec[], pid: number, deaf = fals
   };
   const send = (obj: unknown) => stdout.write(`${JSON.stringify(obj)}\n`);
   const sendResult = (id: unknown, result: unknown) => send({ jsonrpc: '2.0', id, result });
+  // holdCall 模式的滞留队列：tools/call 只入队不应答（调用在飞态观察超时执法用）
+  const heldCalls: FakeServer['heldCalls'] = [];
   stdin.on('data', (chunk: Buffer | string) => {
     if (deaf) return; // 聋模式：收到任何帧永不应答（spawn 即写的握手窗观察面）
     for (const line of String(chunk).split('\n')) {
@@ -115,7 +121,12 @@ function makeFakeServer(specs: readonly FakeToolSpec[], pid: number, deaf = fals
           })),
         });
       } else if (method === 'tools/call') {
-        sendResult(id, { content: [{ type: 'text', text: `ran:${(frame['params'] as { name: string }).name}` }] });
+        const wireName = String((frame['params'] as { name: string }).name);
+        if (holdCall) {
+          heldCalls.push({ id, name: wireName });
+        } else {
+          sendResult(id, { content: [{ type: 'text', text: `ran:${wireName}` }] });
+        }
       } else {
         sendResult(id, {});
       }
@@ -129,6 +140,12 @@ function makeFakeServer(specs: readonly FakeToolSpec[], pid: number, deaf = fals
         stdout.end();
       }
       for (const cb of [...closeCbs]) cb(code, null);
+    },
+    heldCalls,
+    releaseCalls: () => {
+      for (const held of heldCalls.splice(0)) {
+        sendResult(held.id, { content: [{ type: 'text', text: `ran:${held.name}` }] });
+      }
     },
   };
   fakes.push(fake);
@@ -166,8 +183,10 @@ interface FakeHarness {
   kills: number[];
 }
 
-/** 造件依赖（计划按 command 键路由；Error 值 = spawn 抛错腿；{deaf:true} = 聋服务器腿） */
-function makeHarness(spawnPlan: Record<string, FakeToolSpec[] | Error | { deaf: true }>): FakeHarness {
+/** 造件依赖（计划按 command 键路由；Error 值 = spawn 抛错腿；{deaf:true} = 聋服务器腿；{holdCall:true} = 调用滞留腿） */
+function makeHarness(
+  spawnPlan: Record<string, FakeToolSpec[] | Error | { deaf: true } | { holdCall: true; tools: FakeToolSpec[] }>,
+): FakeHarness {
   const dataDir = makeTempDir('mcp-plugin-');
   const servers = new Map<string, FakeServer>();
   const kills: number[] = [];
@@ -177,7 +196,11 @@ function makeHarness(spawnPlan: Record<string, FakeToolSpec[] | Error | { deaf: 
       const plan = spawnPlan[config.command];
       if (plan === undefined) throw new Error(`计划外 spawn：${config.command}`);
       if (plan instanceof Error) throw plan;
-      const server = Array.isArray(plan) ? makeFakeServer(plan, pid++) : makeFakeServer([], pid++, true);
+      const server = Array.isArray(plan)
+        ? makeFakeServer(plan, pid++)
+        : 'deaf' in plan
+          ? makeFakeServer([], pid++, true)
+          : makeFakeServer(plan.tools, pid++, false, true);
       servers.set(config.command, server);
       return server.child;
     },
@@ -404,6 +427,62 @@ describe('mcp 件 — 全局阈值目录形态', () => {
     });
     const stillA = await catalogTool.execute({ action: 'call', tool: 'srv-a__dup' }, { toolCallId: 't' });
     expect(textOf(stillA)).toBe('ran:dup');
+  });
+
+  // 目录降级形态尊重 per-server tool_timeout_sec（定向复扫 20260902 第七轮 L-4）：
+  // 修前目录 def 管道帽与 call 落桥预算双处硬编码 60s 缺省——原生形态尊重的配置在
+  // 目录形态被静默忽略（注册形态随其它服务器工具数漂移，无任何信号）。
+  // 两腿红锁：① def.timeoutMs = 活服务器逐台预算最大值（300s 盖过 60s 缺省——修前
+  // 硬编码 60000 红）；② call 落桥预算按目标服务器同码计算（holdCall 滞留 + 假钟
+  // 推进 61s：300s 配置的调用存活、60s 缺省服务器的调用被 TOOL_TIMEOUT 截杀）。
+  it('目录形态尊重 tool_timeout_sec：管道帽取最大值 + 落桥预算逐服务器执法', async () => {
+    const env = makeEnv();
+    roots.push(env.root);
+    const spec = (p: string): FakeToolSpec[] =>
+      Array.from({ length: 11 }, (_, i) => ({ name: `${p}-tool-${i}`, description: `${p} 侧 ${i}` }));
+    // 两台 holdCall 服务器（11+10 = 21 超阈值入目录形态；调用滞留不答——超时执法观察面）
+    const harness = makeHarness({
+      [cmd('srv-default')]: { holdCall: true, tools: spec('d') },
+      [cmd('srv-slow')]: { holdCall: true, tools: spec('s').slice(0, 10) },
+    });
+    await applyAndWait(env, harness, {
+      'srv-default': { command: cmd('srv-default') },
+      'srv-slow': { command: cmd('srv-slow'), tool_timeout_sec: 300 },
+    });
+    const catalogTool = await vi.waitFor(() => {
+      const tool = env.tools.get('mcp');
+      expect(tool).toBeDefined();
+      return tool!;
+    });
+    // ① 管道帽 = 活服务器逐台预算最大值（srv-slow 300s 盖过 srv-default 60s 缺省）
+    expect(catalogTool.timeoutMs).toBe(300_000);
+
+    // ② 落桥预算逐服务器：发现已完成（真钟观察毕），换假钟推进观察超时执法
+    vi.useFakeTimers();
+    try {
+      // srv-slow（配置 300s）：过 60s 缺省帽仍存活——修前 60.5s 桥预算即杀（红）
+      const slowPending = catalogTool.execute(
+        { action: 'call', tool: 'srv-slow__s-tool-0', args: {} },
+        { toolCallId: 't1' },
+      );
+      await vi.advanceTimersByTimeAsync(61_000);
+      harness.servers.get(cmd('srv-slow'))!.releaseCalls();
+      const slowOut = await slowPending;
+      expect(textOf(slowOut)).toBe('ran:s-tool-0');
+
+      // srv-default（60s 缺省）：同窗被 TOOL_TIMEOUT 截杀——「帽取最大值」不是「全员抬到最大值」。
+      // 兜底 catch 先挂（advance 内即拒、rejects 后挂会留 unhandled rejection 假红面）
+      const defaultPending = catalogTool
+        .execute({ action: 'call', tool: 'srv-default__d-tool-0', args: {} }, { toolCallId: 't2' })
+        .then(
+          () => new Error('预期 TOOL_TIMEOUT 截杀，实际成功'),
+          (err: unknown) => err,
+        );
+      await vi.advanceTimersByTimeAsync(61_000);
+      await expect(defaultPending).resolves.toMatchObject({ code: TOOL_TIMEOUT });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
