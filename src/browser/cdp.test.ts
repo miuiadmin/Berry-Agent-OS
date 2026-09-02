@@ -642,6 +642,46 @@ describe('browser 引擎生命周期', () => {
     await expect(engine.acquireContext('sess-A')).rejects.toThrow('已回卷');
   });
 
+  it('#5 dispose×在飞 bringUp 竞速：起链窗内回卷——起出即收不留僵尸，取用响亮失败', async () => {
+    const dataDir = makeEngineDir();
+    const killTree = vi.fn();
+    const registry = { add: vi.fn(), remove: vi.fn(), sweep: vi.fn(async () => ({ killed: [] as number[] })) };
+    // 手动闸：spawn 先发生（child 已在册）但 DevToolsActivePort 延后写——bringUp
+    // 停在端口轮询窗（this.starting 在飞、连接未收养——竞速现场的最小复刻）
+    let releasePortFile!: () => void;
+    const portGate = new Promise<void>((resolve) => (releasePortFile = resolve));
+    const engine = new BrowserEngine({
+      dataDir,
+      config: { executablePath: process.execPath },
+      spawnEngine: ({ args }) => {
+        const dir = args.find((a) => a.startsWith('--user-data-dir='))!.slice('--user-data-dir='.length);
+        void portGate.then(() => {
+          writeFileSync(join(dir, 'DevToolsActivePort'), `${fake.port}\n/devtools/browser/fake-uuid\n`);
+        });
+        return { pid: 424_242, alive: () => true };
+      },
+      killTree,
+      registry,
+      newConnection: (o) => new JsonRpcConnection(o),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Pick<AppLogger, 'debug' | 'info' | 'warn'>,
+      notify: vi.fn(),
+      idleMs: 60_000, // 拉满——僵尸滞留只能靠竞速收口解决，不靠闲置钟兜底
+      startupTimeoutMs: 2_000,
+    });
+
+    const acquiring = engine.acquireContext('sess-A'); // 在飞（不 await——停在端口轮询）
+    await vi.waitFor(() => expect(registry.add).toHaveBeenCalled()); // spawn 已发生
+    const disposing = engine.dispose(); // 回卷（不 await——修后停在 await this.starting；修前即刻返回空转）
+    releasePortFile(); // 放行：bringUp 完成（收养连接 → running）
+    // 修前红位①：acquireContext 拿到活句柄（向已回卷行返回）——rejects 等不到
+    await expect(acquiring).rejects.toThrow('已回卷');
+    await disposing;
+    // 修前红位②：closeEngine 对未收养连接早退——树杀/净退全空，Chrome 滞留闲置双钟
+    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(registry.remove).toHaveBeenCalledWith(424_242);
+    expect(engine.getStatus().state).toBe('closed');
+  });
+
   it('attach 形态：只连不杀（零 spawn/登记簿/树杀）', async () => {
     const dataDir = makeEngineDir();
     const killTree = vi.fn();

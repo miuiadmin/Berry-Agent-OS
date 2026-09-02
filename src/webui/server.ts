@@ -604,6 +604,11 @@ async function serveStatic(
           res.end();
         }
       });
+      // 客户端中止腿（遗漏大扫 20260902 #6）：pipe 语义只对 dest unpipe 不销毁
+      // source——大资产传输中途断开时源流停在背压暂停态，fd 与已缓冲数据无限期
+      // 驻留（daemon 常驻形态反复中止可累积）。res 'close' 即刻销毁源流（正常
+      // 传完时 source 已 end，destroy 幂等无害）
+      res.on('close', () => source.destroy());
       source.pipe(res);
       return;
     }

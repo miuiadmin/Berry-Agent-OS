@@ -183,6 +183,14 @@ export class BrowserEngine {
       throw new Error('browser 行已回卷——引擎已关停（重装载行后可用）');
     }
     await this.ensureRunning();
+    // 竞速窗复查（遗漏大扫 20260902 #5）：ensureRunning 在飞期行回卷（或入口检查
+    // 后、ensureRunning 前整段 dispose 跑完）——刚起出的引擎不向已回卷行返回活
+    // 句柄，就地收场 + 响亮失败（与 dispose 的竞速窗补刀幂等——tornDown 同代只
+    // 结算一次，两腿先后到达不双杀）
+    if (this.disposed) {
+      await this.closeEngine('行已回卷（竞速窗收场）');
+      throw new Error('browser 行已回卷——引擎已关停（重装载行后可用）');
+    }
     const key = sessionId ?? '_default';
     // 引擎闲置钟撤防（有活 context 期引擎不闲置回收——只由 context 级钟驱动）
     this.clearEngineIdle();
@@ -516,6 +524,14 @@ export class BrowserEngine {
   async dispose(): Promise<void> {
     this.disposed = true;
     await this.closeEngine('行回卷关停');
+    // 竞速窗补刀（遗漏大扫 20260902 #5）：首段 closeEngine 时 bringUp 可能仍在飞
+    // ——conn 未收养即早退，起出的引擎无人结算（post-dispose 僵尸滞留闲置双钟）。
+    // 等在飞起链落定后再补一刀（起出即收）；起链失败不拦收场（吞掉 rejection）
+    const inflight = this.starting;
+    if (inflight !== undefined) {
+      await inflight.catch(() => undefined);
+      await this.closeEngine('行回卷关停（竞速窗补刀）');
+    }
   }
 
   /**
