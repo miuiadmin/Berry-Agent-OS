@@ -16,11 +16,11 @@
  * 交叠同一文件可撕裂混合两态（修前形态）。
  */
 
-import { mkdir, writeFile, readdir } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { assertTargetStable, canonicalize, serializeWrites } from '../tools/fs.js';
 import { readBlob, type CheckpointManifest } from './store.js';
-import { toPosix } from './snapshot.js';
+import { listPrunedRelPaths } from './snapshot.js';
 
 /** 恢复报告（回执展示面） */
 export interface RestoreReport {
@@ -30,36 +30,13 @@ export interface RestoreReport {
   readonly leftovers: readonly string[];
 }
 
-/** 枚举工作区当前全部普通文件相对路径（遗留检测用——与捕获同一遍历剪枝语义的轻量版：只列路径不 stat） */
-async function listCurrentFiles(workspaceRoot: string, skipDirs: Set<string>): Promise<Set<string>> {
-  const out = new Set<string>();
-  const stack: string[] = [workspaceRoot];
-  while (stack.length > 0) {
-    const dir = stack.pop()!;
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    const sorted = [...entries].sort((a, b) => b.name.localeCompare(a.name));
-    for (const entry of sorted) {
-      if (entry.isDirectory()) {
-        if (skipDirs.has(entry.name)) continue;
-        stack.push(join(dir, entry.name));
-      } else if (entry.isFile()) {
-        out.add(toPosix(relative(workspaceRoot, join(dir, entry.name))));
-      }
-    }
-  }
-  return out;
-}
-
 /**
  * 把工作区恢复到目标快照状态（files first 段）。
  * @param workspaceRoot canonical 工作区根
  * @param dataRoot 件数据根（blob 仓所在）
  * @param target 目标快照 manifest
+ * @param exclude 排除 glob（与捕获同一拼接全集——遗留检测复用捕获剪枝语义，
+ *   遗漏大扫 20260902-c #6，会话篇 §5.3 遗留检测枚举语义条款）
  * @returns 恢复报告（restored + leftovers）
  * @throws 任一 blob 读/写失败——整体失败（调用方不进入 fork 段）
  */
@@ -67,6 +44,7 @@ export async function restoreWorkspace(
   workspaceRoot: string,
   dataRoot: string,
   target: CheckpointManifest,
+  exclude: readonly string[],
 ): Promise<RestoreReport> {
   // 写段入 per-canonical-path 写串行链（2026-09-01 遗漏大扫 20260901-c #5，
   // 会话篇 §5.3 前置拒两段收口）：链键 = manifest 路径对 workspaceRoot 的
@@ -88,14 +66,26 @@ export async function restoreWorkspace(
     for (const [i, entry] of target.files.entries()) {
       const abs = join(workspaceRoot, entry.rel);
       const content = await readBlob(dataRoot, entry.hash);
+      // 恢复段物理写序（遗漏大扫 20260902-c #8，会话篇 §5.3 恢复段物理写序
+      // 条款）：mkdir 同为物理写面受同一漂移重验辖——序恒为「重验 → mkdir →
+      // 复验 → writeFile（末次复验与 writeFile 之间零 await）」。修前 mkdir 在
+      // 首验之前：readBlob await 撑宽的窗口里父组件被链外写者换成指向工作区外
+      // 的符号链（目标目录已存在形）时，mkdir recursive 顺着符号链把目录树建到
+      // 区外——文件写虽被随后的重验拒掉，区外目录已留痕。先验再建把目录创建
+      // 收进同一漂移裁决辖（mkdir 自身 await 撑开新窗，故建后复验再写）。
+      await assertTargetStable(abs, chainKeys[i]!);
       await mkdir(join(abs, '..'), { recursive: true });
-      await assertTargetStable(abs, chainKeys[i]!); // 重验与物理写之间零 await
+      await assertTargetStable(abs, chainKeys[i]!); // 复验与物理写之间零 await
       await writeFile(abs, content);
     }
 
-    // 遗留检测：当前工作区有、目标 manifest 无的路径（快照后新建）——报告不删
-    const snapshotted = new Set(target.files.map((f) => f.rel));
-    const current = await listCurrentFiles(workspaceRoot, new Set(['node_modules', '.git']));
+    // 遗留检测：当前工作区有、目标 manifest 无的路径（快照后新建）——报告不删。
+    // 枚举与捕获同一剪枝语义件内单源（遗漏大扫 20260902-c #6，会话篇 §5.3 遗留
+    // 检测枚举语义条款）：捕获剪掉的路径（秘密缺省族/gitignore 面）从未入快照
+    // 面，当「遗留」点名是误报；skipped 超限跳过路径捕获时已在场，并入已快照
+    // 集（超限跳过是披露面不是遗留面）。
+    const snapshotted = new Set([...target.files.map((f) => f.rel), ...target.skipped]);
+    const current = await listPrunedRelPaths(workspaceRoot, exclude);
     return [...current].filter((rel) => !snapshotted.has(rel)).sort();
   });
 

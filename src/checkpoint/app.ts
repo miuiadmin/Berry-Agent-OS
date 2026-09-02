@@ -408,10 +408,12 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
           );
           return;
         }
-        // ② 文件恢复（失败不 fork、快照保留——§5.3 失败语义）
+        // ② 文件恢复（失败不 fork、快照保留——§5.3 失败语义）。exclude 传捕获
+        // 同一拼接全集：遗留检测复用捕获剪枝语义（遗漏大扫 20260902-c #6——捕获
+        // 剪掉的路径不当「快照后新建」误报）
         let report;
         try {
-          report = await restoreWorkspace(paths.workspaceRoot(), dataRoot, target);
+          report = await restoreWorkspace(paths.workspaceRoot(), dataRoot, target, cfg.exclude);
         } catch (err) {
           notify(`文件恢复失败：${String(err)}——未回退（快照保留，可重试）。`);
           return;

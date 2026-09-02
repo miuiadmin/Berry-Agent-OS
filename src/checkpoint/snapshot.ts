@@ -86,14 +86,14 @@ interface FingerPrint {
 }
 
 /**
- * gitignore-aware 工作区遍历：枚举 root 子树全部普通文件的 stat 指纹。
- * 剪枝 = PRUNE_DIRS 硬表 + exclude 配置规则 + 祖先链 .gitignore（逐目录前缀化
- * 挂载）；符号链目录不跟随（Dirent.isDirectory 对符号链 false，防环）；目录读
- * 失败跳过本目录继续其余子树（best-effort——捕获是安全网非账目）。
+ * 剪枝感知工作区遍历核（捕获指纹 walk 与遗留检测枚举的件内单源——遗漏大扫
+ * 20260902-c #6，会话篇 §5.3 遗留检测枚举语义条款）：DFS 枚举 root 子树全部
+ * 普通文件。剪枝 = PRUNE_DIRS 硬表 + exclude 配置规则 + 祖先链 .gitignore
+ * （逐目录前缀化挂载）；符号链目录不跟随（Dirent.isDirectory 对符号链 false，
+ * 防环）；目录读失败跳过本目录继续其余子树（best-effort——捕获是安全网非账目）。
  */
-async function walkFingerprints(root: string, exclude: readonly string[]): Promise<FingerPrint[]> {
+async function* walkPruned(root: string, exclude: readonly string[]): AsyncGenerator<{ rel: string; abs: string }> {
   const matcher = ignore().add([...exclude]);
-  const out: FingerPrint[] = [];
   const stack: string[] = [root]; // DFS 显式栈（目录序确定）
   while (stack.length > 0) {
     const dir = stack.pop()!;
@@ -117,15 +117,39 @@ async function walkFingerprints(root: string, exclude: readonly string[]): Promi
       } else if (entry.isFile()) {
         const rel = toPosix(relative(root, join(dir, entry.name)));
         if (matcher.ignores(rel)) continue;
-        try {
-          const s = await stat(join(dir, entry.name));
-          out.push({ rel, size: s.size, mtimeMs: s.mtimeMs, mode: s.mode });
-        } catch {
-          continue; // stat 失败（竞态消失/权限）——跳过该文件
-        }
+        yield { rel, abs: join(dir, entry.name) };
       }
     }
   }
+}
+
+/**
+ * gitignore-aware 工作区遍历：枚举 root 子树全部普通文件的 stat 指纹
+ * （walkPruned 核之上叠 stat——剪枝语义见核注释）。
+ */
+async function walkFingerprints(root: string, exclude: readonly string[]): Promise<FingerPrint[]> {
+  const out: FingerPrint[] = [];
+  for await (const { rel, abs } of walkPruned(root, exclude)) {
+    try {
+      const s = await stat(abs);
+      out.push({ rel, size: s.size, mtimeMs: s.mtimeMs, mode: s.mode });
+    } catch {
+      continue; // stat 失败（竞态消失/权限）——跳过该文件
+    }
+  }
+  return out;
+}
+
+/**
+ * 剪枝感知路径枚举（遗留检测复用捕获同一剪枝语义——遗漏大扫 20260902-c #6，
+ * 会话篇 §5.3 遗留检测枚举语义条款）：恢复侧的「快照后新建」清单以此枚举，
+ * 与捕获遍历同一 PRUNE_DIRS + exclude + .gitignore 语义单源——捕获剪掉的
+ * 路径（秘密缺省族/gitignore 面）绝不在恢复侧作为「遗留」误报（它们从未入
+ * 快照面，谈不上「快照后新建」）。
+ */
+export async function listPrunedRelPaths(root: string, exclude: readonly string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  for await (const { rel } of walkPruned(root, exclude)) out.add(rel);
   return out;
 }
 
@@ -310,6 +334,3 @@ export async function executePrune(
     inventory.manifests.filter((m) => !dropped.has(m.id)),
   );
 }
-
-/** posix 归一导出（restore 复用同一相对路径语义） */
-export { toPosix };

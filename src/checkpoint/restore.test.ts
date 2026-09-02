@@ -7,7 +7,7 @@
  * 与在飞工具写交叠即撕裂混合两态）。hermetic：临时目录作双根，用后即清。
  */
 
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -57,7 +57,7 @@ describe('restoreWorkspace（写串行链义务——遗漏大扫 20260901-c #5�
       const holder = serializeWrites([key], () => new Promise<void>((resolve) => (release = resolve)));
 
       let settled = false;
-      const restoring = restoreWorkspace(ws, dataRoot, target).then((report) => {
+      const restoring = restoreWorkspace(ws, dataRoot, target, []).then((report) => {
         settled = true;
         return report;
       });
@@ -109,7 +109,7 @@ describe('restoreWorkspace（写串行链义务——遗漏大扫 20260901-c #5�
 
       // 恢复整体中止（readBlob 抛 CHECKPOINT_BLOB_CORRUPT 经 serializeWrites 透传）。
       // 断言形态同 apply-patch.test 先例：AppError 码在 .code 属性（非 message 前缀）
-      const err = await restoreWorkspace(ws, dataRoot, target).catch((e: unknown) => e);
+      const err = await restoreWorkspace(ws, dataRoot, target, []).catch((e: unknown) => e);
       expect((err as AppError).code).toBe('CHECKPOINT_BLOB_CORRUPT');
       // 现场未被撕裂数据覆写（恢复中止 = 半事务零落盘；快照保留可重试）
       expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v2-现场内容');
@@ -156,7 +156,7 @@ describe('restoreWorkspace（段内目标漂移重验——遗漏大扫 20260902
       const key = await canonicalize(join(ws, 'a.txt'));
       let release!: () => void;
       const holder = serializeWrites([key], () => new Promise<void>((r) => (release = r)));
-      const restoring = restoreWorkspace(ws, dataRoot, target);
+      const restoring = restoreWorkspace(ws, dataRoot, target, []);
       await new Promise((resolve) => setTimeout(resolve, 20)); // 让 T0 定键+入队完成
 
       // 链外写者的 symlink swap：真身换符号链（发生在定键之后、恢复段进入前）
@@ -172,6 +172,113 @@ describe('restoreWorkspace（段内目标漂移重验——遗漏大扫 20260902
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('restoreWorkspace（恢复段物理写序——遗漏大扫 20260902-c #8）', () => {
+  it('父组件被换成指向区外目录的符号链 → mkdir 前重验即拒：区外目录树零创建（修前 mkdir 先建区外再拒写）', async () => {
+    // 修前形态：段内序 = mkdir → 重验 → writeFile。目标父组件（sub）在定键后被
+    // 链外写者换成指向区外已存在目录的符号链、且深层目录（deep）尚不存在时，
+    // mkdir recursive 顺着符号链把 deep 建到区外真身——随后的重验虽拒掉文件写
+    //（DRIFTED），区外目录已留痕。修后：重验 → mkdir → 复验 → writeFile——
+    // 首验即拒，区外零创建。
+    const ws = mkdtempSync(join(tmpdir(), 'checkpoint-restore-mkdir-'));
+    const outsideDir = mkdtempSync(join(tmpdir(), 'checkpoint-restore-mkdir-out-'));
+    try {
+      // 深层路径（sub/deep/inner.txt——mkdir 真有目录要建）；T0 时 sub 整个不存在
+      const v1 = Buffer.from('v1-快照内容-mkdir序');
+      const hash = hashContent(v1);
+      await writeBlob(dataRoot, hash, v1);
+      const target: CheckpointManifest = {
+        id: newManifestId(),
+        sessionId: 'sess-restore-mkdir-test',
+        time: 1755900000000,
+        triggerTool: 'write',
+        guard: false,
+        forkSeq: null,
+        triggerText: null,
+        files: [{ rel: 'sub/deep/inner.txt', hash, size: v1.length, mtimeMs: 1, mode: 0o644 }],
+        skipped: [],
+        newBytes: v1.length,
+        totalBytes: v1.length,
+      };
+
+      // T0 定键（sub 不存在——canonicalize 祖先回退拼尾段）→ 占链 → 恢复入队
+      const key = await canonicalize(join(ws, 'sub', 'deep', 'inner.txt'));
+      let release!: () => void;
+      const holder = serializeWrites([key], () => new Promise<void>((r) => (release = r)));
+      const restoring = restoreWorkspace(ws, dataRoot, target, []);
+      await new Promise((resolve) => setTimeout(resolve, 20)); // 让 T0 定键+入队完成
+
+      // 链外写者的 symlink swap：sub 换成指向区外已存在目录的符号链（deep 尚
+      // 不存在——mkdir 若先跑会穿透符号链在区外建出 deep）
+      symlinkSync(outsideDir, join(ws, 'sub'));
+
+      release(); // 放链——恢复段进入，mkdir 前首验面对已漂移父组件
+      await holder;
+      const err = await restoring.catch((e: unknown) => e);
+      expect((err as AppError).code).toBe('FS_WRITE_TARGET_DRIFTED');
+      // 区外目录树零创建（修前红：mkdir 已把 deep 建进区外真身）
+      expect(existsSync(join(outsideDir, 'deep'))).toBe(false);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('restoreWorkspace（遗留检测枚举语义——遗漏大扫 20260902-c #6）', () => {
+  it('捕获剪掉的路径不当遗留误报：exclude 族 + .gitignore 面 + skipped 超限跳过全部豁免', async () => {
+    // 修前形态：遗留枚举只跳 node_modules/.git 硬表——exclude 配置剪掉的
+    //（secret.key）、.gitignore 剪掉的（dist/out.js、debug.log）在场时全部被
+    // 点名为「快照后新建」（operator 被误导处置）；skipped 超限跳过（huge.bin
+    // 捕获时已在场）同被误报。修后：枚举与捕获同一剪枝语义件内单源，真正的新建
+    //（new-after.txt）照常点名。
+    const ws = mkdtempSync(join(tmpdir(), 'checkpoint-restore-leftover-'));
+    try {
+      // 根 .gitignore：dist/ 与 *.log（捕获语义 = 逐目录 .gitignore 前缀化规则）。
+      // .gitignore 自身不被剪枝、属真实快照面——manifest 带上（否则它自己成遗留）
+      const gitignoreContent = 'dist/\n*.log\n';
+      writeFileSync(join(ws, '.gitignore'), gitignoreContent);
+      const giBuf = Buffer.from(gitignoreContent);
+      const giHash = hashContent(giBuf);
+      await writeBlob(dataRoot, giHash, giBuf);
+      // 快照面：a.txt + .gitignore 入 manifest；huge.bin 走超限跳过（skipped 披露）
+      const v1 = Buffer.from('v1-快照内容-遗留');
+      const hash = hashContent(v1);
+      await writeBlob(dataRoot, hash, v1);
+      const target: CheckpointManifest = {
+        id: newManifestId(),
+        sessionId: 'sess-restore-leftover-test',
+        time: 1755900000000,
+        triggerTool: 'write',
+        guard: false,
+        forkSeq: null,
+        triggerText: null,
+        files: [
+          { rel: 'a.txt', hash, size: v1.length, mtimeMs: 1, mode: 0o644 },
+          { rel: '.gitignore', hash: giHash, size: giBuf.length, mtimeMs: 1, mode: 0o644 },
+        ],
+        skipped: ['huge.bin'],
+        newBytes: v1.length + giBuf.length,
+        totalBytes: v1.length + giBuf.length,
+      };
+
+      // 现场态：快照后的真实新建（new-after.txt）+ 捕获各剪枝面覆盖的在场路径
+      writeFileSync(join(ws, 'new-after.txt'), '快照后新建');
+      writeFileSync(join(ws, 'secret.key'), '秘密-exclude 剪掉');
+      writeFileSync(join(ws, 'debug.log'), '日志-gitignore 剪掉');
+      mkdirSync(join(ws, 'dist'));
+      writeFileSync(join(ws, 'dist', 'out.js'), '构建物-gitignore 剪掉');
+      writeFileSync(join(ws, 'huge.bin'), '超限跳过-捕获时已在场');
+
+      // exclude 与捕获同一拼接全集语义（此处用显式清单演示参数接线；缺省族
+      // 由 checkpoint-stack.test 的接线级用例覆盖）
+      const report = await restoreWorkspace(ws, dataRoot, target, ['secret.key']);
+      expect(report.leftovers).toEqual(['new-after.txt']); // 修前红：五路全误报
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
     }
   });
 });
