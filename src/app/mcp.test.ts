@@ -68,8 +68,8 @@ afterEach(async () => {
   fakes.length = 0;
 });
 
-/** 造一台假服务器：应答握手/发现（带 readOnlyHint 与自定义描述）/调用 */
-function makeFakeServer(specs: readonly FakeToolSpec[], pid: number): FakeServer {
+/** 造一台假服务器：应答握手/发现（带 readOnlyHint 与自定义描述）/调用；deaf = 收帧永不应答（握手窗观察用） */
+function makeFakeServer(specs: readonly FakeToolSpec[], pid: number, deaf = false): FakeServer {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   stdout.on('error', () => undefined); // 重复 end 的无害化（die 可多次触发）
@@ -91,6 +91,7 @@ function makeFakeServer(specs: readonly FakeToolSpec[], pid: number): FakeServer
   const send = (obj: unknown) => stdout.write(`${JSON.stringify(obj)}\n`);
   const sendResult = (id: unknown, result: unknown) => send({ jsonrpc: '2.0', id, result });
   stdin.on('data', (chunk: Buffer | string) => {
+    if (deaf) return; // 聋模式：收到任何帧永不应答（spawn 即写的握手窗观察面）
     for (const line of String(chunk).split('\n')) {
       if (line.trim() === '') continue;
       let frame: Record<string, unknown>;
@@ -165,8 +166,8 @@ interface FakeHarness {
   kills: number[];
 }
 
-/** 造件依赖（计划按 command 键路由；Error 值 = spawn 抛错腿） */
-function makeHarness(spawnPlan: Record<string, FakeToolSpec[] | Error>): FakeHarness {
+/** 造件依赖（计划按 command 键路由；Error 值 = spawn 抛错腿；{deaf:true} = 聋服务器腿） */
+function makeHarness(spawnPlan: Record<string, FakeToolSpec[] | Error | { deaf: true }>): FakeHarness {
   const dataDir = makeTempDir('mcp-plugin-');
   const servers = new Map<string, FakeServer>();
   const kills: number[] = [];
@@ -176,7 +177,7 @@ function makeHarness(spawnPlan: Record<string, FakeToolSpec[] | Error>): FakeHar
       const plan = spawnPlan[config.command];
       if (plan === undefined) throw new Error(`计划外 spawn：${config.command}`);
       if (plan instanceof Error) throw plan;
-      const server = makeFakeServer(plan, pid++);
+      const server = Array.isArray(plan) ? makeFakeServer(plan, pid++) : makeFakeServer([], pid++, true);
       servers.set(config.command, server);
       return server.child;
     },
@@ -254,6 +255,32 @@ describe('mcp 件 — apply 语义', () => {
       expect(entries[0]).toMatchObject({ hostPid: process.pid, server: 'srv-a', command: '/usr/local/bin/srv-a' });
     });
   });
+
+  it('spawn 即写：握手窗内已入登记簿，握手失败对称删行（遗漏大扫 20260902-b #7——修前登记滞后到发现全完成，握手窗内宿主硬崩则孤儿清扫结构性失明）', async () => {
+    const env = makeEnv();
+    roots.push(env.root);
+    // 聋服务器：收到 initialize 永不应答（startup_timeout_sec 1s——握手窗可观察且收场快）
+    const harness = makeHarness({ '/fake/bin/deaf': { deaf: true } });
+    const registryPath = join(harness.deps.dataDir, 'mcp', 'children.json');
+    const entriesOf = (): Array<Record<string, unknown>> => {
+      try {
+        return JSON.parse(readFileSync(registryPath, 'utf8')) as Array<Record<string, unknown>>;
+      } catch {
+        return []; // 文件未生成 = 空表（registry.list 同语义）
+      }
+    };
+    await applyAndWait(env, harness, { deaf: { command: '/fake/bin/deaf', startup_timeout_sec: 1 } });
+    // 握手窗内（1s 超时未到）：条目已在簿——spawn 返回 pid 的同步点写入（红先载体）
+    await vi.waitFor(() => expect(entriesOf().some((e) => e['server'] === 'deaf')).toBe(true));
+    expect(entriesOf().find((e) => e['server'] === 'deaf')).toMatchObject({
+      hostPid: process.pid,
+      command: '/fake/bin/deaf',
+    });
+    // 握手失败收场（1s 到点）：撤销面删行 + 树杀 + 单点失败 notify 不阻启动
+    await vi.waitFor(() => expect(entriesOf().some((e) => e['server'] === 'deaf')).toBe(false), { timeout: 4_000 });
+    expect(harness.kills).toContain(7000); // 树杀打到聋子进程 pid
+    expect(env.notifies.some((n) => n.message.includes('deaf') && n.message.includes('连接失败'))).toBe(true);
+  }, 10_000);
 
   it('enabled/disabled 双表过滤（enabled 优先收窄）', async () => {
     const env = makeEnv();

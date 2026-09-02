@@ -251,13 +251,17 @@ async function applyLspApp(
         killTree: deps.killTree,
         logger: ctx.logger,
         newConnection: deps.newConnection,
+        // spawn 即写（契约篇 §6.7；遗漏大扫 20260902-b #7）：spawn 返回 pid 的
+        // 同步点入簿——initialize 握手窗（缺省 30s）内宿主硬崩也可见于孤儿清扫
+        // （修前登记滞后到握手完成）。撤销面留给握手失败路（client.ts catch）。
+        onSpawned: (childPid) => {
+          deps.registry.add({ hostPid: process.pid, childPid, server: name, command: config.command });
+          return () => deps.registry.remove(childPid);
+        },
       });
       // 先置活再接线（同段同步——close 事件不可能插入；置活后 onExit 的
       // state.conn === conn 判断在任意竞速下都能正确清活）
       state.conn = conn;
-      if (conn.childPid !== undefined) {
-        deps.registry.add({ hostPid: process.pid, childPid: conn.childPid, server: name, command: config.command });
-      }
       conn.onExit((reason) => {
         // 回卷期退出不是「运行期退出」——清算由回卷本体负责（防误计数触发熔断 notify）
         if (disposed) return;

@@ -134,14 +134,18 @@ function makeFakeServer(pid = 4242): FakeServer {
 /** 最小服务器配置（绝对路径过关） */
 const CONFIG: McpServerConfig = { command: '/usr/local/bin/fake-mcp' };
 
-/** 依赖束工厂：killTree 录制不真杀 */
-function makeDeps(spawn: (config: McpServerConfig) => Promise<SpawnedChild>) {
+/** 依赖束工厂：killTree 录制不真杀；onSpawned 可选注入（spawn 即写钩子用例） */
+function makeDeps(
+  spawn: (config: McpServerConfig) => Promise<SpawnedChild>,
+  onSpawned?: (childPid: number) => () => void,
+) {
   const kills: Array<{ pid: number; alive: boolean }> = [];
   const logger = { debug: vi.fn(), warn: vi.fn() };
   const deps: McpConnectDeps = {
     spawnServer: spawn,
     killTree: (pid, alive) => kills.push({ pid, alive: alive() }),
     logger,
+    ...(onSpawned === undefined ? {} : { onSpawned }),
   };
   return { deps, kills, logger };
 }
@@ -192,6 +196,23 @@ describe('connectMcpServer — connect 期一码收口', () => {
       code: MCP_CONNECT_FAILED,
     });
     expect(kills).toEqual([{ pid: 4242, alive: true }]); // alive 恒 true = 无条件杀
+  });
+
+  it('spawn 即写钩子：spawn 返回 pid 的同步点调用，握手失败路对称撤销（遗漏大扫 20260902-b #7）', async () => {
+    const server = makeFakeServer(); // 聋——initialize 永不应答
+    const events: string[] = [];
+    const { deps } = makeDeps(
+      async () => server.child,
+      (childPid) => {
+        events.push(`add:${childPid}`);
+        return () => events.push(`remove:${childPid}`);
+      },
+    );
+    const pending = connectMcpServer('srv', { ...CONFIG, startup_timeout_sec: 0.2 }, deps);
+    // 握手窗内（0.2s 超时未到）：钩子已 fired——登记先于握手完成（修前此面不存在）
+    await vi.waitFor(() => expect(events).toEqual(['add:4242']));
+    await expect(pending).rejects.toMatchObject({ code: MCP_CONNECT_FAILED });
+    expect(events).toEqual(['add:4242', 'remove:4242']); // 失败路撤销面调用
   });
 
   it('握手收到服务器错误响应 → 包装为 MCP_CONNECT_FAILED + 树杀', async () => {

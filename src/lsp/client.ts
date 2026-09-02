@@ -84,6 +84,13 @@ export interface LspConnectDeps {
   readonly logger: Pick<AppLogger, 'debug' | 'warn'>;
   /** JSON-RPC 桥核工厂（mcp JsonRpcConnection 经组合根注入——帧无关复用） */
   readonly newConnection: JsonRpcConnectionFactory;
+  /**
+   * spawn 即写钩子（契约篇 §6.7「spawn 即写、净退即删」——遗漏大扫 20260902-b #7）：
+   * spawn 返回 pid 的同步点即时调用（件层闭包入登记簿）——initialize 握手窗
+   * （缺省 30s）内宿主硬崩也可见于孤儿清扫；返回撤销面供握手失败路对称删行。
+   * 缺省无簿记（pid undefined 的极端竞态同样不调——无键可登记）。
+   */
+  readonly onSpawned?: (childPid: number) => () => void;
 }
 
 /** per-URI 文档账（version 单调递增——didOpen/didChange 必填；close 后再 open 继续递增防旧唤醒） */
@@ -173,6 +180,10 @@ export async function connectLspServer(
       cause: err,
     });
   }
+  // spawn 即写（遗漏大扫 20260902-b #7）：pid 到手的同步点即时入簿——修前登记
+  // 滞后到 initialize 握手完成，握手窗内宿主硬崩则 detached 子进程结构性失明于
+  // 孤儿清扫。撤销面由握手失败路调用（连不上的子进程不活到注册面——簿上不留行）
+  const unregisterSpawned = child.pid === undefined ? undefined : deps.onSpawned?.(child.pid);
 
   const exitListeners = new Set<(reason: string) => void>();
   let disposed = false; // dispose 幂等闸（effect 回卷与运行期退出可能竞速）
@@ -285,6 +296,7 @@ export async function connectLspServer(
     conn.notify('initialized', {});
   } catch (err) {
     // 握手失败/超时：响亮杀进程树不留挂起（MCP 同款连接语义）
+    unregisterSpawned?.(); // spawn 即写的对称撤销（遗漏大扫 20260902-b #7）
     deps.killTree(child.pid ?? -1, () => true);
     if (err instanceof AppError) throw err;
     throw new AppError(LSP_CONNECT_FAILED, `LSP 服务器 ${server} 握手失败：${describeCause(err)}`, {

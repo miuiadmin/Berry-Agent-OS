@@ -53,6 +53,13 @@ export interface McpConnectDeps {
   readonly killTree: (pid: number, alive: () => boolean) => void;
   /** 诊断日志（stderr 行/通知杂音——debug 级） */
   readonly logger: Pick<AppLogger, 'debug' | 'warn'>;
+  /**
+   * spawn 即写钩子（契约篇 §6.6「spawn 即写、净退即删」——遗漏大扫 20260902-b #7）：
+   * spawn 返回 pid 的同步点即时调用（件层闭包入登记簿）——握手窗（缺省 30s）
+   * 内宿主硬崩也可见于下个宿主的孤儿清扫；返回撤销面供握手失败路对称删行。
+   * 缺省无簿记（pid undefined 的极端竞态同样不调——无键可登记）。
+   */
+  readonly onSpawned?: (childPid: number) => () => void;
 }
 
 /** 连接后的稳定面（plugin 层消费：发现/调用/关停/退出订阅） */
@@ -97,6 +104,10 @@ export async function connectMcpServer(
     // spawn 失败（ENOENT/EACCES…）：一码收口，cause 保真
     throw new AppError(MCP_CONNECT_FAILED, `服务器 ${server} 子进程未启动：${describeCause(err)}`, { cause: err });
   }
+  // spawn 即写（遗漏大扫 20260902-b #7）：pid 到手的同步点即时入簿——修前登记
+  // 滞后到发现全完成，握手/发现窗内宿主硬崩则 detached 子进程结构性失明于孤儿
+  // 清扫。撤销面由握手失败路调用（连不上的子进程不活到注册面——簿上不留行）
+  const unregisterSpawned = child.pid === undefined ? undefined : deps.onSpawned?.(child.pid);
 
   const exitListeners = new Set<(reason: string) => void>();
   let disposed = false; // dispose 幂等闸（effect 回卷与运行期退出可能竞速）
@@ -144,6 +155,7 @@ export async function connectMcpServer(
   } catch (err) {
     // 握手失败/超时：响亮杀进程树不留挂起（契约篇 §6.6 连接语义条）；
     // alive 恒 true = 无条件树杀（killpg 打在已死组上抛 ESRCH 被内吞——安全）
+    unregisterSpawned?.(); // spawn 即写的对称撤销（遗漏大扫 20260902-b #7）
     deps.killTree(child.pid ?? -1, () => true);
     if (err instanceof AppError) throw err;
     throw new AppError(MCP_CONNECT_FAILED, `服务器 ${server} 握手失败：${describeCause(err)}`, { cause: err });

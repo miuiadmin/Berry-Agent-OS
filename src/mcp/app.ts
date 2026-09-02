@@ -156,20 +156,41 @@ async function discoverAll(
   const found = await Promise.all(
     names.map(async (name) => {
       if (bag.isDead() || ctx.signal.aborted) return null; // spawn 前查活（冷读 #7）
+      let conn: McpServerConnection | undefined;
       try {
-        const conn = await connectMcpServer(name, servers[name]!, {
+        conn = await connectMcpServer(name, servers[name]!, {
           spawnServer: bag.deps.spawnServer,
           killTree: bag.deps.killTree,
           logger: ctx.logger,
+          // spawn 即写（契约篇 §6.6；遗漏大扫 20260902-b #7）：spawn 返回 pid 的
+          // 同步点入簿——握手/发现窗内宿主硬崩也可见于孤儿清扫（修前登记滞后到
+          // wireLive，即全部握手+发现+过滤完成之后）。撤销面留给握手失败路。
+          onSpawned: (childPid) => {
+            bag.registry.add({
+              hostPid: process.pid,
+              childPid,
+              server: name,
+              command: servers[name]!.command, // 真实命令行基线——清扫期 ps 验身用
+            });
+            return () => bag.registry.remove(childPid);
+          },
         });
         const tools = await conn.discover();
         if (bag.isDead() || ctx.signal.aborted) {
           // 竞态：发现完成时作用域已死——立即协议化关停，不注册
+          if (conn.childPid !== undefined) bag.registry.remove(conn.childPid); // spawn 即写条目对称清
           await conn.dispose();
           return null;
         }
         return { name, conn, tools };
       } catch (err) {
+        // 发现失败（tools/list 超时/坏应答——握手已成的活子进程仍在）：协议化关停
+        // （宽限后树杀兜底在 dispose 内）+ spawn 即写条目删行——不活到 wireLive
+        // 的退出三清就不能留簿（遗漏大扫 20260902-b #7 连带：修前此路裸漏活子进程）
+        if (conn !== undefined) {
+          if (conn.childPid !== undefined) bag.registry.remove(conn.childPid);
+          await conn.dispose().catch(() => undefined);
+        }
         const message = err instanceof AppError ? describeError(err) : String(err);
         ctx.logger.warn(`mcp 服务器 ${name} 连接失败：${message}`);
         ui.notify(`MCP 服务器「${name}」连接失败：${message}`, { level: 'warn' });
@@ -178,7 +199,17 @@ async function discoverAll(
     }),
   );
 
-  if (bag.isDead() || ctx.signal.aborted) return;
+  if (bag.isDead() || ctx.signal.aborted) {
+    // 竞态：作用域死在发现完成时——逐台协议化关停 + 条目删行（修前直接 return，
+    // wireLive 未跑使 effect 回卷的 shutdownAll 看不见这批 conn，detached 子进程
+    // 裸漏——遗漏大扫 20260902-b #7 连带同窗收口）
+    for (const it of found) {
+      if (it === null) continue;
+      if (it.conn.childPid !== undefined) bag.registry.remove(it.conn.childPid);
+      await it.conn.dispose().catch(() => undefined);
+    }
+    return;
+  }
   const connected = found.filter(
     (it): it is { name: string; conn: McpServerConnection; tools: McpRemoteTool[] } => it !== null,
   );
@@ -234,7 +265,7 @@ async function discoverAll(
     if (dispose !== undefined) bag.catalogBox.dispose = dispose; // 件级寿命盒——回卷才撤
     // 全部活服务器接线（撤件集空——目录工具不随单服退出撤，单服 close 只清自己的目录条目）
     for (const { name, conn } of filtered) {
-      wireLive(bag, name, conn, servers[name]!, [], ui);
+      wireLive(bag, name, conn, [], ui);
     }
     return;
   }
@@ -249,7 +280,7 @@ async function discoverAll(
       );
       if (dispose !== undefined) disposers.push(dispose);
     }
-    wireLive(bag, name, conn, servers[name]!, disposers, ui);
+    wireLive(bag, name, conn, disposers, ui);
   }
 }
 
@@ -356,7 +387,6 @@ function wireLive(
   bag: DiscoverCtx,
   name: string,
   conn: McpServerConnection,
-  config: McpServerConfig,
   disposers: Disposer[],
   ui: UiNotifyFace | undefined,
 ): void {
@@ -372,14 +402,8 @@ function wireLive(
     bag.logger.warn(`mcp 服务器 ${name} 运行期退出：${reason}`);
   });
   bag.live.set(name, { conn, disposers, offExit });
-  if (conn.childPid !== undefined) {
-    bag.registry.add({
-      hostPid: process.pid,
-      childPid: conn.childPid,
-      server: name,
-      command: config.command, // 真实命令行基线——清扫期 ps 验身用
-    });
-  }
+  // 登记不在本函数——spawn 即写已前移到 connectMcpServer 的 onSpawned 钩子
+  // （遗漏大扫 20260902-b #7）；本函数只保留退出方向的删行（onExit 与 shutdownAll）。
 }
 
 /**

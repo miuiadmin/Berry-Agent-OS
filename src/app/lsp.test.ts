@@ -58,6 +58,8 @@ interface FakeServerBehavior {
   readonly symbols?: { name: string; line?: number }[];
   /** definition/references 应答（缺省空表） */
   readonly locations?: { uri: string; line: number; character: number }[];
+  /** initialize 永不应答（握手窗观察用——spawn 即写测试的聋形态） */
+  readonly hangInitialize?: boolean;
 }
 
 /** 全部假服务器登记（afterEach 统一 die——让关停宽限即刻结算不留 3s 计时器） */
@@ -135,6 +137,7 @@ function makeFakeLspServer(behavior: FakeServerBehavior, pid: number): FakeLspSe
     const method = String(frame['method'] ?? '');
     const params = (frame['params'] ?? {}) as Record<string, unknown>;
     if (method === 'initialize') {
+      if (behavior.hangInitialize === true) return; // 聋形态：握手窗内永不应答
       sendResult(id, { capabilities: {}, serverInfo: { name: 'fake-lsp', version: '0' } });
       return;
     }
@@ -541,6 +544,25 @@ describe('lsp 件 — write/edit 后诊断注入', () => {
 /* ---------------- 熔断与回卷 ---------------- */
 
 describe('lsp 件 — 熔断与 effect 回卷', () => {
+  it('spawn 即写：握手窗内已入登记簿，握手失败对称删行（遗漏大扫 20260902-b #7——修前登记滞后到 initialize 握手完成，握手窗内宿主硬崩则孤儿清扫结构性失明）', async () => {
+    const env = makeEnv();
+    const harness = makeHarness({ hangInitialize: true });
+    await applyLsp(env, harness, { servers: serversConfig({ startup_timeout_sec: 1 }) });
+    writeFileSync(join(harness.workspace, 'h.ts'), 'x\n', 'utf8');
+    const toolPromise = runTool(env, 'lsp_symbols', { path: 'h.ts' });
+    // 握手窗内（1s 超时未到）：spawn 返回 pid 的同步点已入簿（红先载体——
+    // 修前 registry.add 在 connectLspServer 握手成功返回之后，聋服务器永不至）
+    await vi.waitFor(() => expect(harness.registry.adds).toHaveLength(1));
+    expect(harness.registry.adds[0]).toMatchObject({ hostPid: process.pid, server: 'ts' });
+    const childPid = harness.registry.adds[0]!.childPid;
+    // 握手失败收场（1s 到点）：工具腿失败 + 撤销面删行 + 树杀（不留簿不留进程）
+    const out = await toolPromise;
+    expect(out.isError).toBe(true);
+    expect(textOf(out)).toContain('不可用');
+    expect(harness.registry.removes).toEqual([childPid]);
+    expect(harness.kills).toContain(childPid);
+  }, 10_000);
+
   it('3 连败熔断：connect 失败逐次计败 → notify warn + 第 4 调直接拒（复位走 /reload）', async () => {
     const env = makeEnv();
     const harness = makeHarness({}, new Error('ENOENT: no such file'));
