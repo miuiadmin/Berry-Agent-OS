@@ -141,6 +141,24 @@ export default async function apply(ctx) {
 }
 `;
 
+/** 亚下限预算 fixture（定向复扫 20260902 第七轮 M-1）：声明 timeoutMs 500——
+ * 分域声明面就该钳至 1000ms 下限再过界。宿主侧 registry 只钳存储副本（管道
+ * 预算腿），execute 闭包按 meta 原值起桥预算（session setTimeout 腿）——修前
+ * 500 原样过界，分域工具被亚下限值杀而主域同值享 1000ms 下限（「不换协议
+ * 只换载体」等价性破）；修后声明面单点钳位，两腿同值 */
+const FX_TOOL_FLOOR = `
+export const name = 'fx-tool-floor';
+export default async function apply(ctx) {
+  ctx.get('tools').register({
+    name: 'fx/floor',
+    description: '亚下限预算探针',
+    parameters: { type: 'object', properties: {} },
+    timeoutMs: 500,
+    execute: async () => ({ content: [{ type: 'text', text: 'floor' }] }),
+  });
+}
+`;
+
 /** 直连域：MessageChannel 两端各挂一个端点（worker 端 = 被测件；宿主端 = 记录型桩） */
 interface TestChannel {
   /** 宿主端点（测试驱动面） */
@@ -329,6 +347,20 @@ describe('startWorkerRealm — svc.apply（桩 ctx 与注册结算）', () => {
     expect(seen).toContain('register:ok');
     // 工具注册走 tools-register 帧（本地桩行为面）——svc-invoke 通道零 'tools' 帧
     expect(ch.toolRegs.some((r) => JSON.stringify(r).includes('fx/sd'))).toBe(true);
+  });
+
+  it('工具注册亚下限 timeoutMs 声明面钳位（第七轮 M-1）：500 过界即钳 1000——主域同律', async () => {
+    const { ch, dir } = setup();
+    const entry = writeApp(dir, 'fx-floor.ts', FX_TOOL_FLOOR);
+    await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
+    await ch.host.call('svc', 'apply', ['fx', {}, {}]);
+    // tools-register 帧 = [rowId, meta, domain]——meta[1] 是声明面五字段结构化
+    const frame = ch.toolRegs.find((r) => JSON.stringify(r).includes('fx/floor'));
+    expect(frame).toBeDefined();
+    const meta = (frame as unknown[])[1] as { timeoutMs?: number };
+    // 修前：meta.timeoutMs === 500 原样过界（宿主 execute 闭包按原值起桥预算
+    // → ~500ms 收 BRIDGE_CALL_TIMEOUT；主域同值经 registry 钳位享 1000ms）
+    expect(meta.timeoutMs).toBe(1000);
   });
 });
 

@@ -29,6 +29,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { AppError, BRIDGE_METHOD_NOT_FOUND, BRIDGE_SURFACE_NARROWED, APP_LOAD_FAILED } from '../contracts/errors.js';
 import type { AppEventHandler } from '../contracts/app.js';
 import type { ToolDefinition } from '../contracts/tools.js';
+import { TOOL_TIMEOUT_FLOOR_MS } from '../contracts/tools.js';
 import {
   createAppJiti,
   importAppEntry,
@@ -169,7 +170,13 @@ function makeToolsStub(
         parameters: def.parameters,
       };
       if (def.effect !== undefined) meta['effect'] = def.effect;
-      if (def.timeoutMs !== undefined) meta['timeoutMs'] = def.timeoutMs;
+      // timeoutMs 亚下限钳位后过界（定向复扫 20260902 第七轮 M-1 修死）：宿主侧
+      // registry 只钳存储副本（管道预算腿），execute 闭包按 meta 原值起桥预算
+      // （session setTimeout 腿）——不钳则 0<t<1000 的分域工具被亚下限值杀而
+      // 主域同值享下限（「不换协议只换载体」等价性破）。makeToolsStub 是双载体
+      // （worker_threads/external stdio——后者复用 startWorkerRealm）唯一声明面，
+      // 单点钳位两腿同值。常量单源契约层（bridge 对 tools 无拓扑边）
+      if (def.timeoutMs !== undefined) meta['timeoutMs'] = Math.max(def.timeoutMs, TOOL_TIMEOUT_FLOOR_MS);
       if (def.label !== undefined) meta['label'] = def.label;
       registrations.push(
         guardedRegistration(

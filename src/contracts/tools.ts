@@ -195,6 +195,16 @@ export const TOOL_POST_EXECUTE_EVENT = 'tools_post_execute';
 export const TOOLS_CHANGE_EVENT = 'tools_change';
 
 /**
+ * 装载面注册 timeoutMs 下限（毫秒——契约篇 §1.6 注册预算下限，2026-08-27
+ * 刀〇a；定向复扫 20260902 第七轮 M-1 迁此单源）：正数过小钳至此值，<= 0
+ * 拒绝（TOOL_TIMEOUT_INVALID）。原宿主位 = tools/registry.ts；分域声明面
+ * （bridge worker makeToolsStub——双载体唯一声明面）同律钳位后过界，宿主
+ * execute 闭包桥预算腿与 registry 存储副本腿两腿同值（「不换协议只换载体」
+ * 等价性）。bridge 对 tools 无拓扑边，故常量落契约层两消费面同源。
+ */
+export const TOOL_TIMEOUT_FLOOR_MS = 1000;
+
+/**
  * 工具执行上下文（ToolDefinition.execute 的第二参数）。
  * 与 AgentTool.execute 签名的关系：管道把 loop 侧 (toolCallId, signal,
  * onUpdate) 收拢为本对象后调工具实现。

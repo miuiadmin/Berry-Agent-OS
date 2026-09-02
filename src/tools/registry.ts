@@ -41,7 +41,7 @@ import {
   TOOL_TIMEOUT_INVALID,
 } from '../contracts/errors.js';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
-import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
+import { TOOLS_CHANGE_EVENT, TOOL_TIMEOUT_FLOOR_MS } from '../contracts/tools.js';
 import type { RowAppProbe } from '../contracts/app.js';
 import { RateLimiter } from '../context/rate-limit.js';
 import { chainCaller } from '../context/chain.js';
@@ -89,13 +89,9 @@ export interface ToolRegistryOptions {
  */
 const DESCRIPTION_INJECTION_PATTERNS: readonly RegExp[] = [/\b(curl|wget)\b[^\n|]*\|[^\n]*\b(ba|z|da)?sh\b/i];
 
-/**
- * 装载面注册 timeoutMs 下限（毫秒——契约篇 §1.6 注册预算下限，2026-08-27 刀〇a）：
- * 正数过小钳至此值（存归一副本），<= 0 拒绝（TOOL_TIMEOUT_INVALID）。
- * 「0 = 自管取消」语义保留给宿主内部合成 def（exec 内部 def 不经注册面——
- * 事实豁免通道，冷读 CR-2-F9 裁决）。
- */
-export const TOOL_TIMEOUT_FLOOR_MS = 1000;
+// 注册预算下限 TOOL_TIMEOUT_FLOOR_MS 单源在契约层（定向复扫 20260902 第七轮
+// M-1 迁移——bridge 分域声明面同源钳位；正数过小钳至此值存归一副本、<= 0 拒
+// 绝 TOOL_TIMEOUT_INVALID、宿主内部合成 def「0 = 自管取消」豁免通道不变）
 
 /**
  * 三层注册表合计件数帽（契约篇 §1.6 资源护栏族 #10①，2026-08-27 刀〇b）：
