@@ -13,7 +13,7 @@
  * 测试（vitest.config include 显式列举）——tsc 视门外纯 node 语义直跑。
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
@@ -23,16 +23,19 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('check-events 机器闸（含应用声明层，第四十六批）', () => {
-  it('全绿：六族双向一致 + 汇总行报应用声明计数与错误码册数（exit 0 由 execFileSync 非零即抛保证）', () => {
+  it('全绿：七族双向一致 + 汇总行报应用声明计数、错误码册数与迁移末行锚（exit 0 由 execFileSync 非零即抛保证）', () => {
     const stdout = execFileSync(process.execPath, [join('tools', 'check-events.mjs')], {
       cwd: ROOT,
       encoding: 'utf8',
     });
     // 声明层计数锚：obs/alert 在册即 ≥1；并集被拆掉则脚本已红（到不了断言）
     expect(stdout).toMatch(/另应用声明 \d+ 词/);
-    // 族 6 锚（基建大扫 #46）：错误码册数 + 六族字样在场——族 6 被整块删除时
-    // 汇总行回五族形态，此断言先红（闸的闸）
-    expect(stdout).toMatch(/错误码 \d+ 册，六族双向一致/);
+    // 族 6 锚（基建大扫 #46）：错误码册数 + 七族字样在场——族 6 被整块删除时
+    // 汇总行回六族形态，此断言先红（闸的闸）
+    expect(stdout).toMatch(/错误码 \d+ 册，七族双向一致/);
+    // 族 7 锚（全面复盘 20260902 G-1/G-3①）：迁移末行版本锚在场——族 7 被整块
+    // 删除时此断言先红
+    expect(stdout).toMatch(/迁移末行 v\d+ 锚/);
   });
 });
 
@@ -92,5 +95,62 @@ describe('check-events 锚负例（遗漏大扫 20260901 O-4②）', () => {
     expect(run.status).toBe(1);
     // 同文档互证锚（头部统计行 vs 全家桶表行数）——O-2 事故型（统计行换基表未跟）
     expect(run.stderr).toContain('README.md 头部全家桶计数 99 ≠ 表行数 2');
+  });
+});
+
+describe('check-events 迁移版本锚负例（全面复盘 20260902 G-1/G-3①）', () => {
+  /**
+   * 夹具树只造 docs/ 两锚面（迁移表止于 v14 + 运维手册标题写 14），真值恒读真仓
+   * src（当前 v15）→ 三路漂移逐一点名（readMirrorFile 以 relPath 含 docs/ 前缀拼
+   * MIRROR_ROOT，故夹具文件须落 docs/ 子目录）。族 7 被整块删除（或镜像面根缝被
+   * 静默退化）时本测必红——闸的闸。
+   */
+  it('夹具两表止于 v14 / 标题写 14 → exit 1 三路点名末行与标题漂移', () => {
+    const fixRoot = mkdtempSync(join(tmpdir(), 'berry-check-events-mig-'));
+    try {
+      mkdirSync(join(fixRoot, 'docs'), { recursive: true });
+      writeFileSync(
+        join(fixRoot, 'docs', '架构总览.md'),
+        [
+          '# 夹具架构总览',
+          '',
+          '## 8. 存储布局（SQLite 单库 + 统一迁移）',
+          '',
+          '| user_version | 内容 |',
+          '| --- | --- |',
+          '| 1（基线） | 基线 |',
+          '| 14 | stale 末行 |',
+          '',
+          '## 9. 下一节',
+          '',
+        ].join('\n'),
+      );
+      writeFileSync(
+        join(fixRoot, 'docs', '运维手册.md'),
+        [
+          '# 夹具运维手册',
+          '',
+          '## 2. 库内表清单（user_version = 14）',
+          '',
+          '| user_version | 表 | 内容 |',
+          '| --- | --- | --- |',
+          '| 1（基线） | x | y |',
+          '| 14 | jobs | stale 末行 |',
+          '',
+          '## 3. 备份',
+          '',
+        ].join('\n'),
+      );
+      const run = spawnSync(process.execPath, [join('tools', 'check-events.mjs')], {
+        cwd: ROOT,
+        env: { ...process.env, CHECK_ROOT: fixRoot },
+        encoding: 'utf8',
+      });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('迁移表末行 v14 ≠ 代码真值 v15');
+      expect(run.stderr).toContain('标题 user_version = 14 ≠ 代码真值 v15');
+    } finally {
+      rmSync(fixRoot, { recursive: true, force: true });
+    }
   });
 });

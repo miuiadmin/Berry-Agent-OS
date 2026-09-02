@@ -24,6 +24,10 @@
  *    「错误码与事件类型同纪律的 CI 校验」兑现——AppError 字面量码 ⊆ 注册表
  *    （手拼/typo 码红）；注册表零使用即死码红（registerErrorCode 自防御抛码
  *    经字面量构造算使用）。
+ * 7. 迁移链版本锚（全面复盘 20260902 G-1/G-3①）：全仓非测试 src 的
+ *    MigrationSpec 声明面最大 version ≡ docs 两表末行 + 运维手册标题
+ *    「user_version = N」——新增迁移不滚表即红（v15 落码两表止于 v14
+ *    静默绿是首个已发实证）。
  * 5. 公开面镜像对照（契约篇 §6.3#4 第五族，2026-08-31 第四十三批）：
  *    - docs/应用开发指南「活体总线词汇速览」表：词集 ≡ 总线目录名集 +
  *      标题计数/层括号计数和对照（提取锚 = 以 | 起头的表格行内反引号词）；
@@ -604,6 +608,76 @@ for (const entry of liveCatalog) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* 族 7：迁移链版本锚（全面复盘 20260902 G-1/G-3①——新增迁移不滚表即红） */
+/* ------------------------------------------------------------------ */
+
+/** 代码真值：全仓 MigrationSpec 声明面最大 version（汇总行同引——let 供族块内赋值） */
+let migrationMax = 0;
+{
+  // 代码真值：全仓非测试 src 的 MigrationSpec 声明面（声明形态恒 `: MigrationSpec = {`
+  // 且 version 恒首字段——窗口 400 字符内取不到即表结构漂移 fail-loud）。不 import
+  // 聚合链（collectBuiltinMigrations 拖全 app 依赖面）也不 import 四散 schema 模块
+  // （登记清单会漏新文件）——源扫描对「新增迁移文件」结构性可见。
+  const versions = [];
+  for (const file of files) {
+    const declRe = /:\s*MigrationSpec\s*=\s*\{/g;
+    for (const m of file.code.matchAll(declRe)) {
+      const win = file.code.slice(m.index, m.index + 400);
+      const vm = /version:\s*(\d+)/.exec(win);
+      if (vm === null) {
+        v(`${file.rel}：MigrationSpec 声明 400 字符内无 version 字段——声明面结构漂移 fail-loud`);
+        continue;
+      }
+      versions.push(Number(vm[1]));
+    }
+  }
+  migrationMax = Math.max(0, ...versions);
+  // 公开面两表 + 运维手册标题：末行版本 ≡ 代码真值（G-1 事故型 = v15 落码两表
+  // 止于 v14、四门禁静默绿）。镜像面随 CHECK_ROOT 随移（readMirrorFile 两态同构）。
+  // 表行版本取节内首列 `| N` 形（运维手册 v4/v9 折进他行内容不设独立行——
+  // 完整性不是两表不变量，末行对齐才是）。
+  const docTables = [
+    ['docs/架构总览.md', /^## 8\. 存储布局[^\n]*/m],
+    ['docs/运维手册.md', /^## 2\. 库内表清单[^\n]*/m],
+  ];
+  for (const [relPath, headRe] of docTables) {
+    const source = readMirrorFile(relPath);
+    if (source === undefined) continue;
+    const head = headRe.exec(source);
+    if (head === null) {
+      v(`[镜像] ${relPath} 迁移表节头锚缺席——表结构漂移 fail-loud`);
+      continue;
+    }
+    const after = source.slice(head.index + head[0].length);
+    const nextSec = after.search(/^#{2,3} /m);
+    const section = nextSec === -1 ? after : after.slice(0, nextSec);
+    const rows = [...section.matchAll(/^\|\s*(\d+)(?!\d)/gm)].map((m) => Number(m[1]));
+    if (rows.length === 0) {
+      v(`[镜像] ${relPath} 迁移表零版本行——表结构漂移 fail-loud`);
+      continue;
+    }
+    const docMax = Math.max(...rows);
+    if (docMax !== migrationMax) {
+      v(
+        `[镜像] ${relPath} 迁移表末行 v${docMax} ≠ 代码真值 v${migrationMax}——新增迁移未滚表（全面复盘 20260902 G-1 事故型）`,
+      );
+    }
+  }
+  // 运维手册标题版本号（「user_version = N」）单独对照——标题与表末行双面同锚
+  const ops = readMirrorFile('docs/运维手册.md');
+  if (ops !== undefined) {
+    const hm = /user_version\s*=\s*(\d+)/.exec(ops);
+    if (hm === null) {
+      v('[镜像] docs/运维手册.md 标题 user_version 锚缺席——表结构漂移 fail-loud');
+    } else if (Number(hm[1]) !== migrationMax) {
+      v(
+        `[镜像] docs/运维手册.md 标题 user_version = ${hm[1]} ≠ 代码真值 v${migrationMax}——版本号漂移（全面复盘 20260902 G-1 事故型）`,
+      );
+    }
+  }
+}
+
 // ---- 汇总 ----
 if (violations.length > 0) {
   console.error(`check-events：${violations.length} 处目录/派发点漂移`);
@@ -611,5 +685,5 @@ if (violations.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-events ✓ 总线 ${liveCatalog.length} 项（另应用声明 ${declaredByName.size} 词）/ AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量 / 错误码 ${errorsMod.listErrorCodes().length} 册，六族双向一致（含公开面镜像）`,
+  `check-events ✓ 总线 ${liveCatalog.length} 项（另应用声明 ${declaredByName.size} 词）/ AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量 / 错误码 ${errorsMod.listErrorCodes().length} 册，七族双向一致（含公开面镜像 + 迁移末行 v${migrationMax} 锚）`,
 );
