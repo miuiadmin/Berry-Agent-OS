@@ -327,6 +327,71 @@ describe('write-behind 失败语义（响亮失败，不静默丢批）', () => 
   });
 });
 
+describe('盘满持续失败 cordon 全链（成熟度扫描 20260901 P1-7——ENOSPC 注入形态）', () => {
+  /**
+   * 磁盘满替身：前 N 次 appendCore 恒抛 ENOSPC（code/errno 对齐 Node 物理形态；
+   * SQLITE_FULL 同类——write-behind 对错误形状零分支，锁一形态即锁该故障类），
+   * 之后恢复真写。与 makeFlakyStore 的差异：错误形状物理化 + 多轮持续而非单发。
+   */
+  function makeFullDiskStore(failRounds: { current: number }): Store {
+    const real = Persistence.open({ path: nextPath(), windowMs: 60_000 });
+    const store = real.store;
+    const origAppend = store.appendCore.bind(store);
+    (store as unknown as { appendCore: Store['appendCore'] }).appendCore = (reg, batch, inc) => {
+      if (failRounds.current > 0) {
+        failRounds.current--;
+        throw Object.assign(new Error('mock 磁盘满：no space left on device'), { code: 'ENOSPC', errno: -28 });
+      }
+      return origAppend(reg, batch, inc);
+    };
+    return store;
+  }
+
+  it('多轮持续失败：零提交文案变体逐次上报/成因链保真/积压不重不丢/解除后 close 屏障全量恢复', async () => {
+    const failRounds = { current: 3 }; // 窗口初败 + 两轮显式 flush 重试 = 三轮持续失败
+    const store = makeFullDiskStore(failRounds);
+    const onError = vi.fn();
+    const wb = new WriteBehind(store, 'inc-test', { windowMs: 20, onError });
+    const session = new Session({ sessionId: 's-full' });
+    wb.enqueue(session, session.append('user/message', { content: 'e0' }));
+    wb.enqueue(session, session.append('user/message', { content: 'e1' }));
+    await sleep(60); // 窗口触发 → 第 1 轮失败（首片即抛——零提交形态）
+    expect(onError).toHaveBeenCalledTimes(1);
+    const first = onError.mock.calls[0]![0];
+    expect(first.code).toBe(PERSIST_BATCH_WRITE_FAILED);
+    // 零提交文案变体：本批一条未落（既有测试只锁过「已写 2 条」片裁剪形与
+    // 「外部写者」形——三变体至此收齐）
+    expect(first.message).toContain('已写 0 条、剩 2 条保留待重试');
+    // 成因链保真：物理故障形态经 AppError cause 透传（「响亮」的可观测底账）
+    expect((first.cause as NodeJS.ErrnoException).code).toBe('ENOSPC');
+    expect(wb.isPaused).toBe(true); // cordon 立起：自动调度挂起
+    expect(store.loadEvents('s-full')).toHaveLength(0);
+
+    // cordon 期新事件只排队不自动重试（盘满下自动重试只会徒增负担）
+    wb.enqueue(session, session.append('user/message', { content: 'e2' }));
+    await sleep(60);
+    expect(store.loadEvents('s-full')).toHaveLength(0);
+    expect(wb.pendingEventCount).toBe(3); // 积压披露如实增长（health 两数数据源）
+
+    // 显式 flush 两轮恒败：逐次响亮（不静默降级）+ 失败回队恰一份（无复制膨胀）
+    await expect(wb.flush()).rejects.toThrow(/已写 0 条、剩 3 条/);
+    expect(onError).toHaveBeenCalledTimes(2);
+    wb.enqueue(session, session.append('user/message', { content: 'e3' }));
+    await expect(wb.flush()).rejects.toThrow(/已写 0 条、剩 4 条/);
+    expect(onError).toHaveBeenCalledTimes(3);
+    expect(wb.pendingEventCount).toBe(4); // 三轮失败后积压恰 4 条——重试面不重不丢
+    expect(store.loadEvents('s-full')).toHaveLength(0);
+
+    // 盘满解除（failRounds 耗尽）：close() 最后机会屏障一次灌全——seq 连续、全量恢复
+    await wb.close();
+    const stored = store.loadEvents('s-full');
+    expect(stored.map((e) => (e.data as { content: string }).content)).toEqual(['e0', 'e1', 'e2', 'e3']);
+    expect(stored.map((e) => e.seq)).toEqual([0, 1, 2, 3]);
+    expect(wb.pendingEventCount).toBe(0);
+    store.close();
+  });
+});
+
 describe('顺序保证', () => {
   it('per-session promise chain：单会话批量事件严格按 seq 落盘', async () => {
     const p = Persistence.open({ path: nextPath(), windowMs: 15 });
