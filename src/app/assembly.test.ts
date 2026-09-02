@@ -182,6 +182,7 @@ describe('createRuntime 装配面', () => {
     expect(runtime.tools.compositionFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
+      'skill_manage',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -476,6 +477,7 @@ describe('createRuntime 装配面', () => {
     expect(runtime.tools.list().map((t) => t.name)).toEqual([
       'find',
       'grep',
+      'skill_manage',
       'agent',
       'fetch',
       'apps_list',
@@ -518,6 +520,7 @@ describe('createRuntime 装配面', () => {
       'demo',
       'apps-quickstart',
       'commit-checklist',
+      'skill-authoring',
       'troubleshooting',
       'admin',
     ]);
@@ -550,6 +553,7 @@ describe('ConversationDriver + durable 接线', () => {
     expect(contexts[0]?.tools?.map((t) => t.name)).toEqual([
       'find',
       'grep',
+      'skill_manage',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -744,6 +748,7 @@ describe('ConversationDriver + durable 接线', () => {
     expect(contexts[1]?.tools?.map((t) => t.name)).toEqual([
       'find',
       'grep',
+      'skill_manage',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -1814,6 +1819,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
     expect(runtime.tools.compositionFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
+      'skill_manage',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -2803,6 +2809,7 @@ describe('/reload 组合树重载', () => {
     expect(runtime.tools.compositionFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
+      'skill_manage',
       'agent_hermes',
       'memory_write',
       'memory_forget',
