@@ -24,7 +24,7 @@
  * import；typebox 走 contracts 再导出面。
  */
 
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppContext, BuiltinAppModule } from '../contracts/app.js';
 import type { CommandDefinition } from '../contracts/channels.js';
@@ -71,6 +71,43 @@ export interface ObsHealthFace {
 /** flush 缺省参数（5s / 256 条——契约篇 §6.9 刀一） */
 const DEFAULT_FLUSH_MS = 5_000;
 const DEFAULT_FLUSH_BATCH = 256;
+
+/**
+ * alerts.jsonl 轮转帽（字节）——追写前检查，超帽代际归档 alerts.jsonl →
+ * alerts.jsonl.1（单代留存；daemon.log 轮转同款机制与同值，遗漏大扫
+ * 20260902-b #5）。「触发频率受冷却窗天然限流」的原假设被 cooldown_min=0
+ * 合法档（schema 域 0..43200）击破——daemon 常驻 + 无冷却规则 + 持续过阈
+ * ≈ 3.4MB/天无界累积（jobs 终态帽 L-4「daemon 常驻防无界累积」同族）。
+ */
+export const OBS_ALERTS_ROTATE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * 留账追写前的代际轮转：账本超帽 → rename 为 alerts.jsonl.1（旧 .1 先删再
+ * 换——POSIX rename 原子覆盖、Windows 撞存在目标报错故先清位，daemon.log
+ * 同语义）。轮转失败不吞触发不阻追写（与留账失败同策略：warn 留痕
+ * best-effort——rename 炸时调用方 catch 兜，本函数静默让追写原地续尾即回
+ * 到无轮转语义，膨胀面交下次触发重试）。
+ */
+function rotateAlertsIfNeeded(alertsPath: string): void {
+  let size: number;
+  try {
+    size = statSync(alertsPath).size;
+  } catch {
+    return; // 账本缺席（从未触发过）——无轮转面
+  }
+  if (size <= OBS_ALERTS_ROTATE_BYTES) return;
+  const archived = `${alertsPath}.1`;
+  try {
+    rmSync(archived, { force: true }); // force：旧代缺席即 no-op
+  } catch {
+    /* 删不动（权限等）——留给 rename 覆盖位报错路 */
+  }
+  try {
+    renameSync(alertsPath, archived);
+  } catch {
+    /* 轮转失败不阻追写（见 JSDoc） */
+  }
+}
 
 /** obs_query 四表枚举（alerts 不是 metric——冷读 M1） */
 const OBS_METRICS = ['llm', 'tool', 'turn', 'approval'] as const;
@@ -362,6 +399,9 @@ export function createObsApp(): BuiltinAppModule {
           // mkdir 的 mode 只作用于新建段，目录已在时是死位，且权限已由 0700 数据
           // 根罩住——遗漏大扫 20260902 U1 死位清理，防「权限已收紧」错觉）
           mkdirSync(dataDir, { recursive: true });
+          // 追写前轮转检查（#5）：超帽代际归档 .1——旧代先删再换，轮转失败不阻
+          // 追写（best-effort 同本块失败策略）
+          rotateAlertsIfNeeded(alertsPath);
           appendFileSync(
             alertsPath,
             // firedAt = 触发时点 ISO；op 取自规则行（不在 obs/alert 信封里——信封

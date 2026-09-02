@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAppSqliteFace } from '../persist/index.js';
 import { createRuntime, type AppRuntime } from '../app/assembly.js';
 import type { AgentToolResult, ToolDefinition } from '../contracts/tools.js';
+import { OBS_ALERTS_ROTATE_BYTES } from './app.js';
 
 const runtimes: AppRuntime[] = [];
 
@@ -581,6 +582,55 @@ describe('obs 告警留账（成熟度扫描 20260901 P1-12）：触发第四件
     expect(await runtime.channels.commands.dispatch('/obs-alerts list')).toBe('ok');
     expect(notifies.at(-1) ?? '').not.toContain('未触发');
     expect(captured.lines.some((l) => l.includes('留账'))).toBe(true);
+  });
+
+  it('轮转帽（遗漏大扫 20260902-b #5）：超帽账本代际归档 .1 单代留存，触发照常落新档', async () => {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-rotate-')));
+    const compositionDir = join(root, 'composition');
+    mkdirSync(compositionDir, { recursive: true });
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: obs\n    config: { flushMs: 60 }\n');
+
+    const runtime = await createRuntime({ dbPath: ':memory:', workspace: root, compositionDir });
+    runtimes.push(runtime);
+    const notifies: string[] = [];
+    runtime.ui.attach({
+      id: 'rec',
+      notify: (text: string) => notifies.push(text),
+      setStatus: () => {},
+      confirm: async () => true,
+    });
+    // cooldown=0（合法档 0..43200）——正是击破「冷却窗天然限流」假设的无界累积形态
+    expect(await runtime.channels.commands.dispatch('/obs-alerts add sum llm.calls >= 1 24 0')).toBe('ok');
+
+    // 预置超帽旧档：10 MiB + 1B（多行等长填充——字节精确过帽）
+    const ledgerPath = findRollupDb(root).replace(/rollup\.db$/, 'alerts.jsonl');
+    const filler = `${'x'.repeat(1023)}\n`;
+    writeFileSync(ledgerPath, filler.repeat(Math.ceil((OBS_ALERTS_ROTATE_BYTES + 1) / filler.length)));
+
+    const session = runtime.session;
+    expect(session).toBeDefined();
+    session!.append('request/header', {
+      config: {},
+      systemPrompt: 'x',
+      toolSchemas: [],
+      reason: 'initial',
+      app: 'chat',
+    });
+    session!.append('llm/usage', {
+      callId: 'c-rotate',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
+    await settle(300);
+
+    // 追写前轮转：旧档整体归档 .1（字节守恒——内容不丢只换档）；新档只含本触发一行
+    const { readFileSync, statSync } = await import('node:fs');
+    expect(statSync(`${ledgerPath}.1`).size).toBeGreaterThan(OBS_ALERTS_ROTATE_BYTES);
+    const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect((JSON.parse(lines[0]!) as Record<string, unknown>).metric).toBe('llm.calls');
+    expect(notifies.some((n) => n.includes('观测告警'))).toBe(true); // 轮转不吞触发
   });
 
   it('无头整笔跳过不写账（R-2 整笔一致——留账是第四件同生共死）', async () => {
