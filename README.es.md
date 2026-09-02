@@ -104,12 +104,12 @@ Requiere Node.js ≥ 22.19. Tres formas de instalar (guía completa en [docs/使
 
 ```bash
 # Opción 1: script de instalación (dos pasos — descargar y luego ejecutar, así una conexión interrumpida nunca ejecuta un script parcial; estado paso a paso; URL del repo se completará al publicar)
-curl -fsSL -o install.sh <repo>/scripts/install.sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/miuiadmin/Berry-Agent-OS/feat-new/scripts/install.sh
 sh install.sh
 # Opción 2: npm (disponible tras la publicación)
 npm i -g berry-agent-os
 # Opción 3: desde el código (desarrolladores)
-git clone <este repositorio> && cd Berry-Agent-OS && npm install && npm run build && npm link
+git clone https://github.com/miuiadmin/Berry-Agent-OS.git && cd Berry-Agent-OS && npm install && npm run build && npm link
 ```
 
 ```bash
