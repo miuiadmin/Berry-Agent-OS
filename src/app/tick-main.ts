@@ -380,6 +380,14 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   } finally {
     // 归属回写（事实陈述：本轮落在哪个会话——成败都记）+ 落盘关停
     store.recordLastSession(jobName, entry.session.header.sessionId, Date.now());
+    // 收口序（遗漏大扫 20260902-c #5——骨架篇 §6.8「后台唤醒」条归属裁决③）：
+    // submitOnce resolve → 结算同步记账波（goal 记账 / 判阈起压缩）→ **drain
+    // 在飞压缩** → shutdown（retire + flush）。tick 会话按 job 定向跨跳累积，
+    // 阈值压缩是其唯一上下文回收路——不等即被进程收口掐死（上下文无界增长）。
+    // 结算回调同步起跑的 attempt 已在 fireRunSettled 波内注册在飞位，drain 必
+    // 等得到；drain 期间落的事件经 shutdown flush 落盘，收口零丢失面。面缺席
+    // （compaction 行未装载）直通——无在飞面即无链可等。
+    await runtime.ctx.tryGet<{ readonly drain: () => Promise<void> }>('compaction')?.drain();
     signals.dispose();
     await runtime.shutdown();
   }

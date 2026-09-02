@@ -73,7 +73,7 @@ interface Harness {
  */
 const SMALL_WINDOW = 500;
 
-function setup(): Harness {
+function setup(processKind?: 'tui' | 'run' | 'tick' | 'daemon'): Harness {
   const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
   const session = new Session();
   const db = openStore({ path: ':memory:', migrations });
@@ -136,10 +136,13 @@ function setup(): Harness {
   // 模型窗口判据源：request/header 末条 + getModel 元数据
   session.append('request/header', { model: 'test-model' });
 
-  void createGoalApp({ connection: db.connection, getSessionId: () => session.header.sessionId }).apply(
-    ctx as never,
-    ctx.config,
-  );
+  // processKind 透传（tick 形态豁免用例——遗漏大扫 20260902-c #5；条件展开
+  // 保持缺省 undefined = 非 tick 的既有行为面）
+  void createGoalApp({
+    connection: db.connection,
+    getSessionId: () => session.header.sessionId,
+    ...(processKind !== undefined ? { processKind } : {}),
+  }).apply(ctx as never, ctx.config);
 
   return {
     session,
@@ -316,5 +319,44 @@ describe('goal ⑥ 轮间沉淀机器（onRunSettled → runGoalSummary）', () 
     ).toBe(true);
     // 沉淀照常三件套（缓存列已回填）
     expect(h.store.getByGoalId(goalId)!.summary).toBe('目标推进摘要：五节文本');
+  });
+
+  it('【回归锁 20260902-c #5】tick 形态豁免：结算不自激不沉淀——零续跑投递 + 零 goal/summary + 行保持 active', async () => {
+    const h = setup('tick');
+    const goalId = h.seedGoal();
+    // 过阈素材（沉淀腿若未豁免，attemptSummary 会异步起跑）
+    for (let i = 0; i < 3; i++) h.addTurn();
+    h.fire('completed');
+    // 豁免是同步分支：派发波内即决——零续跑投递（修前红：非 tick 路投递在
+    // 同步波内落 sent——tick 子进程里这条投递开的新 run 会被 shutdown retire
+    // 掐死在出生点，纯浪费）
+    expect(h.sent()).toHaveLength(0);
+    // 沉淀腿同被跳过：等出异步窗后仍无 goal/summary 事实源事件、无 complete
+    // 调用（水位不进 = 下一跳/长命进程触及时代水位重试语义天然兜底）
+    await new Promise((r) => setTimeout(r, 150));
+    expect(h.session.events.filter((e) => e.type === 'goal/summary')).toHaveLength(0);
+    expect(h.completeCalls()).toHaveLength(0);
+    // 行不动：active 保持（豁免是跳过派生腿，非终态停——挂钟语义跨 tick 存活）
+    expect(h.store.getByGoalId(goalId)!.status).toBe('active');
+  });
+
+  it('【回归锁 20260902-c #5】tick 豁免不豁掉同步记账：连续帽满结算 → capped evidence 照落账（willRetry）', () => {
+    const h = setup('tick');
+    const goalId = h.seedGoal();
+    // 连续帽灌满（3 条 self 归因 user/message——wakeGate 连续段判据素材）
+    for (let i = 0; i < 3; i++) h.addSelfWake(goalId);
+    h.fire('completed');
+    // 无投递（豁免分支不 sendUserMessage）
+    expect(h.sent()).toHaveLength(0);
+    // 记账照走：超帽 evidence 落 durable（纯挂钟喂养的 goal 超帽史仍可判读）
+    expect(
+      h.session.events.some(
+        (e) =>
+          e.type === 'goal/evidence' &&
+          (e.data as { goalId?: string; reason?: string; willRetry?: boolean }).goalId === goalId &&
+          (e.data as { reason?: string }).reason === 'capped' &&
+          (e.data as { willRetry?: boolean }).willRetry === true,
+      ),
+    ).toBe(true);
   });
 });

@@ -716,4 +716,42 @@ describe('run --tick goal 挂钟分支：pre-boot 让路 + 投递前执法 + 到
     expect(row['last_run_at']).not.toBeNull();
     expect(row['last_session_id']).toBe(target);
   });
+
+  it('【回归锁 20260902-c #5】tick 形态结算不自激：到点投递结算后零 self 续跑投递（接力 = 下一跳 OS 钟）', async () => {
+    const dbFile = makeDbFile();
+    const workspace = makeTempDir('app-tickmain-ws-');
+    const runtime = await createRuntime({ dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) });
+    runtimes.push(runtime);
+    const target = runtime.drivers.focused()!.session.header.sessionId;
+    await runtime.shutdown();
+    runtimes.pop();
+    const goalId = seedGoalClock(dbFile, target, { objective: '挂钟结算不自激验证' });
+    const out = captureStdout();
+    try {
+      expect(await tickMain(`goal-${goalId}`, { dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) })).toBe(0);
+    } finally {
+      out.restore();
+    }
+    // tick 路投递照常（挂钟本体——每跳一轮的语义不变）
+    expect(
+      scalar(
+        dbFile,
+        `SELECT COUNT(*) AS value FROM events WHERE session_id = ? AND type = 'user/message' AND data LIKE '%"wakePath":"tick"%'`,
+        target,
+      ),
+    ).toBeGreaterThanOrEqual(1);
+    // 结算回调零自激（修前红：续跑投递 durable 落账 1 条 wakePath=self——该
+    // 投递开的新 run 在 tick 收口序里被 shutdown retire 掐死在出生点）
+    expect(
+      scalar(
+        dbFile,
+        `SELECT COUNT(*) AS value FROM events WHERE session_id = ? AND type = 'user/message' AND data LIKE '%"wakePath":"self"%'`,
+        target,
+      ),
+    ).toBe(0);
+    // 行保持 active（豁免非终态停——挂钟语义跨 tick 存活，下一跳照常投递）
+    expect(scalar(dbFile, `SELECT COUNT(*) AS value FROM goals WHERE goal_id = ? AND status = 'active'`, goalId)).toBe(
+      1,
+    );
+  });
 });

@@ -440,6 +440,28 @@ async function applyGoalApp(
             suspendWake(goal.goalId);
             return;
           }
+          // tick 形态豁免（遗漏大扫 20260902-c #5 规范先行——骨架篇 §6.8
+          // 「后台唤醒」条归属裁决①）：tick 子进程是单发执行体——submitOnce
+          // resolve 后 finally 即收口，结算回调派生的异步腿（续跑投递开的新
+          // run / 轮间沉淀 LLM 单发）结构性被 retire/进程退出掐死（启动即
+          // abort 即纯浪费：provider 侧计费、结果丢弃、durable 账本噪声）。
+          // 挂钟语义本就是每跳一轮——接力交给下一跳 OS 钟。**同步记账面照走**
+          // （规范原文）：capped 帽落账不受豁免影响（超帽 evidence 照落——纯
+          // 挂钟喂养的 goal 超帽史仍可判读；stalls 硬停在上文已走，纯挂钟喂
+          // 养的停滞 goal 仍会硬停）。轮间沉淀的滞后面 = 水位不进即重试语义
+          // 天然兜底（长命进程触及该 goal 结算时补账；纯挂钟 goal 无新摘要为
+          // 已披露降级面——摘要的活消费者〔续跑提示注入〕本路已跳过）。
+          if (deps.processKind === 'tick') {
+            const tickGate = wakeGate({
+              goalId: goal.goalId,
+              now: Date.now(),
+              events: sessions.eventsOfType('user/message'),
+            });
+            if (!tickGate.allow) {
+              sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'capped', willRetry: true });
+            }
+            return;
+          }
           // ⑥ 沉淀触发（刀四 T6-A）：与续跑判定独立——capped 拒发不影响沉淀
           //（上下文管理不随唤醒拒发而停）。fire-and-forget：与下方投递并发，
           // 渲染面读行时点的缓存列——竞窗只影响「本轮续跑提示是否携带新摘要」

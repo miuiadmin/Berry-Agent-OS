@@ -409,10 +409,21 @@ export function createCompactionApp(): BuiltinAppModule {
         });
       };
 
+      /**
+       * 在飞压缩汇流快照（遗漏大扫 20260902-c #5 规范先行——[会话与存储]篇
+       * 溢出兜底条服务面扩面）：per-session 在飞互斥位（配套⑤ Map）values 的
+       * Promise.all。唯一消费方 = tick 编排收口（submitOnce resolve 后 shutdown
+       * 前 await——tick 会话按 job 定向跨跳累积，压缩链被进程收口掐死即上下文
+       * 无界增长）。性质：快照语义（快照后新起压缩不担待——消费方收口序已保证
+       * 结算波内注册）；tail 恒不拒（runSerialized 尾链吞异常只作 Map 存值），
+       * all 直返无 rejection 面；无在飞 = 已结算 Promise 直返。
+       */
+      const drain = (): Promise<void> => Promise.all([...inFlight.values()]).then(() => undefined);
+
       // 溢出压缩面（第四十五批配套②）：恒提供——agent 缺席同；消费方（chat
       // 驱动）经根作用域调用点惰性 tryGet 解析（chat 首行先于本第九行装载，
       // 装配期求值恒空——时序由调用点解决）
-      ctx.provide('compaction', { compactForOverflow });
+      ctx.provide('compaction', { compactForOverflow, drain });
 
       // 阈值触发路：agent 缺席即无此路（面已照提供，下方只接 run 结算订阅）
       if (!agent) return;

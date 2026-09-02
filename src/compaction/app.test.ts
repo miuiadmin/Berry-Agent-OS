@@ -49,8 +49,14 @@ interface Harness {
   setUsage: (input: number) => void;
   /** 造消息轮（user/assistant 各一，seq 由 Session 自排） */
   addTurn: () => void;
-  /** 溢出压缩面（第四十五批配套②：恒提供——agent 缺席同） */
-  overflow: () => { compactForOverflow(): Promise<'compacted' | 'nothing' | 'failed'> } | undefined;
+  /** 溢出压缩面（第四十五批配套②：恒提供——agent 缺席同；drain = #5 收口汇流面） */
+  overflow: () =>
+    | {
+        compactForOverflow(): Promise<'compacted' | 'nothing' | 'failed'>;
+        /** 在飞压缩汇流快照（tick 编排收口前 await——遗漏大扫 20260902-c #5） */
+        drain(): Promise<void>;
+      }
+    | undefined;
 }
 
 /** complete 替身返回形（模型层停靠站契约） */
@@ -222,6 +228,41 @@ describe('compaction 官方件 apply', () => {
     expect(String((failed.data as { error: string }).error)).toContain('599');
     // 载体未落（失败在摘要步——无遮蔽半成品）
     expect(h.session.events.some((e) => e.type === 'user/message' && e.surfaceOp)).toBe(false);
+  });
+
+  it('【回归锁 20260902-c #5】drain：在飞压缩汇流等待（慢 complete 未决即 drain 未决）+ 五步全落才 resolve + 无在飞直返', async () => {
+    const h = setup();
+    for (let i = 0; i < 5; i++) h.addTurn();
+    h.setUsage(150_000); // 过阈（150_000 ≥ 100_000）
+    // 慢 complete：手动放行（挂起期间 attempt 占 per-session 在飞互斥位——
+    // tick 收口 drain 等的就是这个位）
+    let release!: () => void;
+    h.setComplete(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ message: { content: '慢链摘要', model: 'test-model' }, usage: { input: 10, output: 5 } });
+        }),
+    );
+    h.fire();
+    await until(() => h.session.events.some((e) => e.type === 'compaction/start')); // 已在飞
+    let drained = false;
+    const drainedPromise = h
+      .overflow()!
+      .drain()
+      .then(() => {
+        drained = true;
+      });
+    await new Promise((r) => setTimeout(r, 30));
+    // 在飞未决 → drain 未决：收口不等即掐死链的事实半边（修复前的 tick 行为）
+    expect(drained).toBe(false);
+    release();
+    await drainedPromise;
+    await until(() => h.session.events.some((e) => e.type === 'compaction/end'));
+    // drain resolve 时五步已全落（end 在场）——不是「等到了但账没落全」
+    expect(drained).toBe(true);
+    // 结算清位后：无在飞 = 已结算 Promise 直返
+    await expect(h.overflow()!.drain()).resolves.toBeUndefined();
   });
 
   it('冷却 derive：failed 事件在冷却窗内 → 过阈也不触发', async () => {
