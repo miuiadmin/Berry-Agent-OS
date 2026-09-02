@@ -46,7 +46,7 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
   berry daemon <start|stop|status|doctor>
                          常驻执行体客户端命令（契约篇 §6.8 刀一/二）：start 就绪
                          门槛（须 token 端点真握手才 exit 0）；stop 信号序；status
-                         真握手披露；doctor 七项体检（pid/token/库/版本/端口）。
+                         真握手披露；doctor 十项体检（pid/token/库/版本/端口等）。
                          daemon 形态 webui 常开回环，缺省 7860
   berry attach           接上 daemon 的 TUI 纯客户端（零本地装配/零本地库——
                          HTTP/SSE 直连回环；审批卡/打断/投递全走 daemon 面）

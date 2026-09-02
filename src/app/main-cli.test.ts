@@ -11,6 +11,7 @@
  * standalone 退役）/ #14 --app-file 空串占位两入口退 2。
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 /* ---------------- 六命令主流程 + wrapper/检测面全 mock（单元边界） ---------------- */
@@ -298,5 +299,22 @@ describe('CLI 顶层兜底：AppError 织码（基建大扫 #8）', () => {
     expect(code).toBe(1);
     expect(stderr).toContain('普通异常');
     expect(stderr).not.toContain('['); // 无码不织前缀
+  });
+});
+
+/* ---------------- 帮助面 doctor 计数锚（全面复盘 20260902 B-1/G-3②） ---------------- */
+
+describe('帮助面 doctor 计数锚（全面复盘 20260902 B-1/G-3②）', () => {
+  it('--help 计数与 daemon doctor 体检项数对照一致（修前必红：七项 vs 实测十项）', async () => {
+    const { stdout } = await dispatch(['--help']);
+    // 代码真值：daemon.ts 全文圆圈序数词去重集——doc 注的项序枚举 ①-⑩ 与
+    // findings 文案前缀同源（新增体检项必然两处同现 ⑪），结构性可见、零登记清单
+    const src = readFileSync(new URL('./daemon.ts', import.meta.url), 'utf8');
+    const count = new Set(src.match(/[①-⑳]/g) ?? []).size;
+    expect(count).toBeGreaterThan(0); // 零命中 = 序数词面整体漂移，锚失效 fail-loud
+    const cn = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二'][count - 1]!;
+    // 三消费面同源对照：--help 文案 / doctor 总结行自报 / 项序枚举——任一漂移即红
+    expect(stdout).toContain(`doctor ${cn}项体检`);
+    expect(src).toContain(`doctor：${cn}项全绿`);
   });
 });
