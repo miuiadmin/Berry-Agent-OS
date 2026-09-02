@@ -17,6 +17,7 @@ import type { Disposer } from '../context/types.js';
 import type { CommandRegistry } from '../channels/commands.js';
 import type { UiService } from '../channels/types.js';
 import { runUpgradeCheck, entryRealPath } from './upgrade.js';
+import { QUICK_START_ENTRY } from './guide-text.js';
 import { VERSION, CODENAME } from './version.js';
 import { formatSkillInvocation } from '../skills/index.js';
 import type { SkillDiagnostic, SkillsService } from '../skills/index.js';
@@ -28,13 +29,13 @@ import type { AppStatusRow } from './composition.js';
 /** 诊断 → 通知文本行（2026-08-23 生态读码补钉 ref-3：「没生效」必须有可见出口） */
 /**
  * /guide 快速上手参考（技术栈篇 §8.5 第 2 件——「上手引导」的常驻形态；与首启
- * 欢迎块〔tui-main.ts FIRST_BOOT 同族〕同一份内容骨架：版本/默认应用/核心命令/
- * 文档地图/升级卸载一句——改词两处同步，抽共享常量挂 m4）。
+ * 欢迎块〔tui-main.ts〕共享指路行（QUICK_START_ENTRY 常量——m4 已收口）：
+ * 版本/核心命令/文档地图/升级卸载参考。
  */
 const GUIDE_TEXT = [
   `Berry ${VERSION}（${CODENAME}）— 快速上手`,
   '',
-  '· 直接说需求即可——默认进入 berrycode 代码智能体应用（/app chat 换纯对话）',
+  `· ${QUICK_START_ENTRY}`,
   '· 核心命令：/help 全命令 · /guide 本引导 · /usage 用量 · /skills 技能 ·',
   '  /apps 应用管理 · /memory-export 记忆导出 · /rewind 工作区回退',
   '· 模型与凭证：APP_MODEL 环境变量覆盖缺省模型；凭证走 pi-ai 授权链',

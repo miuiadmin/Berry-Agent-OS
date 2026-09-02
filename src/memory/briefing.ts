@@ -38,7 +38,7 @@ const PROMOTION_BRIDGE_LINE =
 
 /** 点名档头句：§9.1 第 1/4 项的全部指引文案（策略面——随模型进步过期即弃，不作设计资产） */
 const PROMOTION_CANDIDATE_HEADER =
-  '（可晋升候选——下列反复命中的教训/约定可提议整理成 SKILL.md 写入技能目录：写入时 frontmatter 带 provenance: memories: [所源记忆完整 id]；内容写「做什么/为什么/怎么验」，勿编码模型自身癖性（通用知识才跨模型可复用）；技能经用户确认落位后，用 memory_forget 带 promotedToSkill 让源记忆退场（知识搬家进技能；冻结条目除外）。显式动作、需用户确认。）';
+  '（可晋升候选——下列反复命中的教训/约定可提议整理成 SKILL.md 写入技能目录：写入时 frontmatter 带 provenance: memories: [所源记忆完整 id]；内容写「做什么/为什么/怎么验」，勿编码模型自身癖性（通用知识才跨模型可复用）；改动范围尽量小（最小可用修改、说明哪些反馈触发——勿整篇重写）；技能经用户确认落位后，用 memory_forget 带 promotedToSkill 让源记忆退场（知识搬家进技能；冻结条目除外）。显式动作、需用户确认。）';
 
 /**
  * 渲染常驻简报段内容（空库返回 ''——上层物化跳过空段不留空壳分节）。

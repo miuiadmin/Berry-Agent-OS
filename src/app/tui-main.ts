@@ -23,6 +23,7 @@ import { isDaemonAlive, readDaemonState } from './daemon-state.js';
 import { VERSION_WITH_CODENAME as VERSION } from './version.js';
 import { existsSync } from 'node:fs';
 import { dbPath } from './paths.js';
+import { QUICK_START_ENTRY } from './guide-text.js';
 
 /**
  * 判活 daemon 是否持有**本工作区**近史会话（daemon 刀二·P3 触达面②判据）。
@@ -143,13 +144,13 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
       { level: 'warn' },
     );
   }
-  // 首启欢迎（§8.5 第 4 件；内容骨架与 commands.ts GUIDE_TEXT 同源——改词两处
-  // 同步，抽共享常量挂 m4）：活体层 notify 不落库——只在第一次出现，非首启
+  // 首启欢迎（§8.5 第 4 件；指路行与 GUIDE_TEXT 共享 QUICK_START_ENTRY 常量——
+  // m4 已收口）：活体层 notify 不落库——只在第一次出现，非首启
   // 零噪音；内容骨架与 /guide 同源（命令/文档/配置指路三件）
   if (firstBoot) {
     runtime.ui.notify(
       `欢迎使用 Berry ${VERSION}——跑 AI 应用的操作系统。\n` +
-        '· 首启即用：直接说需求即可（默认进入 berrycode 代码智能体应用；/app chat 换纯对话）\n' +
+        `· 首启即用：${QUICK_START_ENTRY}\n` +
         '· /help 看全部命令 · /guide 快速上手参考\n' +
         '· 模型配置：APP_MODEL 环境变量覆盖缺省模型；凭证与数据目录见 docs/使用指南',
     );
