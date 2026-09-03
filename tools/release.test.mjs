@@ -15,7 +15,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   INJECT_SCENARIOS,
@@ -24,7 +24,10 @@ import {
   assertNoInstallPlaceholders,
   classifyGitTag,
   classifyProbe,
+  compareExtractedTrees,
   decideIdempotent,
+  defaultIo,
+  deepCompareTarballs,
   inspectPackEntries,
   parseNpmPackJson,
   planSnapshotArchive,
@@ -74,7 +77,7 @@ describe('契约 3 parseNpmPackJson：prepare 钩子 stdout 前置污染剥离�
   });
 });
 
-describe('契约 4 decideIdempotent：幂等收口两支', () => {
+describe('契约 4 decideIdempotent：幂等收口（在场两支 + 深对照三态）', () => {
   it('缺席 → 发', () => {
     expect(decideIdempotent({ state: 'absent' }, 'aa')).toEqual({ action: 'publish' });
   });
@@ -89,6 +92,22 @@ describe('契约 4 decideIdempotent：幂等收口两支', () => {
   });
   it('deferEqual → 与本地任何 shasum 等价（跳过）', () => {
     expect(decideIdempotent({ state: 'present', shasum: null, deferEqual: true }, 'zz').action).toBe('skip');
+  });
+  it('深对照三态（刀四——字节不等时的复判输入）：等价跳过 / 实质差异拒（点名）/ 对照不可行维持拒', () => {
+    // 字节不等 + 内容级对照产物三分支；build-meta 溯源戳漂移 = 等价（中断重跑态）
+    const probe = { state: 'present', shasum: 'bb' };
+    const skip = decideIdempotent(probe, 'aa', { ok: true, equivalent: true });
+    expect(skip.action).toBe('skip');
+    expect(skip.reason).toContain('溯源戳漂移');
+    const rej = decideIdempotent(probe, 'aa', { ok: true, equivalent: false, differ: ['package/README.md'] });
+    expect(rej.action).toBe('reject');
+    expect(rej.reason).toContain('package/README.md');
+    // fail-closed：拉取/解包不可行 = 无对照基准，维持拒不盲跳
+    const inconclusive = decideIdempotent(probe, 'aa', { ok: false, reason: 'registry tarball 拉取失败（退出码 1）' });
+    expect(inconclusive.action).toBe('reject');
+    expect(inconclusive.reason).toContain('深对照不可行');
+    // undefined（未做深对照）维持旧文案——编排层只在 present 且字节不等时才触发对照
+    expect(decideIdempotent(probe, 'aa').reason).toContain('同版本异质');
   });
 });
 
@@ -366,8 +385,11 @@ afterEach(() => {
 function writeRealTarball(tgzPath, files = { 'README.md': '# berry-agent-os\n\nnpm i -g berry-agent-os\n' }) {
   const src = mkdtempSync(join(tmpdir(), 'release-tarball-src-'));
   try {
-    mkdirSync(join(src, 'package'), { recursive: true });
-    for (const [name, text] of Object.entries(files)) writeFileSync(join(src, 'package', name), text);
+    // 逐文件建父目录（files 键可含子路径——深对照夹具的 dist/.build-meta.json 形）
+    for (const [name, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(src, 'package', name)), { recursive: true });
+      writeFileSync(join(src, 'package', name), text);
+    }
     const r = spawnSync('tar', ['-czf', tgzPath, '-C', src, 'package']);
     if (r.status !== 0) throw new Error(`夹具 tgz 打包失败：${r.stderr}`);
   } finally {
@@ -694,14 +716,14 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
 
   it('shasum-mismatch：同版本异质响亮拒——publish 永不触达', async () => {
     const version = '1.0.0-alpha.3';
-    const base = greenBase(version); // probe 被谱接管（在场异质），其余照底座
+    const base = greenBase(version); // probe/pack:remote 被谱接管（在场异质 + 深对照拉取注入失败），其余照底座
     const { io, calls } = scriptedIo(base);
     await expect(
       runRelease(['--dry-run', '--inject', 'shasum-mismatch'], applyScenario(io, INJECT_SCENARIOS['shasum-mismatch']), {
         workDir,
         pkg: { name: 'berry-agent-os', version, binName: 'berry' },
       }),
-    ).rejects.toThrow(/同版本异质/);
+    ).rejects.toThrow(/同版本字节不等且深对照不可行/); // fail-closed 维持拒（刀四——实质差异拒腿由深对照 e2e 真锁）
     expect(labels(calls)).not.toContain('publish');
   });
 
@@ -900,6 +922,11 @@ describe('契约 3 子步 3.5：面快照归档（技术栈 §8.3——第九十
     ]);
     expect(calls.find((c) => c.label === 'snapshot:commit').args).toEqual([
       'commit',
+      // --only 点名两件（刀四）：机械 commit 只带归档快照 + 再生 COMPATIBILITY.md——
+      // index 竞争卷入他物结构性不可能（结构保证取代净空环境假设）
+      '--only',
+      `api/snapshots/${version}.json`,
+      'COMPATIBILITY.md',
       '-m',
       `chore(release): API surface snapshot ${version}`,
     ]);
@@ -953,5 +980,185 @@ describe('契约 3 子步 3.5：面快照归档（技术栈 §8.3——第九十
     expect(labels(calls)).not.toContain('snapshot:commit');
     expect(existsSync(join(workDir, 'api/snapshots'))).toBe(false);
     expect(existsSync(join(workDir, 'COMPATIBILITY.md'))).toBe(false);
+  });
+});
+
+// ───────────────── 契约 4 深对照（全面复盘 20260903-91 刀四——build-meta 溯源戳豁免） ─────────────────
+
+/** 混合 io：canned 表优先、缺标签落真执行（深对照 e2e 用——tar 解包步真跑真解） */
+function hybridIo(canned) {
+  const calls = [];
+  const real = defaultIo();
+  return {
+    calls,
+    io: {
+      exec(label, command, args, opts) {
+        calls.push({ label, command, args, opts });
+        const handler = canned[label];
+        // canned handler 收 (args, opts)——pack:remote 的 canned 需从 args 读
+        // --pack-destination 落真 tgz（对照目标是真 tar 字节，不能是罐头应答）
+        if (handler) return handler(args, opts);
+        return real.exec(label, command, args, opts);
+      },
+    },
+  };
+}
+
+/**
+ * 中断重跑形态的双 tarball 夹具：local/remote 除 dist/.build-meta.json 溯源戳外
+ * 字节全同（归档 commit 先于 publish 移动 HEAD——run A 打的包嵌旧 commit，重跑
+ * 重建嵌新 commit）。diffRemote = true 时再动 README 一个字节（实质差异腿）。
+ */
+function rerunTarballFiles(diffRemote = false) {
+  const readme = '# berry-agent-os\n\nnpm i -g berry-agent-os\n';
+  return {
+    local: { 'README.md': readme, 'dist/.build-meta.json': '{"commit":"run-a-head"}' },
+    remote: {
+      'README.md': diffRemote ? `${readme}x` : readme,
+      'dist/.build-meta.json': '{"commit":"run-b-head-after-archive-commit"}',
+    },
+  };
+}
+
+describe('契约 4 深对照：compareExtractedTrees 纯函数（豁免件语义）', () => {
+  it('仅 build-meta 溯源戳漂移 = 等价；实质差异（内容异/单边缺席）点名进 differ', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'release-tree-cmp-'));
+    try {
+      /** 落一棵解包树：package/<rel> 逐文件写 */
+      const plant = (root, files) => {
+        for (const [rel, text] of Object.entries(files)) {
+          const p = join(root, 'package', rel);
+          mkdirSync(dirname(p), { recursive: true });
+          writeFileSync(p, text);
+        }
+      };
+      const { local, remote } = rerunTarballFiles();
+      const a = join(dir, 'a');
+      const b = join(dir, 'b');
+      mkdirSync(a);
+      mkdirSync(b);
+      // 等价腿：仅 build-meta 不同
+      plant(a, local);
+      plant(b, remote);
+      expect(compareExtractedTrees(a, b)).toEqual({ equivalent: true, differ: [] });
+      // 实质差异腿：README 内容异 + remote 多一独有件（单边缺席）
+      const c = join(dir, 'c');
+      mkdirSync(c);
+      plant(c, { ...remote, 'README.md': 'different bytes\n', 'EXTRA.md': 'one side only\n' });
+      const verdict = compareExtractedTrees(a, c);
+      expect(verdict.equivalent).toBe(false);
+      expect(verdict.differ).toEqual(['package/README.md', 'package/EXTRA.md']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('契约 4 深对照：deepCompareTarballs 编排（拉 registry tarball + 双解包树走）', () => {
+  /** 单腿跑法：canned pack:remote 往 args 目标位写真 tgz；tar 解包落真执行 */
+  const runOnce = async (diffRemote, overridePack) => {
+    const { local, remote } = rerunTarballFiles(diffRemote);
+    const localTgz = writeRealTarball(join(workDir, 'local.tgz'), local);
+    const remoteName = 'berry-agent-os-1.0.0-alpha.3.tgz';
+    const canned = {
+      'pack:remote':
+        overridePack ??
+        ((args) => {
+          // args[3] = --pack-destination 目标位（npm 真跑同参数形——夹具落真 tgz 假装拉回）
+          writeRealTarball(join(args[3], remoteName), remote);
+          return { code: 0, stdout: JSON.stringify([{ filename: remoteName }]), stderr: '' };
+        }),
+    };
+    const { io } = hybridIo(canned);
+    return deepCompareTarballs(io, {
+      name: 'berry-agent-os',
+      version: '1.0.0-alpha.3',
+      localTarballPath: localTgz,
+    });
+  };
+
+  it('仅 build-meta 溯源戳漂移 → {ok, equivalent:true}（中断重跑的中断重跑态）', async () => {
+    const verdict = await runOnce(false);
+    expect(verdict).toEqual({ ok: true, equivalent: true, differ: [] });
+  });
+  it('除溯源戳外仍有实质差异 → equivalent:false 且点名差异件', async () => {
+    const verdict = await runOnce(true);
+    expect(verdict.ok).toBe(true);
+    expect(verdict.equivalent).toBe(false);
+    expect(verdict.differ).toEqual(['package/README.md']);
+  });
+  it('拉取失败 / 输出不可解析 → ok:false（fail-closed——decideIdempotent 维持拒）', async () => {
+    const fail = await runOnce(false, () => ({ code: 1, stdout: '', stderr: 'npm error' }));
+    expect(fail.ok).toBe(false);
+    expect(fail.reason).toContain('拉取失败');
+    const garbage = await runOnce(false, () => ({ code: 0, stdout: 'not json at all', stderr: '' }));
+    expect(garbage.ok).toBe(false);
+    expect(garbage.reason).toContain('不可解析');
+  });
+});
+
+describe('契约 4 深对照编排骨舞：字节不等先对照再裁决（runRelease e2e）', () => {
+  it('中断重跑（registry 在场 + 字节不等 + 仅 build-meta 漂移）→ 深对照等价跳过 publish，后续步骤照跑', async () => {
+    const version = '1.0.0-alpha.3';
+    const base = greenBase(version);
+    // registry 在场且 shasum 与本地真 tarball 必不等（本地是刚打的真字节）
+    base.probe = () => ({ code: 0, stdout: JSON.stringify('ff00deadbeef'), stderr: '' });
+    // 本地 tarball 落「重跑」形态（build-meta 嵌 run-b head）
+    const { local, remote } = rerunTarballFiles();
+    base['pack:real'] = () => {
+      writeRealTarball(join(workDir, 'berry-agent-os-fake.tgz'), local);
+      return { code: 0, stdout: JSON.stringify([{ filename: 'berry-agent-os-fake.tgz' }]), stderr: '' };
+    };
+    // registry「已有版本」= run A 打的包（build-meta 嵌 run-a head——仅此一件不同）
+    const remoteName = 'berry-agent-os-registry.tgz';
+    base['pack:remote'] = (args) => {
+      writeRealTarball(join(args[3], remoteName), remote);
+      return { code: 0, stdout: JSON.stringify([{ filename: remoteName }]), stderr: '' };
+    };
+    base['dist-tag-add'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['view-tags:post'] = () => ({
+      code: 0,
+      stdout: JSON.stringify({ latest: version, next: version }),
+      stderr: '',
+    });
+    base['git-tag:list'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['git-rev:head'] = () => ({ code: 0, stdout: 'run-b-head\n', stderr: '' });
+    base['git-tag:create'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['git-tag:push'] = () => ({ code: 0, stdout: '', stderr: '' });
+    const { io, calls } = hybridIo(base);
+
+    const summary = await runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } });
+
+    expect(summary.published).toBe(false);
+    expect(summary.skippedPublish).toBe(true);
+    // 深对照步在契约 4 触达且先于后续（publish 缺席——跳过）
+    expect(labels(calls)).toContain('pack:remote');
+    expect(labels(calls)).toContain('tar:extract-local');
+    expect(labels(calls)).toContain('tar:extract-remote');
+    expect(labels(calls)).not.toContain('publish');
+    // 后续步骤照跑（interrupt-rerun 语义）：dist-tag 断言与 tag 打挂不因跳过缺席
+    expect(labels(calls)).toContain('view-tags:post');
+    expect(labels(calls)).toContain('git-tag:create');
+  });
+
+  it('深对照见实质差异 → 响亮拒（同号不同内容永不静默跳过）', async () => {
+    const version = '1.0.0-alpha.3';
+    const base = greenBase(version);
+    base.probe = () => ({ code: 0, stdout: JSON.stringify('ff00deadbeef'), stderr: '' });
+    const { local, remote } = rerunTarballFiles(true); // remote 再动 README——实质差异
+    base['pack:real'] = () => {
+      writeRealTarball(join(workDir, 'berry-agent-os-fake.tgz'), local);
+      return { code: 0, stdout: JSON.stringify([{ filename: 'berry-agent-os-fake.tgz' }]), stderr: '' };
+    };
+    const remoteName = 'berry-agent-os-registry.tgz';
+    base['pack:remote'] = (args) => {
+      writeRealTarball(join(args[3], remoteName), remote);
+      return { code: 0, stdout: JSON.stringify([{ filename: remoteName }]), stderr: '' };
+    };
+    const { io, calls } = hybridIo(base);
+    await expect(
+      runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
+    ).rejects.toThrow(/实质差异.*package\/README\.md/);
+    expect(labels(calls)).not.toContain('publish');
   });
 });

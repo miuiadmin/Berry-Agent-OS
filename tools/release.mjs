@@ -14,8 +14,10 @@
  *      同笔再生 + 机械 commit——技术栈 §8.3，2026-09-03 第九十一批挂机；归档
  *      commit 先于契约 6 打 tag，tag 树必含本版快照；同版本同内容幂等跳过、
  *      异内容响亮拒；--dry-run 只投影不触 git 写面）
- *   4. 幂等收口与 publish 单点——在场等价（同 shasum）跳过 publish；异质响亮
- *      拒；publish 上传物 = 本脚本打出的 tarball 本体（检视即所传）
+ *   4. 幂等收口与 publish 单点——在场等价（同 shasum）跳过 publish；字节不等
+ *      先内容级深对照（剥离 dist/.build-meta.json 溯源戳：等价跳 / 实质差异拒 /
+ *      对照不可行维持拒——技术栈 §8.3，全面复盘 20260903-91 刀四）；publish
+ *      上传物 = 本脚本打出的 tarball 本体（检视即所传）
  *   5. dist-tag 终态机器断言——preview 期统一律 latest===next===刚发版
  *      （alpha/rc 同律）；首个正式版起分叉（latest=版本号、next 不动）
  *   6. 尾件 git tag——v<version> 幂等打挂（同 commit 跳过 / 异 commit 拒）
@@ -105,14 +107,19 @@ export function classifyProbe(raw) {
 }
 
 /**
- * 契约 4：幂等收口两支判定（在场再分等价/异质）。
+ * 契约 4：幂等收口两支判定（在场再分等价/异质；字节不等时深对照三态裁决）。
  * @param {{state:'absent'|'present'|'unreachable', shasum?:string|null, deferEqual?:boolean}} probe
  *   探测结果（present 且 deferEqual 时视为「与本地 tarball 等价」——注入谱
  *   interrupt-rerun 场景：probe 先于 pack 执行，等价承诺在收口时刻兑现）
  * @param {string} localShasum 契约 3 本地 tarball 的 sha1（registry dist.shasum 同口径）
+ * @param {{ok:boolean, equivalent?:boolean, differ?:string[]}|undefined} [contentEquiv]
+ *   深对照产物（deepCompareTarballs——字节不等时编排层先跑内容级对照再复判）：
+ *   undefined = 未做深对照（维持旧拒文案）；ok:false = 拉取/解包不可行（fail-closed
+ *   维持拒）；ok:true+equivalent = 仅 build-meta 溯源戳漂移（跳过）；
+ *   ok:true+!equivalent = 实质差异（拒，点名差异件）
  * @returns {{action:'publish'}|{action:'skip'}|{action:'reject', reason:string}}
  */
-export function decideIdempotent(probe, localShasum) {
+export function decideIdempotent(probe, localShasum, contentEquiv) {
   if (probe.state === 'unreachable') {
     // registry 不可达：盲发会在无比对基准下覆盖心智模型，拒发
     return { action: 'reject', reason: 'registry 探测不可达（网络/registry 异常）——拒发不盲发' };
@@ -122,10 +129,109 @@ export function decideIdempotent(probe, localShasum) {
   if (probe.deferEqual || probe.shasum === localShasum) {
     return { action: 'skip', reason: 'registry 已有同字节版本（中断重跑态）——publish 跳过、后续步骤照跑' };
   }
+  // 字节不等 → 深对照裁决（刀四）：build-meta 溯源戳是发布物里唯一的「构建时刻
+  // 环境指纹」——子步 3.5 归档 commit 先于本契约，中断重跑时 HEAD 已移、重建产物
+  // 的 build-meta 嵌新 commit 而其余字节全同；不剥离它，一切中断重跑都会被误判异质
+  if (contentEquiv === undefined) {
+    return {
+      action: 'reject',
+      reason: `同版本异质：registry shasum ${probe.shasum} ≠ 本地 ${localShasum}——同号不同内容永不可写；若怀疑 npm 工具链升级致打包漂移，人工核对 registry integrity 字段`,
+    };
+  }
+  if (!contentEquiv.ok) {
+    return {
+      action: 'reject',
+      reason: `同版本字节不等且深对照不可行（${contentEquiv.reason ?? 'registry tarball 拉取/解包失败'}）——无对照基准不盲跳，维持拒；人工核对 registry integrity 字段`,
+    };
+  }
+  if (contentEquiv.equivalent) {
+    return {
+      action: 'skip',
+      reason:
+        '同内容等价：registry 版本与本轮构建仅 dist/.build-meta.json 溯源戳漂移（中断重跑态——归档 commit 先于 publish 移动了 HEAD）——publish 跳过、后续步骤照跑',
+    };
+  }
   return {
     action: 'reject',
-    reason: `同版本异质：registry shasum ${probe.shasum} ≠ 本地 ${localShasum}——同号不同内容永不可写；若怀疑 npm 工具链升级致打包漂移，人工核对 registry integrity 字段`,
+    reason: `同版本异质：registry 版本与本轮构建除溯源戳外仍有实质差异（${(contentEquiv.differ ?? []).slice(0, 5).join('、')}）——同号不同内容永不可写`,
   };
+}
+
+/**
+ * 深对照豁免件：tarball 内唯一合法的「构建时刻环境指纹」——归档 commit 移动
+ * HEAD 后重建，build-meta 嵌新 commit 而其余字节全同（技术栈 §8.3 契约 4）。
+ * 路径形 = npm tarball 解包后的 package/ 前缀（compareExtractedTrees 走相对路径）
+ */
+const DEEP_COMPARE_EXEMPT = 'package/dist/.build-meta.json';
+
+/**
+ * 两棵解包树的内容级对照（纯文件系统走查——测试直测）。
+ * 语义：文件集对称 + 逐文件字节等价，唯一豁免 DEEP_COMPARE_EXEMPT 一件。
+ * @param {string} localDir 本地 tarball 解包目录
+ * @param {string} remoteDir registry tarball 解包目录
+ * @returns {{equivalent: boolean, differ: string[]}} differ = 差异相对路径清单
+ *   （内容异/单边缺席都算——供拒绝文案点名）
+ */
+export function compareExtractedTrees(localDir, remoteDir) {
+  /** 递归收割文件相对路径集（dir 为根，路径分隔统一 /——tar 解包产物跨平台形态） */
+  const walk = (dir, base = '') => {
+    const out = [];
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const rel = base === '' ? ent.name : `${base}/${ent.name}`;
+      if (ent.isDirectory()) out.push(...walk(join(dir, ent.name), rel));
+      else if (ent.isFile()) out.push(rel);
+    }
+    return out;
+  };
+  const localFiles = new Set(walk(localDir));
+  const remoteFiles = new Set(walk(remoteDir));
+  /** 差异清单：对称并集里逐件比对（豁免件直接跳过——两边都该在但内容无关紧要） */
+  const differ = [];
+  for (const rel of new Set([...localFiles, ...remoteFiles])) {
+    if (rel === DEEP_COMPARE_EXEMPT) continue;
+    const localPath = join(localDir, rel);
+    const remotePath = join(remoteDir, rel);
+    // 单边缺席或字节不等都算实质差异（readFileSync 缺席抛错——先探在场性）
+    const same =
+      localFiles.has(rel) && remoteFiles.has(rel) && readFileSync(localPath).equals(readFileSync(remotePath));
+    if (!same) differ.push(rel);
+  }
+  return { equivalent: differ.length === 0, differ };
+}
+
+/**
+ * 契约 4 深对照编排：拉 registry tarball（公开包零鉴权——`npm pack <pkg>@<v>
+ * --pack-destination`）与本地 tarball 双解包后 compareExtractedTrees。
+ * 全程经 io 缝（测试注入 canned pack:remote + 真 tar 解包）；任一步失败返回
+ * {ok:false}——decideIdempotent 对 ok:false 维持拒（fail-closed，不盲跳）。
+ * @param {{exec: Function}} io 执行缝（runRelease 内传 anchoredIo）
+ * @param {{name: string, version: string, localTarballPath: string}} input
+ * @returns {Promise<{ok: true, equivalent: boolean, differ: string[]}|{ok: false, reason: string}>}
+ */
+export async function deepCompareTarballs(io, { name, version, localTarballPath }) {
+  /** 对照工作区：拉取落点 + 两解包目录（收场即清——零残留） */
+  const dir = mkdtempSync(join(tmpdir(), 'release-deepcmp-'));
+  try {
+    // 拉 registry 在场版本（公开包无鉴权面；--pack-destination 钉临时目录防落仓库根）
+    const dl = await io.exec('pack:remote', 'npm', ['pack', `${name}@${version}`, '--pack-destination', dir, '--json']);
+    if (dl.code !== 0) return { ok: false, reason: `registry tarball 拉取失败（退出码 ${dl.code}）` };
+    const parsed = parseNpmPackJson(dl.stdout);
+    if (parsed === null) return { ok: false, reason: 'npm pack（registry 拉取）输出不可解析' };
+    const remoteTgz = join(dir, parsed[0].filename);
+    if (!existsSync(remoteTgz)) return { ok: false, reason: `registry tarball 未落盘：${remoteTgz}` };
+    // 双解包（tar 走真进程——与安装冒烟同律，机器缺 tar 时此处响亮失败进 ok:false）
+    const localEx = join(dir, 'local');
+    const remoteEx = join(dir, 'remote');
+    mkdirSync(localEx);
+    mkdirSync(remoteEx);
+    const tx1 = await io.exec('tar:extract-local', 'tar', ['-xzf', localTarballPath, '-C', localEx]);
+    if (tx1.code !== 0) return { ok: false, reason: `本地 tarball 解包失败（退出码 ${tx1.code}）` };
+    const tx2 = await io.exec('tar:extract-remote', 'tar', ['-xzf', remoteTgz, '-C', remoteEx]);
+    if (tx2.code !== 0) return { ok: false, reason: `registry tarball 解包失败（退出码 ${tx2.code}）` };
+    return { ok: true, ...compareExtractedTrees(localEx, remoteEx) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -361,9 +467,12 @@ export const INJECT_SCENARIOS = {
     },
   },
   'shasum-mismatch': {
-    description: '契约 4 同版本异质拒——registry 在场但 shasum 与本地 tarball 不同',
+    description:
+      '契约 4 同版本异质拒——registry 在场但 shasum 与本地 tarball 不同；深对照（刀四）注入为拉取不可行 → fail-closed 维持拒（实质差异拒腿由 release.test.mjs 深对照 e2e 真锁）',
     steps: {
       probe: () => ({ code: 0, stdout: JSON.stringify('0'.repeat(40)), stderr: '' }),
+      // 深对照拉取步注入失败：CLI 演习零触网确定性（真 fetch 会依赖 registry 实态）
+      'pack:remote': () => ({ code: 1, stdout: '', stderr: 'npm error network unreachable（注入）' }),
     },
   },
   'assert-fail': {
@@ -601,6 +710,13 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
       if (add.code !== 0) throw new Error(`git add 快照归档两件失败（退出码 ${add.code}）`);
       const commit = await anchoredIo.exec('snapshot:commit', 'git', [
         'commit',
+        // --only 点名两件（刀四）：commit 只带归档快照 + 再生 COMPATIBILITY.md——
+        // 「只带两件」由契约 1 净空环境假设升为结构保证，index 内任何他物（并发
+        // 会话半成品等）被卷入结构性不可能；--only 照跑 pre-commit 四门禁（发布
+        // 机器不豁免执法——净空闸 + 门禁闸双在）
+        '--only',
+        `api/snapshots/${pkg.version}.json`,
+        'COMPATIBILITY.md',
         '-m',
         `chore(release): API surface snapshot ${pkg.version}`,
       ]);
@@ -609,7 +725,19 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
 
     // ── 契约 4：幂等收口与 publish 单点 ──
     const plan = planTagOperations(pkg.version);
-    const decision = decideIdempotent(probe, localShasum);
+    let decision = decideIdempotent(probe, localShasum);
+    if (decision.action === 'reject' && probe.state === 'present' && !probe.deferEqual) {
+      // 字节不等先深对照再裁决（刀四）：build-meta 溯源戳漂移是中断重跑的必然
+      // 形态（3.5 归档 commit 先于本步移动 HEAD），不剥离它一切重跑都被误判异质；
+      // 对照不可行时 decideIdempotent 对 ok:false 维持拒（fail-closed 不盲跳）
+      console.log('── 契约 4/6 字节不等——内容级深对照（剥离 dist/.build-meta.json 溯源戳）');
+      const contentEquiv = await deepCompareTarballs(anchoredIo, {
+        name: pkg.name,
+        version: pkg.version,
+        localTarballPath: tarballPath,
+      });
+      decision = decideIdempotent(probe, localShasum, contentEquiv);
+    }
     if (decision.action === 'reject') throw new Error(decision.reason);
     // 正式期「next 不动」需要 publish 前快照（preview 期两腿同指不需要）——
     // 快照必须先于任何写操作：本脚本的正式期发布不触 next，比对即「我们没动它」
