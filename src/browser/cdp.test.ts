@@ -1363,8 +1363,8 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
     expect((stuck.content[0] as { text: string }).text).toContain('历史最末端');
   });
 
-  it('snapshot → click/type 全链：ref 表换代 + 盒中心坐标派', async () => {
-    fake.responders['DOM.getFlattenedDocumentTree'] = () => ({
+  it('snapshot → click/type 全链：ref 表换代 + 盒中心坐标派（真机形状：getFlattenedDocument + border 四角 + 先滚入视口）', async () => {
+    fake.responders['DOM.getFlattenedDocument'] = () => ({
       nodes: [
         { nodeId: 1, backendNodeId: 100, nodeType: 9, nodeName: '#document' },
         {
@@ -1384,17 +1384,36 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
     const handle = await engine.acquireContext('sess-A');
     expect(handle.capture.refs.get('@e0')).toMatchObject({ backendNodeId: 103 });
 
-    fake.responders['DOM.getBoxModel'] = () => ({ model: { quad: [0, 0, 100, 0, 100, 40, 0, 40] } });
+    // 真 Chrome BoxModel 录制形状（六键 content/padding/border/margin/width/height——无 quad 键；
+    // border 四角 [0,0,100,0,100,40,0,40] 中心 = 50,20）——第九轮全面复盘 #3：假服务器照代码反推
+    // 造 quad 键 = 测试资产共谋，红锁必须用真机键名
+    fake.responders['DOM.getBoxModel'] = () => ({
+      model: {
+        content: [8, 3, 92, 3, 92, 37, 8, 37],
+        padding: [4, 0, 96, 0, 96, 40, 4, 40],
+        border: [0, 0, 100, 0, 100, 40, 0, 40],
+        margin: [-8, -8, 108, -8, 108, 48, -8, 48],
+        width: 100,
+        height: 40,
+      },
+    });
     const click = await run('browser_click', { ref: '@e0' });
     expect((click.content[0] as { text: string }).text).toContain('已点击 button "提交"');
+    // #11：点击前先滚入视口（折叠线外 dispatchMouseEvent 真机零派发零报错——静默假成功防线）；
+    // backendNodeId 锚 + 帧序在鼠标帧之前
+    const scrollIn = framesOf('DOM.scrollIntoViewIfNeeded');
+    expect(scrollIn[0]!.params).toEqual({ backendNodeId: 103 });
     const mice = framesOf('Input.dispatchMouseEvent');
     expect(mice).toHaveLength(2);
+    expect(fake.receivedFrames.indexOf(scrollIn[0]!)).toBeLessThan(fake.receivedFrames.indexOf(mice[0]!));
     expect(mice[0]!.params).toMatchObject({ type: 'mousePressed', x: 50, y: 20, button: 'left', clickCount: 1 });
     expect(mice[1]!.params).toMatchObject({ type: 'mouseReleased', x: 50, y: 20 });
 
     const type = await run('browser_type', { ref: '@e1', text: '你好 world' });
     expect((type.content[0] as { text: string }).text).toContain('已向 textbox');
     expect(framesOf('Input.insertText')[0]!.params).toEqual({ text: '你好 world' });
+    // type 同律前置滚入视口（@e1 = INPUT 节点 backendNodeId 109）
+    expect(framesOf('DOM.scrollIntoViewIfNeeded')[1]!.params).toEqual({ backendNodeId: 109 });
 
     // ref miss = 语义失败数据面（快照未含 @e9）
     const miss = await run('browser_click', { ref: '@e9' });
@@ -1406,8 +1425,8 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
   // 移除（快照后页面变化——浏览自动化最高频竞态后果路）。修复前红：该 throw
   // 全测试面零触达——若误把坏 quad 当合法坐标，会派 NaN 坐标点击（静默错误
   // 坐标）而非 isError 自纠指引。
-  it('#22 click/type 无盒分支：坏 quad（空模型/短 quad/非数值）→ isError 自纠 + 零鼠标派发', async () => {
-    fake.responders['DOM.getFlattenedDocumentTree'] = () => ({
+  it('#22 click/type 无盒分支：坏 border（空模型/短 border/非数值）→ isError 自纠 + 零鼠标派发', async () => {
+    fake.responders['DOM.getFlattenedDocument'] = () => ({
       nodes: [
         { nodeId: 1, backendNodeId: 100, nodeType: 9, nodeName: '#document' },
         {
@@ -1421,14 +1440,14 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
       ],
     });
     await run('browser_snapshot');
-    // 三种坏形态逐一（覆盖分支的全部拒绝子条件）：无 quad / 长度不足 / 非数值
-    for (const model of [{}, { quad: [0, 0, 100, 0] }, { quad: [0, 0, 100, 0, 100, 40, 0, 'x'] }]) {
+    // 三种坏形态逐一（覆盖分支的全部拒绝子条件）：无 border / 长度不足 / 非数值
+    for (const model of [{}, { border: [0, 0, 100, 0] }, { border: [0, 0, 100, 0, 100, 40, 0, 'x'] }]) {
       fake.responders['DOM.getBoxModel'] = () => ({ model });
       fake.receivedFrames.length = 0; // 每轮清面——零鼠标派发断言按轮验
       const bad = await run('browser_click', { ref: '@e0' });
       expect(bad.isError).toBe(true);
       expect((bad.content[0] as { text: string }).text).toContain('无盒模型');
-      expect((bad.content[0] as { text: string }).text).toContain('滚动到位'); // 自纠指引在场
+      expect((bad.content[0] as { text: string }).text).toContain('重拍快照'); // 自纠指引在场
       expect(framesOf('Input.dispatchMouseEvent')).toHaveLength(0); // 不派 NaN 坐标
     }
     // type 同路（聚焦点击前同一 refBoxCenter——同样拦在鼠标派发之前）
@@ -1457,16 +1476,22 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
     expect((bad.content[0] as { text: string }).text).toContain('未知键名');
   });
 
-  it('scroll：四向距离派（yDistance 正 = 向下）+ 页面锚点回读（#11——规范工具表 scroll 行 title+url 承诺）', async () => {
+  it('scroll：四向距离派（协议 yDistance 正 = 向上滚——真机勘正 #10）+ 页面锚点回读（#11——规范工具表 scroll 行 title+url 承诺）', async () => {
     const ok = await run('browser_scroll', { direction: 'down' });
     expect((ok.content[0] as { text: string }).text).toContain('向下滚动 600px');
     // #11：滚动后回 title+url（与 navigate/back/forward 同律——模型直拿位置反馈）
     expect((ok.content[0] as { text: string }).text).toContain('Example');
     expect((ok.details as { url?: string; title?: string }).url).toBe('https://example.com/page');
     expect((ok.details as { title?: string }).title).toBe('Example');
-    expect(framesOf('Input.synthesizeScrollGesture')[0]!.params).toMatchObject({ xDistance: 0, yDistance: 600 });
+    // 协议语义（PDL 原文 + 真机实证，第九轮 #10）：yDistance 正 = 向上滚——
+    // direction 是用户语义，映射时 y 轴取负（down 600 = yDistance -600）
+    expect(framesOf('Input.synthesizeScrollGesture')[0]!.params).toMatchObject({ xDistance: 0, yDistance: -600 });
+    await run('browser_scroll', { direction: 'up', amount: 250 });
+    expect(framesOf('Input.synthesizeScrollGesture')[1]!.params).toMatchObject({ yDistance: 250 });
     await run('browser_scroll', { direction: 'left', amount: 300 });
-    expect(framesOf('Input.synthesizeScrollGesture')[1]!.params).toMatchObject({ xDistance: 300 });
+    expect(framesOf('Input.synthesizeScrollGesture')[2]!.params).toMatchObject({ xDistance: 300 });
+    await run('browser_scroll', { direction: 'right', amount: 300 });
+    expect(framesOf('Input.synthesizeScrollGesture')[3]!.params).toMatchObject({ xDistance: -300 });
   });
 
   it('screenshot：PNG 落盘（字节不进结果）+ 逐会话滚动保留', async () => {
@@ -1504,13 +1529,15 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
     const allText = (all.content[0] as { text: string }).text;
     expect(allText.indexOf('dialog')).toBeLessThan(allText.indexOf('exception'));
     expect(allText.indexOf('exception')).toBeLessThan(allText.indexOf('console'));
-    // context 建立即 enable 两域（事件源前提）
+    // context 建立即 enable 三域（事件源前提 + getFlattenedDocument 门控——真 Chrome 未
+    // enable DOM 拒 -32000，第九轮 #2）
     expect(framesOf('Runtime.enable')).toHaveLength(1);
     expect(framesOf('Page.enable')).toHaveLength(1);
+    expect(framesOf('DOM.enable')).toHaveLength(1);
   });
 
   it('refs 换代：第二次快照后旧 ref 失效（跨快照混用禁）', async () => {
-    fake.responders['DOM.getFlattenedDocumentTree'] = () => ({
+    fake.responders['DOM.getFlattenedDocument'] = () => ({
       nodes: [
         { nodeId: 1, backendNodeId: 100, nodeType: 9, nodeName: '#document' },
         {
@@ -1524,9 +1551,9 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
       ],
     });
     await run('browser_snapshot');
-    fake.responders['DOM.getFlattenedDocumentTree'] = () => ({ nodes: [] }); // 空文档——ref 表清空换代
+    fake.responders['DOM.getFlattenedDocument'] = () => ({ nodes: [] }); // 空文档——ref 表清空换代
     await run('browser_snapshot');
-    fake.responders['DOM.getBoxModel'] = () => ({ model: { quad: [0, 0, 1, 0, 1, 1, 0, 1] } });
+    fake.responders['DOM.getBoxModel'] = () => ({ model: { border: [0, 0, 1, 0, 1, 1, 0, 1] } });
     const stale = await run('browser_click', { ref: '@e0' });
     expect(stale.isError).toBe(true);
     expect((stale.content[0] as { text: string }).text).toContain('不在最近快照');
@@ -1565,6 +1592,32 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
     const plain = await run('browser_console');
     expect((plain.content[0] as { text: string }).text).not.toContain('引擎回退');
     expect((plain.details as { fallbackWarning?: string }).fallbackWarning).toBeUndefined();
+  });
+
+  // 【第九轮全面复盘 20260903 #27】console 执行段是十件中唯一无 try/catch 的：
+  // acquire（引擎起链/context 建链）抛纯 Error 时直接 reject 出 execute——其余
+  // 九件全走 asDataError 数据面自纠，唯 console 把引擎故障当管道异常上抛。
+  // 修复前红：本测 rejects 即证（独立注册面注入 acquire 抛错——#27 note 测试同款缝）。
+  it('#27 console acquire 失败：纯 Error → isError 数据面自纠（十件同轨）', async () => {
+    const errDefs = new Map<string, ToolDefinition>();
+    registerBrowserTools({
+      service: {
+        status: () => engine.getStatus(),
+        acquireContext: async () => {
+          throw new Error('引擎起链失败：连接超时');
+        },
+        dispose: async () => undefined,
+      },
+      dataDir,
+      gates: NOOP_GATES,
+      register: (def) => {
+        errDefs.set(def.name, def);
+        return () => errDefs.delete(def.name);
+      },
+    });
+    const bad = await errDefs.get('browser_console')!.execute({}, { toolCallId: 't-1', sessionId: 'sess-A' });
+    expect(bad.isError).toBe(true);
+    expect((bad.content[0] as { text: string }).text).toContain('引擎起链失败');
   });
 });
 

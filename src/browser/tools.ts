@@ -95,18 +95,26 @@ function lookupRef(refs: ReadonlyMap<string, SnapshotRefEntry>, ref: string): Sn
 }
 
 /**
- * ref → 元素中心坐标（DOM.getBoxModel 内容 quad 四角均值）。
- * 无盒模型 = 元素当前不可见（display:none / 未渲染）——语义失败。
+ * ref → 元素中心坐标（真机形状，第九轮全面复盘 20260903 #3 勘正）：
+ * ① 先 DOM.scrollIntoViewIfNeeded 滚入视口（backendNodeId 锚）——折叠线外
+ *    dispatchMouseEvent 真机零派发零报错（静默假成功，#11）；
+ * ② 再 DOM.getBoxModel 取 model.border 四角均值——真 Chrome BoxModel 六键
+ *    content/padding/border/margin/width/height、无 quad 键（原读 model.quad
+ *    恒 undefined = 100% 全灭）；border 四角为视口系坐标，滚后即当前点击位。
+ * 无盒模型 = 元素当前不可见（display:none / 已移除）——语义失败。
  */
 async function refBoxCenter(
   rpc: CdpRpc,
   sessionId: string,
   entry: SnapshotRefEntry,
 ): Promise<{ x: number; y: number }> {
+  // 滚入视口在取盒模型之前（滚后 border 即视口系坐标）；display:none 元素此调用
+  // 真机静默 no-op——由下一步盒模型缺如拦下
+  await rpc.request('DOM.scrollIntoViewIfNeeded', { backendNodeId: entry.backendNodeId }, { sessionId });
   const res = await rpc.request('DOM.getBoxModel', { backendNodeId: entry.backendNodeId }, { sessionId });
-  const quad = (res as { model?: { quad?: unknown } })?.model?.quad;
+  const quad = (res as { model?: { border?: unknown } })?.model?.border;
   if (!Array.isArray(quad) || quad.length < 8 || quad.some((v) => typeof v !== 'number')) {
-    throw new Error(`元素「${entry.role} "${entry.name}"」当前无盒模型（不可见/未渲染）——可能需先滚动到位或元素已移除`);
+    throw new Error(`元素「${entry.role} "${entry.name}"」当前无盒模型（不可见/未渲染）——可能已移除，请重拍快照后重试`);
   }
   const q = quad as number[];
   const xs = [q[0]!, q[2]!, q[4]!, q[6]!];
@@ -339,8 +347,11 @@ export function registerBrowserTools(deps: BrowserToolsDeps): Array<() => void> 
     execute: async (_args, tctx) => {
       try {
         const { rpc, session, capture } = await acquire(tctx.sessionId);
+        // 真机方法名（第九轮全面复盘 20260903 #2 勘正）：Chrome 无
+        // DOM.getFlattenedDocumentTree（-32601）——正名 DOM.getFlattenedDocument
+        // （depth:-1 扁平节点表；需会话先 DOM.enable——engine 启用段三域之一）
         const doc = (await rpc.request(
-          'DOM.getFlattenedDocumentTree',
+          'DOM.getFlattenedDocument',
           { depth: -1 },
           { sessionId: session.sessionId },
         )) as { nodes?: FlatDocNode[] };
@@ -511,9 +522,11 @@ export function registerBrowserTools(deps: BrowserToolsDeps): Array<() => void> 
         const { rpc, session } = await acquire(tctx.sessionId);
         const direction = String(args.direction) as 'up' | 'down' | 'left' | 'right';
         const amount = typeof args.amount === 'number' ? args.amount : 600;
-        // CDP 语义：yDistance 正 = 向下滚；xDistance 正 = 向左滚（协议原文）
+        // CDP 协议语义（PDL 原文 + 真机实证，第九轮全面复盘 20260903 #10 勘正）：
+        // yDistance 正 = 向上滚、xDistance 正 = 向左滚。direction 是用户语义
+        //（down = 页面往下看）——映射 y 轴取负
         const xDistance = direction === 'left' ? amount : direction === 'right' ? -amount : 0;
-        const yDistance = direction === 'down' ? amount : direction === 'up' ? -amount : 0;
+        const yDistance = direction === 'down' ? -amount : direction === 'up' ? amount : 0;
         await rpc.request(
           'Input.synthesizeScrollGesture',
           { x: 0, y: 0, xDistance, yDistance, speed: 600 },
@@ -594,19 +607,25 @@ export function registerBrowserTools(deps: BrowserToolsDeps): Array<() => void> 
     effect: 'read',
     timeoutMs: 5_000,
     execute: async (args, tctx) => {
-      const { capture } = await acquire(tctx.sessionId);
-      const level = args.level as string | undefined;
-      const limit = typeof args.limit === 'number' ? args.limit : 50;
-      const all = capture.console.entries();
-      const picked = all.filter((e) => level === undefined || e.level === level).slice(0, limit);
-      const text =
-        picked.length > 0
-          ? picked.map((e) => `[${e.seq}] ${e.level}/${e.kind}: ${e.text}`).join('\n')
-          : '（console 缓冲为空——尚无输出或引擎刚启动）';
-      return {
-        content: [{ type: 'text', text }],
-        details: { buffered: all.length, returned: picked.length, level: level ?? null },
-      };
+      // 十件同轨（第九轮全面复盘 20260903 #27）：acquire 抛纯 Error（引擎起链/
+      // context 建链失败）也走 isError 数据面自纠——console 原是唯一裸奔件
+      try {
+        const { capture } = await acquire(tctx.sessionId);
+        const level = args.level as string | undefined;
+        const limit = typeof args.limit === 'number' ? args.limit : 50;
+        const all = capture.console.entries();
+        const picked = all.filter((e) => level === undefined || e.level === level).slice(0, limit);
+        const text =
+          picked.length > 0
+            ? picked.map((e) => `[${e.seq}] ${e.level}/${e.kind}: ${e.text}`).join('\n')
+            : '（console 缓冲为空——尚无输出或引擎刚启动）';
+        return {
+          content: [{ type: 'text', text }],
+          details: { buffered: all.length, returned: picked.length, level: level ?? null },
+        };
+      } catch (err) {
+        return asDataError(err);
+      }
     },
   };
 

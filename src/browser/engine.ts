@@ -206,10 +206,13 @@ export class BrowserEngine {
         this.captures.set(key, new SessionCapture());
         this.contextOwners.set(key, conn); // 归属记本代连接（代际护栏判据，#17）
         this.keyByCdpSession.set(session.sessionId, key);
-        // page 级域启用：Runtime = console/异常事件源；Page = dialog 事件源
-        // （fail-loud：域启用失败 = context 建立失败——不留静默半捕获态）
+        // page 级域启用三域（fail-loud：域启用失败 = context 建立失败——不留静默
+        // 半捕获态）：Runtime = console/异常事件源；Page = dialog 事件源；DOM =
+        // getFlattenedDocument 门控（真 Chrome 未 enable DOM 拒 -32000——第九轮
+        // 全面复盘 20260903 #2 同笔）
         await conn.rpc.request('Runtime.enable', undefined, { sessionId: session.sessionId });
         await conn.rpc.request('Page.enable', undefined, { sessionId: session.sessionId });
+        await conn.rpc.request('DOM.enable', undefined, { sessionId: session.sessionId });
       } catch (err) {
         // 建链半途失败即回滚（#3）：不留「session 在表但域永未启用」的半捕获态——
         // 三表回滚 + 尽力 dispose（连接可能已坏，容错不拦上抛）+ 零活 context

@@ -1,9 +1,11 @@
 /**
  * L3 browser — a11y 快照渲染（契约篇 §6.10 a11y/ref 模型段，第四十九批刀二）。
  *
- * 输入 = DOM.getFlattenedDocumentTree 的扁平节点表（真 Chrome 形态：nodeId/
- * parentId 同空间引用 + 每节点带 backendNodeId），输出 = 人读缩进树文本 +
- * 可交互节点 ref 表（@eN → backendNodeId 锚——click/type 坐标派的查表键）。
+ * 输入 = DOM.getFlattenedDocument 的扁平节点表（真 Chrome 形态，第九轮全面复盘
+ * 20260903 #2 勘正：Chrome 无 getFlattenedDocumentTree 方法——正名 + 需先
+ * DOM.enable；nodeId/parentId 同空间引用 + 每节点带 backendNodeId），输出 =
+ * 人读缩进树文本 + 可交互节点 ref 表（@eN → backendNodeId 锚——click/type
+ * 坐标派的查表键）。
  *
  * 纯函数零 IO：role/name 推导规则全在此单点（规范钉死：aria role 属性优先 →
  * tag 隐式映射 → generic；name 链 aria-label > alt > placeholder > title >
