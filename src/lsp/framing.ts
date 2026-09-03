@@ -14,6 +14,20 @@
 const HEADER_SEPARATOR = '\r\n\r\n';
 
 /**
+ * 攒头态帽（字节，16KiB——契约篇 §6.7 帧资源卫生双帽）：无 `\r\n\r\n` 分隔符
+ * 的持续字节流不再无界攒积。帧头是几行 ASCII 键值（正常 <1KiB——16KiB 已
+ * 百倍余量），超帽 = 故障/恶意服务器对宿主堆的洪流，按坏帧抛错（遗漏大扫
+ * 20260903 runtime D4-1 修死：修前 buffer 无上界 concat）。
+ */
+export const MAX_HEADER_BYTES = 16 * 1024;
+
+/**
+ * 攒正文态帽（字节，16MiB）：`Content-Length` 声明值即缓冲吸收上界——声明
+ * 超大值不再预先授权无界吸收。正常巨帧（全量 diagnostics 等）余量充足。
+ */
+export const MAX_BODY_BYTES = 16 * 1024 * 1024;
+
+/**
  * 编一帧（写面）：JSON 字符串 → `Content-Length: n\r\n\r\n` + 正文。
  * Content-Length 按**字节**计（UTF-8）——LSP 协议明文要求；Buffer.byteLength 计。
  */
@@ -42,7 +56,16 @@ export function createFrameDecoder(onFrame: (json: string) => void): (chunk: str
       if (pendingBodyBytes === undefined) {
         // 攒头段：找 \r\n\r\n（Buffer.indexOf 收子串）
         const sep = buffer.indexOf(HEADER_SEPARATOR);
-        if (sep === -1) return; // 头未齐——继续攒
+        if (sep === -1) {
+          // 头未齐——继续攒，但攒头态帽执法（契约篇 §6.7 帧资源卫生双帽）：
+          // 分隔符永不到的字节洪流在 16KiB 处拦死，不让宿主堆无界吸收
+          if (buffer.length > MAX_HEADER_BYTES) {
+            throw new Error(
+              `LSP 帧头攒积超 ${MAX_HEADER_BYTES} 字节仍无分隔符（坏帧/恶意流——连接不可信）：${buffer.subarray(0, 64).toString('utf8')}…`,
+            );
+          }
+          return; // 头未齐——继续攒
+        }
         const header = buffer.subarray(0, sep).toString('utf8');
         // 头内找 Content-Length 行（多行头兼容——只认这一个键，其余行忽略）
         let length: number | undefined;
@@ -55,6 +78,11 @@ export function createFrameDecoder(onFrame: (json: string) => void): (chunk: str
         }
         if (length === undefined) {
           throw new Error(`LSP 帧头缺 Content-Length（坏帧——连接不可信）：${header.slice(0, 200)}`);
+        }
+        // 攒正文态帽（契约篇 §6.7）：声明值即吸收上界——头解析点即拦（不待
+        // 正文攒到位），超大声明不预先授权宿主堆无界吸收
+        if (length > MAX_BODY_BYTES) {
+          throw new Error(`LSP 帧声明 Content-Length ${length} 超上限 ${MAX_BODY_BYTES}（坏帧/恶意流——连接不可信）`);
         }
         // 头消费掉（含分隔符），切进攒正文段
         buffer = buffer.subarray(sep + HEADER_SEPARATOR.length);

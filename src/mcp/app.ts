@@ -52,8 +52,8 @@ interface UiNotifyFace {
 export interface McpAppDeps {
   /** spawn 组装闭包（app/mcp-spawn.ts：buildChildEnv + env set 层 + detached + cwd=dataDir） */
   readonly spawnServer: (config: McpServerConfig) => Promise<SpawnedChild>;
-  /** 树杀原语（exec killTree 经组合根注入） */
-  readonly killTree: (pid: number) => void;
+  /** 树杀原语（exec killTree 经组合根注入；pid 可 undefined——本尊原生早退，无哨兵替换） */
+  readonly killTree: (pid: number | undefined) => void;
   /** 数据目录（登记簿 <dataDir>/mcp/children.json 物理根） */
   readonly dataDir: string;
 }

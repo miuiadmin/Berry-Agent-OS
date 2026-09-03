@@ -630,6 +630,46 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('probe 失败不消费「已验真」旗（遗漏大扫 20260903 runtime D2-1 修死）：第二行 external 装载照常 probe 醒 fail-closed（修复前必红）', async () => {
+    const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-flaglate');
+    let probes = 0; // probe 醒计数（旗语义断言面——只缓存成功不缓存失败）
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      external: {
+        workspace,
+        dataDir,
+        sandbox: backendsStub([
+          {
+            id: 'seatbelt-stub',
+            probe: () => {
+              probes += 1;
+              return false;
+            },
+          },
+        ]),
+      },
+    });
+    const row = (id: string): AppPlanRow => ({ id, entry: probeEntry, sandbox: { carrier: 'external' } });
+    // 第一行：probe 失败拒装（probe #1）
+    await expect(async () => fleet.loader.load(row('first'))).rejects.toMatchObject({
+      code: SANDBOX_UNAVAILABLE,
+      message: expect.stringContaining('fail-closed 拒装'),
+    });
+    // 第二行：修前红——旗在首行 probe 前置位（失败也置位），ensureOsLayer 被
+    // 「已验真」短路，行带着未验真的 OS 层继续 spawn 装载（probes 停在 1 且
+    // load 非 SANDBOX_UNAVAILABLE 形态收场）。修后：旗后置——probe #2 照常
+    // 醒、同款 fail-closed 拒装，两行各 probe 恰一次
+    await expect(async () => fleet.loader.load(row('second'))).rejects.toMatchObject({
+      code: SANDBOX_UNAVAILABLE,
+      message: expect.stringContaining('fail-closed 拒装'),
+    });
+    expect(probes).toBe(2); // 旗只缓存成功探测，失败不缓存
+    expect(fleet.stats()).toMatchObject({ spawned: 0, live: 0 });
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('OS 层空后端链 fail-closed（R4 行为小刀）：零 OS 沙箱后端平台 → SANDBOX_UNAVAILABLE 拒装——不再静默放行悄悄降 PM-only（修复前必红）', async () => {
     const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-emptychain');
     const fleet = createBridgeFleet({

@@ -179,8 +179,8 @@ interface FakeHarness {
   deps: McpAppDeps;
   /** command → 假服务器（断言 die 用） */
   servers: Map<string, FakeServer>;
-  /** killTree 收到的 pid 序列（树杀腿断言面） */
-  kills: number[];
+  /** killTree 收到的 pid 序列（树杀腿断言面；undefined = pid 缺席竞态透传形） */
+  kills: Array<number | undefined>;
 }
 
 /** 造件依赖（计划按 command 键路由；Error 值 = spawn 抛错腿；{deaf:true} = 聋服务器腿；{holdCall:true} = 调用滞留腿） */
@@ -189,7 +189,7 @@ function makeHarness(
 ): FakeHarness {
   const dataDir = makeTempDir('mcp-plugin-');
   const servers = new Map<string, FakeServer>();
-  const kills: number[] = [];
+  const kills: Array<number | undefined> = [];
   let pid = 7000;
   const deps: McpAppDeps = {
     spawnServer: async (config: McpServerConfig) => {
@@ -594,6 +594,7 @@ function makeE2eDeps(dir: string): McpAppDeps {
   return {
     spawnServer: createMcpSpawner(dir, createSandboxService(), dir),
     killTree: (pid) => {
+      if (pid === undefined) return; // pid 缺席竞态不执法（killTree 本尊同语义）
       try {
         process.kill(pid, 'SIGKILL');
       } catch {

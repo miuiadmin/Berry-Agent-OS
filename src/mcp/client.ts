@@ -15,6 +15,7 @@
 import { createInterface } from 'node:readline';
 import { AppError, MCP_CONNECT_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
 import type { AppLogger } from '../contracts/app.js';
+import { LineByteGuard } from '../context/index.js';
 import { JsonRpcConnection } from './jsonrpc.js';
 import type { McpCallResult, McpRemoteTool, McpServerConfig } from './types.js';
 
@@ -49,8 +50,13 @@ export interface SpawnedChild {
 export interface McpConnectDeps {
   /** spawn 组装（app/mcp-spawn.ts：env 白名单 + detached 建组 + cwd=dataDir） */
   readonly spawnServer: (config: McpServerConfig) => Promise<SpawnedChild>;
-  /** 树杀原语（exec killTree 经组合根注入） */
-  readonly killTree: (pid: number) => void;
+  /**
+   * 树杀原语（exec killTree 经组合根注入）。签名接受 `pid: number | undefined`
+   * ——killTree 本尊对 undefined 原生早退（spawn 竞态无 pid 不执法），哨兵
+   * `-1` 替换已废（遗漏大扫 20260903 runtime D2-2：`?? -1` 反转语义 = 杀 pid 1，
+   * 根容器形态即杀 init）。
+   */
+  readonly killTree: (pid: number | undefined) => void;
   /** 诊断日志（stderr 行/通知杂音——debug 级） */
   readonly logger: Pick<AppLogger, 'debug' | 'warn'>;
   /**
@@ -121,9 +127,32 @@ export async function connectMcpServer(
     onNoise: (msg) => deps.logger.debug(`mcp[${server}] ${msg}`),
   });
 
-  // stdout 行帧分发：readline 切行喂桥
+  // stdout 行帧分发 + 行帧卫生（契约篇 §6.6 行帧卫生同律——第九十批，遗漏
+  // 大扫 20260903 runtime D1-1）：server stdout 正是 NDJSON over stdio 载体，
+  // 单行 8MiB 帽与 bridge port-stdio 同律（共享字节计数件 LineByteGuard 同源
+  // 单点——20260902 #9 只落 bridge 漏 mcp 的缺陷族结构性消灭）。守卫**先于
+  // createInterface 构造**（同一 chunk 的字节面先于行派发过账，超限可在
+  // readline 派发残余行之前封读——line 顶 isSealed 短路兜住）。
+  // 封读收场 = 载体级失败：warn + 结清桥 pending（conn.close——MCP_CONNECT_
+  // FAILED 信封，幂等）+ killTree 杀 server（静默服务器不写管道则 SIGPIPE 永
+  // 不来，pending 只能干等自身超时——树杀是确定性收场）。不手动 fire
+  // exitListeners：真子进程死亡补上 close 事件单次 fire（防双发）；closeReason
+  // 预置保超限归因不被「子进程退出」覆写（??= 首因保留）。
+  const guard = new LineByteGuard(child.stdout, {
+    onSeal: (overBytes, maxLineBytes) => {
+      deps.logger.warn(
+        `mcp[${server}] stdout 单行累计字节 ${overBytes} 超上限 ${maxLineBytes}——封读收场（载体级失败，杀 server）`,
+      );
+      closeReason ??= `服务器 ${server} stdout 单行 ${overBytes} 字节超上限 ${maxLineBytes}（封读收场——载体级失败）`;
+      conn.close(closeReason);
+      deps.killTree(child.pid);
+    },
+  });
   const lines = createInterface({ input: child.stdout });
-  lines.on('line', (line) => conn.feed(line));
+  lines.on('line', (line) => {
+    if (guard.isSealed) return; // 已封读——readline 先行缓冲的残余行不再喂桥
+    conn.feed(line);
+  });
 
   // stderr：MCP 惯例日志走 stderr——debug 落盘不进上下文（契约篇 §6.6 transport 条）
   child.stderr.on('data', (chunk: Buffer | string) => {
@@ -156,7 +185,7 @@ export async function connectMcpServer(
     // 握手失败/超时：响亮杀进程树不留挂起（契约篇 §6.6 连接语义条）；
     // alive 恒 true = 无条件树杀（killpg 打在已死组上抛 ESRCH 被内吞——安全）
     unregisterSpawned?.(); // spawn 即写的对称撤销（遗漏大扫 20260902-b #7）
-    deps.killTree(child.pid ?? -1);
+    deps.killTree(child.pid);
     if (err instanceof AppError) throw err;
     throw new AppError(MCP_CONNECT_FAILED, `服务器 ${server} 握手失败：${describeCause(err)}`, { cause: err });
   }
@@ -207,11 +236,11 @@ export async function connectMcpServer(
       const exited = new Promise<void>((resolve) => child.on('close', () => resolve()));
       child.stdin.end();
       const timer = setTimeout(() => {
-        deps.killTree(child.pid ?? -1);
+        deps.killTree(child.pid);
       }, DISPOSE_GRACE_MS);
       await Promise.race([exited, sleep(DISPOSE_GRACE_MS + 200)]);
       clearTimeout(timer);
-      deps.killTree(child.pid ?? -1); // 已退即 ESRCH 内吞（幂等收尾）
+      deps.killTree(child.pid); // 已退即 ESRCH 内吞（幂等收尾）
     },
   };
 }

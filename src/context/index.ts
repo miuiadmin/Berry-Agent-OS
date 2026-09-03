@@ -29,6 +29,11 @@ export { canonicalWorkspaceRoot, setProjectAliases } from './workspace.js';
 // 终段解码、prompt 面读者三处同一棵树）
 export { decodeText, peekLocalCodepageLabels, resolveLocalCodepageLabels } from './encoding.js';
 export type { DecodedText, DecodeTextOptions, LocalCodepageLabels } from './encoding.js';
+// NDJSON 行帧字节帽共享件（契约篇 §1.7 行帧卫生件①；遗漏大扫 20260903 runtime
+// D1-1 收口成共享件——bridge port-stdio 与 mcp client 两消费面同源单点，
+// 同形修复跨模块未同步的缺陷族结构性消灭；规范条款见契约篇 §6.6 行帧卫生同律）
+export { LineByteGuard, DEFAULT_MAX_LINE_BYTES } from './line-guard.js';
+export type { LineByteGuardOptions } from './line-guard.js';
 // 调用链会话作用域 + 调用方身份链（多应用并行 S1——骨架篇 §9.3 机制定案；chat 驱动边界写 / app 全局绑定面读；
 // caller 链 = 会话篇 §5.1 导入者归因——装载器/工具管道边界写，sessions 服务面读）
 export { runInSessionChain, chainSessionId, runInCallerChain, chainCaller } from './chain.js';

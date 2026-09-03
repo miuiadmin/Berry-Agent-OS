@@ -78,8 +78,13 @@ export interface JsonRpcConnectionFactory {
 export interface LspConnectDeps {
   /** spawn 组装（组合根 confined spawner——OS 沙箱 confine 同 mcp 款） */
   readonly spawnServer: (config: LspServerConfig) => Promise<SpawnedProcess>;
-  /** 树杀原语（exec killTree 经组合根注入） */
-  readonly killTree: (pid: number) => void;
+  /**
+   * 树杀原语（exec killTree 经组合根注入）。签名接受 `pid: number | undefined`
+   * ——killTree 本尊对 undefined 原生早退（spawn 竞态无 pid 不执法），哨兵
+   * `-1` 替换已废（遗漏大扫 20260903 runtime D2-2：`?? -1` 反转语义 = 杀 pid 1，
+   * 根容器形态即杀 init）。
+   */
+  readonly killTree: (pid: number | undefined) => void;
   /** 诊断日志（stderr 行/通知杂音——debug 级） */
   readonly logger: Pick<AppLogger, 'debug' | 'warn'>;
   /** JSON-RPC 桥核工厂（mcp JsonRpcConnection 经组合根注入——帧无关复用） */
@@ -267,7 +272,7 @@ export async function connectLspServer(
       // 坏帧路径：连接已不可信而子进程可能仍活——同步树杀防永久孤儿（复盘 L-1 腿二：
       // 件层 onExit 即清实例与登记簿条目，dispose 回卷与孤儿清扫两条兜底都够不着它）。
       // 已退即 ESRCH 内吞（与 dispose 收尾同款幂等语义）。
-      deps.killTree(child.pid ?? -1);
+      deps.killTree(child.pid);
     }
   }
   child.on('close', (code, signal) => {
@@ -297,7 +302,7 @@ export async function connectLspServer(
   } catch (err) {
     // 握手失败/超时：响亮杀进程树不留挂起（MCP 同款连接语义）
     unregisterSpawned?.(); // spawn 即写的对称撤销（遗漏大扫 20260902-b #7）
-    deps.killTree(child.pid ?? -1);
+    deps.killTree(child.pid);
     if (err instanceof AppError) throw err;
     throw new AppError(LSP_CONNECT_FAILED, `LSP 服务器 ${server} 握手失败：${describeCause(err)}`, {
       cause: err,
@@ -395,11 +400,11 @@ export async function connectLspServer(
       const exited = new Promise<void>((resolve) => child.on('close', () => resolve()));
       child.stdin.end();
       const timer = setTimeout(() => {
-        deps.killTree(child.pid ?? -1);
+        deps.killTree(child.pid);
       }, DISPOSE_GRACE_MS);
       await Promise.race([exited, sleep(DISPOSE_GRACE_MS + 200)]);
       clearTimeout(timer);
-      deps.killTree(child.pid ?? -1); // 已退即 ESRCH 内吞（幂等收尾）
+      deps.killTree(child.pid); // 已退即 ESRCH 内吞（幂等收尾）
     },
   };
 }

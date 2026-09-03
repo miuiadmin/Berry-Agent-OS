@@ -21,25 +21,24 @@
 
 import { createInterface } from 'node:readline';
 import { AppError, BRIDGE_ENCODE_FAILED } from '../contracts/errors.js';
+import { LineByteGuard } from '../context/index.js';
 import type { BridgePort } from './session.js';
 
 /**
- * 单行字节上限缺省（8MiB——契约篇 §1.7 行帧卫生件①）：宿主堆对单行无界
- * 吸收的上界钉死（子进程 OS 沙箱/PM 内存旗罩不到宿主侧 readline 缓冲与
- * JSON.parse——上限是宿主自护）。
+ * StdioBridgePort 构造参数
  */
-const DEFAULT_MAX_LINE_BYTES = 8 * 1024 * 1024;
-
-/** StdioBridgePort 构造参数 */
 export interface StdioBridgePortOptions {
   /**
    * 坏行观测（一行 JSON.parse 失败时回调——只可能是对端协议 bug 或管道
    * 撕裂；本层静默跳过保通道活性，观测面交调用方记日志/诊断）。
+   * 封读收场（单行超限）同走此口：line 空串 + 超限 Error（超限行未完成
+   * 无全文可截）。
    */
   readonly onBadLine?: (line: string, err: unknown) => void;
   /**
    * 单行字节上限（严格大于才执法——恰达帽不封；缺省 8MiB）。字节计数在
-   * 流面逐段过账（见构造器头注），超限按载体级失败收场非单行丢弃。
+   * 流面逐段过账（见行帧帽共享件 line-guard），超限按载体级失败收场非
+   * 单行丢弃。
    */
   readonly maxLineBytes?: number;
 }
@@ -52,14 +51,10 @@ export interface StdioBridgePortOptions {
 export class StdioBridgePort implements BridgePort {
   /** 出站写手（宿主侧 = child.stdin；域入口侧 = process.stdout） */
   private readonly out: NodeJS.WritableStream;
-  /** 坏行观测回调（缺省静默跳过） */
+  /** 坏行观测回调（缺省静默跳过——dispatch 坏行腿与封读观测共用此口） */
   private readonly onBadLine?: (line: string, err: unknown) => void;
-  /** 单行字节上限（严格大于才执法——见构造器头注行帧卫生段） */
-  private readonly maxLineBytes: number;
-  /** 封读旗：超限置位后 dispatch 顶短路（后续行不派发——载体级失败语义） */
-  private sealed = false;
-  /** 距上一换行的累计字节（跨 chunk 累计、换行重置——当前未完成行的全长账） */
-  private lineBytes = 0;
+  /** 行帧帽执法件（共享件——与 mcp stdio 桥同源单点，遗漏大扫 20260903 D1-1） */
+  private readonly guard: LineByteGuard;
   /** 'message' 监听器组（readline 'line' 逐条派发——BridgePort 契约面） */
   private readonly listeners: Array<(message: unknown) => void> = [];
 
@@ -71,18 +66,21 @@ export class StdioBridgePort implements BridgePort {
   constructor(input: NodeJS.ReadableStream, out: NodeJS.WritableStream, options: StdioBridgePortOptions = {}) {
     this.out = out;
     this.onBadLine = options.onBadLine;
-    this.maxLineBytes = options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES;
-    // 行帧卫生件①（遗漏大扫 20260902 #9）：readline 无行长上限——本监听器
-    // 在字节面给宿主堆钉上界。自挂 'data' 监听器（与 readline 内部 'data'
-    // 监听共存各记各的），且**先于 createInterface 挂上**：同一 chunk 的字节
-    // 面先于行处理过账，超限可在 readline 派发该 chunk 内的行之前封读
-    // （dispatch 顶 sealed 短路兜住残余行事件）。逐段过账（分段符 = 换行
-    // 0x0A）而非首/尾换行整体算——多行同 chunk 时整体跨度会把多个好行的
-    // 总长误当单行超限（误封好流量）。超限即刻 destroy 入站流（不等行完
-    // 成——宿主峰值吸收 = 上限 + 单 chunk 钉死）；封读后域死走既有编舞
-    // （宿主侧 child SIGPIPE→exit→域死结算；域入口侧 stdin 断→孤儿防线），
-    // 本层零新增收尾代码。
-    input.on('data', (chunk: unknown) => this.countLineBytes(input, chunk));
+    // 行帧卫生件①（契约篇 §1.7；共享件化 = 遗漏大扫 20260903 runtime D1-1——
+    // 20260902 #9 的同形修复只落本件、mcp stdio 桥漏同修的缺陷族收口）：
+    // 守卫**先于 createInterface 挂 data 监听**（同一 chunk 的字节面先于行
+    // 处理过账，超限可在 readline 派发该 chunk 内的行之前封读——dispatch 顶
+    // isSealed 短路兜住残余行事件）。超限即刻 destroy 入站流（不等行完成——
+    // 宿主峰值吸收 = 上限 + 单 chunk 钉死）；封读后域死走既有编舞（宿主侧
+    // child SIGPIPE→exit→域死结算；域入口侧 stdin 断→孤儿防线），本层零新增
+    // 收尾代码。计数/封读语义锁在 line-guard.test.ts（两消费面共同行为锁）。
+    this.guard = new LineByteGuard(input, {
+      ...(options.maxLineBytes === undefined ? {} : { maxLineBytes: options.maxLineBytes }),
+      onSeal: (overBytes, maxLineBytes) => {
+        // 封读观测走坏行口（line 空串——超限行未完成无全文可截）
+        options.onBadLine?.('', new Error(`单行累计字节 ${overBytes} 超上限 ${maxLineBytes}——封读收场（载体级失败）`));
+      },
+    });
     // 入站流端到端接 readline（行边界协议自扛字节流切分）。流 close 即接口
     // 关闭（域死/管道断）。
     const lines = createInterface({ input: input as never });
@@ -114,7 +112,7 @@ export class StdioBridgePort implements BridgePort {
 
   /** 单行解析与派发（坏行静默跳过 + 可选观测——通道活性优先） */
   private dispatch(line: string): void {
-    if (this.sealed) return; // 已封读——同 chunk 内 readline 先行缓冲的残余行不派发
+    if (this.guard.isSealed) return; // 已封读——同 chunk 内 readline 先行缓冲的残余行不派发
     const trimmed = line.trim();
     if (trimmed === '') return;
     let message: unknown;
@@ -131,43 +129,5 @@ export class StdioBridgePort implements BridgePort {
         // 监听器异常不阻断其余监听器（与宿主 emit 单点隔离同纪律）
       }
     }
-  }
-
-  /**
-   * 字节计数与超限执法（构造器头注行帧卫生段）：逐段过账「距上一换行的
-   * 累计字节」——完成行全长 = 此前累计 + 段内字节，尾段（无换行收尾）续入
-   * 累计跨 chunk 延续。任一段严格超上限（恰达帽不封）即封读收场。
-   */
-  private countLineBytes(input: NodeJS.ReadableStream, chunk: unknown): void {
-    if (this.sealed) return; // 已封读——destroy 后残余 data 事件窗不再过账
-    // stdio/PassThrough 流 chunk 恒 Buffer；字符串形态（上游 setEncoding 的
-    // 边角）按 UTF-8 折回字节面计数（字节语义与字符数有差——多字节字符）
-    const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : (chunk as Buffer);
-    let start = 0;
-    let nl = buf.indexOf(10, 0); // 换行 0x0A 的字节下标（-1 = 无换行）
-    while (nl !== -1) {
-      this.lineBytes += nl - start; // 本段收尾 = 一行完成
-      if (this.lineBytes > this.maxLineBytes) {
-        this.seal(input, this.lineBytes);
-        return;
-      }
-      this.lineBytes = 0; // 换行重置——下一行从零起账
-      start = nl + 1;
-      nl = buf.indexOf(10, start);
-    }
-    this.lineBytes += buf.length - start; // 尾段续入累计（未完成行）
-    if (this.lineBytes > this.maxLineBytes) this.seal(input, this.lineBytes);
-  }
-
-  /**
-   * 封读收场（载体级失败）：置 sealed + 合成坏行观测（line 空串——超限行
-   * 未完成无全文可截）+ destroy 入站流。destroy 不带 error 实参——避免向
-   * 无 error 监听的入站流（PassThrough 测试形态 / 宿主侧 child.stdout）发
-   * unhandled 'error'；'close' 事件足以让 readline 与上层收线。
-   */
-  private seal(input: NodeJS.ReadableStream, overBytes: number): void {
-    this.sealed = true;
-    this.onBadLine?.('', new Error(`单行累计字节 ${overBytes} 超上限 ${this.maxLineBytes}——封读收场（载体级失败）`));
-    (input as NodeJS.ReadableStream & { destroy?: (err?: Error) => void }).destroy?.();
   }
 }

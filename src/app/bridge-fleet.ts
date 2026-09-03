@@ -219,7 +219,6 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
    */
   const ensureOsLayer = (sandbox: SandboxService): void => {
     if (osLayerProbed) return;
-    osLayerProbed = true;
     const backends = sandbox.listBackends();
     // 空后端链 fail-closed（R4 行为小刀）：本平台零 OS 沙箱后端——「OS 层尽力」
     // 宣示无层可验，原形态零迭代静默放行 = PM-only 悄悄降格（三层执法缺一层
@@ -238,6 +237,11 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         );
       }
     }
+    // 旗后置：探测全过后才缓存「已验真」（mcp-spawn.ts 同款修法——遗漏大扫
+    // 20260903 runtime D2-1 修死）。修前旗在 probe 前置位：首行 probe 失败抛出
+    // 后旗已立，第二行 external 装载即被「已验真」短路静默放行——fail-closed
+    // 只对首行生效，后续行带着未验真的 OS 层起域。
+    osLayerProbed = true;
   };
 
   /**

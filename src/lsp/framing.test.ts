@@ -80,6 +80,39 @@ describe('lsp framing — createFrameDecoder', () => {
     expect(() => feed('Content-Type: text\r\n\r\n{}')).toThrow(/Content-Length/);
   });
 
+  it('攒头态帽 16KiB：分隔符永不到的字节洪流在帽处抛错（遗漏大扫 20260903 runtime D4-1 修死）', () => {
+    // 修前：buffer 无上界 concat——故障/恶意服务器持续写无分隔符字节流，
+    // 宿主堆无界吸收。修后：16KiB 帽拦死（契约篇 §6.7 帧资源卫生双帽）
+    const feed = createFrameDecoder(() => undefined);
+    expect(() => feed('x'.repeat(16 * 1024 + 1))).toThrow(/帧头攒积超/);
+  });
+
+  it('攒头态帽 16KiB：分段喂入同样拦（跨 chunk 累计攒头）', () => {
+    const feed = createFrameDecoder(() => undefined);
+    // 每段 4KiB × 5 段 = 20KiB > 16KiB——第 5 段抛（前 4 段各在帽下不抛）
+    for (let i = 0; i < 4; i += 1) {
+      expect(() => feed('y'.repeat(4 * 1024))).not.toThrow();
+    }
+    expect(() => feed('y'.repeat(4 * 1024))).toThrow(/帧头攒积超/);
+  });
+
+  it('攒正文态帽 16MiB：Content-Length 声明超帽在头解析点即抛（不待正文攒到）', () => {
+    // 修前：声明值直接进 pendingBodyBytes——超大声明预先授权无界吸收。
+    // 修后：头解析点即拦，一字节正文未到也抛
+    const feed = createFrameDecoder(() => undefined);
+    expect(() => feed(`Content-Length: ${16 * 1024 * 1024 + 1}\r\n\r\n`)).toThrow(/Content-Length .* 超上限/);
+  });
+
+  it('恰达帽不抛：攒头恰 16KiB 不封、声明恰 16MiB 放行（严格大于才执法）', () => {
+    // 恰 16KiB 攒头（未到分隔符）——不抛；随后补正常帧头解出（攒头内容作
+    // 头行无 Content-Length 会抛缺键错——与帽无关，故此用例只验帽位不先抛）
+    const feed = createFrameDecoder(() => undefined);
+    expect(() => feed('z'.repeat(16 * 1024))).not.toThrow();
+    // 声明恰 16MiB + 正文差一字节——不抛（未满正文安静攒）
+    const feed2 = createFrameDecoder(() => undefined);
+    expect(() => feed2(`Content-Length: ${16 * 1024 * 1024}\r\n\r\n` + 'a'.repeat(1024))).not.toThrow();
+  });
+
   it('Buffer 与 string 两形态 chunk 同解', () => {
     const got: string[] = [];
     const feed = createFrameDecoder((json) => got.push(json));

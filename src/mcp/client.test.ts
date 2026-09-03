@@ -29,8 +29,8 @@ interface FakeServer {
   auto: (opts?: { tools?: string[]; pageSize?: number; callError?: boolean; hangCalls?: boolean }) => void;
 }
 
-/** 造一台假子进程 + 应答器（spawnServer 闭包返回值） */
-function makeFakeServer(pid = 4242): FakeServer {
+/** 造一台假子进程 + 应答器（spawnServer 闭包返回值）；pid=null 造无 pid 形态（spawn 竞态用例） */
+function makeFakeServer(pid: number | null = 4242): FakeServer {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -39,7 +39,7 @@ function makeFakeServer(pid = 4242): FakeServer {
   const frames: Array<Record<string, unknown>> = [];
   let stdoutEnded = false;
   const child: SpawnedChild = {
-    pid,
+    ...(pid === null ? {} : { pid }),
     // PassThrough 是 Duplex——桥写来的行服务器侧可读；end 代理可被用例替换
     stdin: {
       write: (chunk: string) => stdin.write(chunk),
@@ -134,12 +134,13 @@ function makeFakeServer(pid = 4242): FakeServer {
 /** 最小服务器配置（绝对路径过关） */
 const CONFIG: McpServerConfig = { command: '/usr/local/bin/fake-mcp' };
 
-/** 依赖束工厂：killTree 录制不真杀；onSpawned 可选注入（spawn 即写钩子用例） */
+/** 依赖束工厂：killTree 录制不真杀（pid 可 undefined——哨兵裁决用例的录制面）；
+ * onSpawned 可选注入（spawn 即写钩子用例） */
 function makeDeps(
   spawn: (config: McpServerConfig) => Promise<SpawnedChild>,
   onSpawned?: (childPid: number) => () => void,
 ) {
-  const kills: Array<{ pid: number }> = [];
+  const kills: Array<{ pid: number | undefined }> = [];
   const logger = { debug: vi.fn(), warn: vi.fn() };
   const deps: McpConnectDeps = {
     spawnServer: spawn,
@@ -196,6 +197,18 @@ describe('connectMcpServer — connect 期一码收口', () => {
       code: MCP_CONNECT_FAILED,
     });
     expect(kills).toEqual([{ pid: 4242 }]); // 无条件杀（F-2 修后守卫参数已退役）
+  });
+
+  it('pid undefined（spawn 竞态）：树杀透传 undefined 不造 -1 哨兵（遗漏大扫 20260903 runtime D2-2 修死）', async () => {
+    const server = makeFakeServer(null); // 无 pid 形态（真实 ChildProcess 竞态面）
+    const { deps, kills } = makeDeps(async () => server.child);
+    await expect(connectMcpServer('srv', { ...CONFIG, startup_timeout_sec: 0.05 }, deps)).rejects.toMatchObject({
+      code: MCP_CONNECT_FAILED,
+    });
+    // 修前红：`child.pid ?? -1` 反转 killTree 本尊「undefined 原生早退」语义 =
+    // kill(-1 → 1)——根容器/特权容器形态即对 init 发信号。修后：undefined
+    // 原样透传（本尊不执法），录制面恰为 [undefined]
+    expect(kills).toEqual([{ pid: undefined }]);
   });
 
   it('spawn 即写钩子：spawn 返回 pid 的同步点调用，握手失败路对称撤销（遗漏大扫 20260902-b #7）', async () => {
@@ -394,6 +407,60 @@ describe('connectMcpServer — 运行期退出与关停', () => {
     const conn = await connectMcpServer('srv', CONFIG, deps);
     server.emitStderr('server: ready\n');
     expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('stderr'));
+    const p = conn.dispose();
+    server.die(0);
+    await p;
+  });
+});
+
+describe('connectMcpServer — stdout 行帧卫生（契约篇 §6.6 行帧卫生同律）', () => {
+  it('单行超 8MiB：封读收场——pending 结清 MCP_CONNECT_FAILED + warn 观测 + 树杀 server（遗漏大扫 20260903 runtime D1-1 修死）', async () => {
+    const server = makeFakeServer();
+    server.auto({ hangCalls: true }); // 调用挂起——结清面可观察
+    const { deps, kills, logger } = makeDeps(async () => server.child);
+    const conn = await connectMcpServer('srv', CONFIG, deps);
+    const pending = conn.call('slow', {}, 10_000).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    await vi.waitFor(() => {
+      expect(server.frames.some((f) => f['method'] === 'tools/call')).toBe(true);
+    });
+    // 9MiB 无换行单行——超 8MiB 缺省帽。修前：mcp 桥无行帧帽（20260902 #9 只落
+    // bridge 漏 mcp），巨行静默吸收进 readline 缓冲、pending 只能干等自身超时；
+    // 修后：共享件 LineByteGuard 同律执法——载体级失败即刻结清 + 杀 server
+    // （静默服务器不写管道则 SIGPIPE 永不来，树杀是唯一确定性收场）
+    // （child.stdout 声明面是 ReadableStream、运行时真身是 PassThrough——写面收窄）
+    (server.child.stdout as PassThrough).write('x'.repeat(9 * 1024 * 1024));
+    const err = await pending;
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe(MCP_CONNECT_FAILED);
+    expect((err as AppError).message).toContain('超上限');
+    expect(kills).toEqual([{ pid: 4242 }]);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('超上限'));
+  });
+
+  it('帽下巨行零干扰：恰 8MiB 内的合法行照常喂桥（恰达帽不封）', async () => {
+    const server = makeFakeServer();
+    server.auto({ hangCalls: true });
+    const { deps, kills } = makeDeps(async () => server.child);
+    const conn = await connectMcpServer('srv', CONFIG, deps);
+    const pending = conn.call('t', {}, 5_000).then(
+      () => 'resolved' as const,
+      (e: unknown) => e,
+    );
+    await vi.waitFor(() => {
+      expect(server.frames.some((f) => f['method'] === 'tools/call')).toBe(true);
+    });
+    // 7MiB 合法 JSON 行（text 块 < 8MiB 帽）——正常路径不受行帧帽影响
+    const call = server.frames.find((f) => f['method'] === 'tools/call')!;
+    server.send({
+      jsonrpc: '2.0',
+      id: call['id'],
+      result: { content: [{ type: 'text', text: 'y'.repeat(7 * 1024 * 1024) }] },
+    });
+    await expect(pending).resolves.toBe('resolved');
+    expect(kills).toEqual([]); // 好流量不执法
     const p = conn.dispose();
     server.die(0);
     await p;

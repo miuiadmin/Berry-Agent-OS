@@ -103,7 +103,7 @@ interface Harness {
   /** 假桥发出的全部 JSON 消息（request/notify 双腿） */
   bridgeSent: string[];
   deps: LspConnectDeps;
-  kills: number[];
+  kills: Array<number | undefined>;
   root: string;
 }
 
@@ -117,7 +117,7 @@ const makeTempDir = (prefix: string): string => realpathSync(mkdtempSync(join(re
 function makeHarness(pid?: number): Harness {
   const server = makeFakeLspServer(pid);
   const bridgeSent: string[] = [];
-  const kills: number[] = [];
+  const kills: Array<number | undefined> = [];
   /** pending 簿（假桥 id 关联表） */
   const pending = new Map<number, Pending>();
   const deps: LspConnectDeps = {

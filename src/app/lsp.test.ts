@@ -240,7 +240,7 @@ interface FakeRegistry {
 interface Harness {
   deps: LspAppDeps;
   registry: FakeRegistry;
-  kills: number[];
+  kills: Array<number | undefined>;
   spawnCount: number;
   /** 假服务器清单（按 spawn 序——断言 die/帧面用） */
   servers: FakeLspServer[];
@@ -251,7 +251,7 @@ interface Harness {
 function makeHarness(behavior: FakeServerBehavior, spawnError?: Error): Harness {
   const workspace = makeTempDir('lsp-app-');
   const registry: FakeRegistry = { adds: [], removes: [], sweepCalls: 0 };
-  const kills: number[] = [];
+  const kills: Array<number | undefined> = [];
   const servers: FakeLspServer[] = [];
   let pid = 7100;
   let spawnCount = 0; // 活计数（闭包内递增——懒兑现/熔断用例断言面）
