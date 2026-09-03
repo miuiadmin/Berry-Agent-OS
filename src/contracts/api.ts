@@ -178,8 +178,8 @@ export const CAPABILITIES: readonly CapabilityEntry[] = [
 
 /**
  * apiVersion 比较（§6.13.4 版本比较语义）：MAJOR.MINOR 逐段数值比较——禁字符串
- * 比较（"1.10" > "1.9"）。格式非法抛 CONTRACT_BAD_API_VERSION（调用方 = 清单
- * 校验后的执法面，正常路径格式已验）。
+ * 比较（"1.10" > "1.9"）。格式非法抛 API_VERSION_MALFORMED（调用方 = 清单
+ * 校验后的执法面，正常路径格式已验；错误码名勘正——遗漏大扫 20260904 U0）。
  * @returns 负数 = a < b；0 = 相等；正数 = a > b
  */
 export function compareApiVersions(a: string, b: string): number {

@@ -285,8 +285,9 @@ function guardTransform(opts: TransformOptions): TransformResult {
  * 与宿主模块不能共享闭包，全局键是两界最短桥。命名去品牌化（通用领域语义）。
  * 键值形态 = (specifier, fromDir, treeRoot) => AppError | undefined——undefined
  * 放行；AppError 由守卫原样 throw（同码 APP_IMPORT_FORBIDDEN，与字面量早拦
- * 同出口）。worker realm 自持 loader 模块实例——两域各装各的（globalThis 按
- * realm 隔离，键不跨域互扰）。
+ * 同出口）；虚拟键另先经实验键裁决核直抛 API_EXPERIMENTAL_UNDECLARED（同步
+ * 抛对守卫与返值抛等价——同帧向上传播，遗漏大扫 20260904 #7）。worker realm
+ * 自持 loader 模块实例——两域各装各的（globalThis 按 realm 隔离，键不跨域互扰）。
  */
 const RUNTIME_GATE_KEY = '__appLoaderImportGate';
 
@@ -297,6 +298,14 @@ function installRuntimeGate(): void {
     fromDir: string,
     treeRoot: string,
   ): AppError | undefined => {
+    // 实验键裁决核与字面量腿同面（遗漏大扫 20260904 #7）：adjudicateImport 第一道
+    // 对虚拟面六键直放，运行期兜底若只跑三道白名单裁决，计算说明符 import 实验
+    // 键即绕过裁决核（字面量腿在 guardTransform 已拦——两腿同律 fail-closed）。
+    // gate 窗缺席（装载窗外的迟发 import）= 空声明集仍必经裁决核——与字面量腿
+    // 「gateWindow 前置跳过 = fail-open」的修死同款（就绪度审计 20260903 P0）
+    if ((VIRTUAL_MODULE_KEYS as readonly string[]).includes(specifier)) {
+      assertExperimentalDeclared(specifier, gateWindow?.experimental ?? EMPTY_EXPERIMENTAL, gateWindow?.appId);
+    }
     const violation = adjudicateImport(specifier, fromDir, treeRoot);
     return violation === undefined
       ? undefined
@@ -327,7 +336,8 @@ const DIRECTIVE_PROLOGUE_RE = /^(?:\s*(?:'[^'\\\n]*'|"[^"\\\n]*")\s*;)+/;
  *   （不依赖装载窗在场，绕开 currentTreeRoot 生命周期）；
  * - __dirname（求值包裹参数）即裁决 fromDir；守卫经 globalThis 键回查宿主
  *   adjudicateImport（产码不能持有宿主闭包引用）；
- * - 虚拟面六键 / node: 内建由三道裁决放行——合法路径零行为变化。
+ * - 虚拟面六键另先经实验键裁决核（遗漏大扫 20260904 #7——与字面量腿同面）；
+ *   node: 内建由三道裁决放行——合法路径零行为变化。
  */
 function injectRuntimeGuardPrelude(code: string, treeRoot: string): string {
   const prologue = DIRECTIVE_PROLOGUE_RE.exec(code);

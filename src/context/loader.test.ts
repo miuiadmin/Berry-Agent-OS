@@ -26,6 +26,8 @@ import type { AppSkillsInfo } from './loader.js';
 import type { ContextScope } from './types.js';
 import {
   EVENT_DUPLICATE,
+  AppError,
+  API_EXPERIMENTAL_UNDECLARED,
   APP_APPLY_FAILED,
   APP_APPLY_TIMEOUT,
   APP_CONFIG_INVALID,
@@ -732,6 +734,64 @@ describe('loadApps import 来源门禁', () => {
     } finally {
       cleanupFixture(dir);
     }
+  });
+
+  // 计算说明符·虚拟键腿（遗漏大扫 20260904 #7）：字面量腿（guardTransform）对
+  // 虚拟键先跑实验键裁决核，运行期兜底闭包原本只跑三道白名单裁决——而
+  // adjudicateImport 第一道对虚拟面六键直放，计算说明符 import 实验键即绕过
+  // 裁决核（两腿须同律 fail-closed）。现役六键全 stable：先以裁决核 spy 断言
+  // 「必经 + 三参对齐」，再以 mockImplementationOnce 定形一次「实验键未声明」
+  // 抛——证运行期腿真消费裁决核的裁决而非绕过。
+  it('运行期兜底·计算虚拟键：实验键裁决核必经（三参对齐字面量腿；修前红：兜底腿裁决核零调用——遗漏大扫 20260904 #7）', async () => {
+    vi.mocked(assertExperimentalDeclared).mockClear();
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'computed-vkey.ts',
+      [
+        'export const name = "computed-vkey";',
+        // 虚拟键运行期拼出——SPECIFIER_RE 只认引号字面量，transform 期扫描结构性看不见
+        "const key = ['berryagent', '/', 'llm'].join('');",
+        'const mod = await im' + 'port(key);',
+        'export const marker = typeof mod.hasApi;',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadApps(root, [
+      { id: 'computed-vkey', entry, apiGate: { appId: 'demo-app', experimental: [] } },
+    ]);
+
+    expect(result.failed).toEqual([]);
+    // 裁决核必经：虚拟键 + 声明集 + 应用归因，三参与字面量腿（guardTransform）同面
+    expect(vi.mocked(assertExperimentalDeclared)).toHaveBeenCalledWith('berryagent/llm', new Set(), 'demo-app');
+  });
+
+  it('运行期兜底·计算虚拟键·实验键未声明：拒载 API_EXPERIMENTAL_UNDECLARED（修前红：兜底腿静默放行装载成功——遗漏大扫 20260904 #7）', async () => {
+    // 现役六键全 stable——mockImplementationOnce 把裁决核下一次调用定形为抛
+    // （模拟「tier=experimental 而装载行未声明」形态；本用例内唯一虚拟键消费点）
+    vi.mocked(assertExperimentalDeclared).mockImplementationOnce(() => {
+      throw new AppError(API_EXPERIMENTAL_UNDECLARED, '实验键未声明（#7 探针定形）');
+    });
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'computed-vkey-reject.ts',
+      [
+        'export const name = "computed-vkey-reject";',
+        "const key = ['berryagent', '/', 'llm'].join('');",
+        'const mod = await im' + 'port(key);',
+        'export const marker = typeof mod.hasApi;',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadApps(root, [
+      { id: 'computed-vkey-reject', entry, apiGate: { appId: 'demo-app', experimental: [] } },
+    ]);
+
+    expect(result.activated).toEqual([]);
+    expect(result.failed[0]!.code).toBe(API_EXPERIMENTAL_UNDECLARED);
   });
 
   it('运行期兜底·纯 CJS 字面量 require：jiti 不调 transform 的面即拒（修前装载成功）', async () => {

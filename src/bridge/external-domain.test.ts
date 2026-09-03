@@ -20,7 +20,7 @@ import type { ContextScope } from '../context/types.js';
 import type { Logger } from '../context/logger.js';
 import { loadApps } from '../context/loader.js';
 import type { WorkerRowLoader } from '../context/loader.js';
-import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
+import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED, APP_LOAD_FAILED } from '../contracts/errors.js';
 import { spawnExternalDomain, externalEntryUrl, type ExternalDomain } from './external-domain.js';
 import { buildChildEnv } from '../exec/env.js';
 
@@ -387,6 +387,66 @@ describe('spawnExternalDomain — Echo parity（真 fork 子进程，worker 腿�
     } finally {
       hfDomain.terminate('hostFace e2e 收尾');
     }
+  });
+});
+
+/* ---------------- svc.load 载荷 apiGate 投影（遗漏大扫 20260904 #6 回归锁） ---------------- */
+
+describe('spawnExternalDomain — load 投影 apiGate 过桥（worker 腿锁的外侧半边——遗漏大扫 20260904 #6）', () => {
+  /** 专用域：共享域在「terminate 域死」用例后已死，本组自起自收（hostface 用例同款） */
+  let gateDomain: ExternalDomain;
+
+  beforeAll(async () => {
+    gateDomain = spawnTestDomain({ workerId: 'e2e-gate-ext' });
+    await untilReady(gateDomain, echoEntry);
+  }, 30_000);
+
+  afterAll(() => {
+    gateDomain.terminate('apiGate 投影锁收尾');
+  });
+
+  it('声明门随行：合法 apiGate 行装载成功且虚拟键在子域物化（fixture 经 berryagent/llm 过裁决核）', async () => {
+    const gateEntry = join(fixtureDir, 'fx-gate-ext.ts');
+    writeFileSync(
+      gateEntry,
+      [
+        "import * as llmFace from 'berryagent/llm';",
+        "export const name = 'fx-gate-ext';",
+        'export default async function apply(ctx) {',
+        // 空面语义（loader.test 同款标记）：虚拟键缺省物化空命名空间——键计数
+        // 经 tap 回读即「模块真解析真物化」的物证（非类型面 import）
+        "  ctx.provide('fx/gate-ext-tap', { kind: () => 'keys:' + Object.keys(llmFace).length });",
+        '}',
+      ].join('\n'),
+    );
+    const meta = await gateDomain.load({
+      id: 'gx-gate',
+      entry: gateEntry,
+      sandbox: { carrier: 'external' },
+      apiGate: { appId: 'demo-app', experimental: [] },
+    });
+    expect(meta.name).toBe('fx-gate-ext');
+    // 虚拟键真物化（apply + 宿主侧 tap 往返——空面计数 0）
+    const scope = root.fork({ name: 'gx-gate', rowId: 'gx-gate', builtinRow: false });
+    await gateDomain.applyRow({ id: 'gx-gate', sandbox: { carrier: 'external' } }, scope);
+    const tap = root.get<Record<string, () => Promise<unknown>>>('fx/gate-ext-tap')!;
+    await expect(tap['kind']!()).resolves.toBe('keys:0');
+    await scope.dispose();
+  });
+
+  it('病态 apiGate 拒收：形状门在子域执法（投影若丢尾，病态载荷被静默放行装载成功——外侧腿 carry-over 物证）', async () => {
+    // 病态载荷（appId 非字符串）：子域 svc.load 的 apiGate 形状门只对「真过桥的
+    // 载荷」才可能拒——此红锁住 external-domain load() 投影不丢 apiGate 字段
+    const err = await rejection(
+      gateDomain.load({
+        id: 'gx-bad',
+        entry: echoEntry,
+        sandbox: { carrier: 'external' },
+        apiGate: { appId: 42, experimental: [] } as unknown as { appId: string; experimental: readonly string[] },
+      }),
+    );
+    expect(err.code).toBe(APP_LOAD_FAILED);
+    expect(err.message).toContain('apiGate 形状非法');
   });
 });
 

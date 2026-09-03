@@ -30,6 +30,7 @@ import {
   BRIDGE_HANDLER_FAILED,
   BRIDGE_METHOD_NOT_FOUND,
   BRIDGE_SURFACE_NARROWED,
+  APP_LOAD_FAILED,
   APP_SHAPE_INVALID,
 } from '../contracts/errors.js';
 import { BridgeEndpoint } from './session.js';
@@ -662,5 +663,23 @@ export default async function apply(ctx) {
     await ch.host.call('svc', 'apply', ['h2', {}, {}]);
     await expect(tapCall(ch, 'h2', 'version')).resolves.toBe('(absent)');
     await expect(tapCall(ch, 'h2', 'capList')).resolves.toEqual([]);
+  });
+
+  it('第 4 位载荷形状执法：病态 hostFaceData 拒收 APP_LOAD_FAILED（修前红：盲断言物化病态面后静默装载成功——遗漏大扫 20260904 #9）', async () => {
+    const { ch, dir } = setup();
+    const entry = writeApp(dir, 'fx-hostface.ts', FX_HOST_FACE);
+    await ch.host.call('svc', 'load', [{ id: 'h9', entry }]);
+    // 病态载荷（version 缺席 + capabilities 非数组）：宿主真链路只会发
+    // readHostFaceData 产物，收到病态形 = 装载管线不变量被破坏，fail-loud 拒收
+    const err = await rejection(
+      ch.host.call('svc', 'apply', [
+        'h9',
+        {},
+        {},
+        { apiVersion: '9.9', formFactor: 'standalone', capabilities: 'nope' },
+      ]),
+    );
+    expect(err.code).toBe(APP_LOAD_FAILED);
+    expect(err.message).toContain('hostFaceData 形状非法');
   });
 });

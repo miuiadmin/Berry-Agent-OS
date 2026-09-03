@@ -568,8 +568,12 @@ async function executeSequentially(
     finalized.push(call);
     await emitToolResultMessage(toolResultMessageOf(call), emit);
     if (signal?.aborted) {
-      // 已中止：余下调用不再准备，但必须补对（§2.4 中止余量收尾）——悬空 tool_use
-      // 经 convertToLlm 透传直达 provider 是不可重试的 400，打断反钉死会话
+      // 已中止：余下调用不再准备，但必须补对（§2.4 中止余量收尾）——配对义务是
+      // 本层自己的 durable 账面纪律：每个 tool_execution_start 都要有配对结果事件
+      // （回放投影/审计面不悬空），且中止成因由本层自报（「已中止，工具未执行」）。
+      // provider 侧另有防线：pi-ai transformMessages 对孤儿 toolCall 会合成
+      // "No result provided" 兜底——但语义归属不外包给适配库的缺省文案（原
+      // 「直达 provider 是不可重试的 400」对缺省栈不成立，勘正：遗漏大扫 20260904 #11）
       for (const leftover of await finalizeAbortedRemaining(toolCalls.slice(i + 1), emit)) {
         finalized.push(leftover);
         await emitToolResultMessage(toolResultMessageOf(leftover), emit);

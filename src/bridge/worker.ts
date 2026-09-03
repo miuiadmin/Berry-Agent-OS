@@ -224,6 +224,28 @@ function makeHostServiceProxy(
 }
 
 /**
+ * 宿主面过河载荷形状判据（遗漏大扫 20260904 #9）：svc.apply 第 4 位载荷必是
+ * 宿主 readHostFaceData 产物（五字段：三字符串 + 两字符串数组）。原码盲断言
+ * （as HostFaceData）会把病态载荷静默物化成空面（materializeHostFace 对
+ * 非数组 capabilities 不炸、缺席字段读出 undefined）——与 svc.load 的 apiGate
+ * 形状门（就绪度审计 20260903 P0）同面对称执法：装载管线不变量被破坏即
+ * fail-loud 拒收，不静默降级。
+ */
+function isHostFaceDataShape(value: unknown): value is HostFaceData {
+  if (typeof value !== 'object' || value === null) return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o['version'] === 'string' &&
+    typeof o['apiVersion'] === 'string' &&
+    typeof o['formFactor'] === 'string' &&
+    Array.isArray(o['capabilities']) &&
+    o['capabilities'].every((c) => typeof c === 'string') &&
+    Array.isArray(o['experimentalKeys']) &&
+    o['experimentalKeys'].every((k) => typeof k === 'string')
+  );
+}
+
+/**
  * 代理桩 ctx（结构对齐 contracts AppContext——apply 的 ctx 实参）。
  * registrations：apply 期间发起的一切过界注册（svc-register/sub/tools-register）
  * 的 promise 集合——svc.apply 在 default 返还后 await 全体，保证 activated 事件
@@ -333,8 +355,11 @@ function makeStubCtx(
     config: Object.freeze({ ...config }),
     logger,
     signal: state.ctl.signal,
-    // ctx.host：宿主面纯数据物化（§6.13.5 桥接档）——载荷缺席时成员整体缺席
-    // （undefined 值会被 external 载体的 JSON 序列化丢尾，故条件展开而非恒挂键）
+    // ctx.host：宿主面纯数据物化（§6.13.5 桥接档）——载荷缺席时成员整体缺席。
+    // 条件展开的理由是缺省协议形：「未注入」（成员缺席）与「注入空面」（host 在
+    // 场但能力集空）必须可区分（应用可探测 host 成员判宿主是否披露自省面），
+    // 恒挂 host: undefined 会让两形塌缩。ctx 本体不跨序列化通道（域内于载荷
+    // 反序列化之后构建），原「JSON 序列化丢尾」注不成立（勘正：遗漏大扫 20260904 #10）
     ...(hostFace === undefined ? {} : { host: materializeHostFace(hostFace) }),
   };
 }
@@ -425,7 +450,11 @@ export function startWorkerRealm(port: BridgePort, workerId: string): BridgeEndp
       const rowId = rowIdArg as string;
       const config = (configArg ?? {}) as Readonly<Record<string, unknown>>;
       const presence = (presenceArg ?? {}) as Readonly<Record<string, boolean>>;
-      // 宿主面过河数据（第 4 位——宿主侧按「已注入才追加」原则发送，缺席即 undefined）
+      // 宿主面过河数据（第 4 位——宿主侧按「已注入才追加」原则发送，缺席即 undefined）。
+      // 形状执法（遗漏大扫 20260904 #9）：病态载荷 fail-loud 拒收——不盲断言、不静默物化空面
+      if (hostFaceArg !== undefined && !isHostFaceDataShape(hostFaceArg)) {
+        throw new AppError(APP_LOAD_FAILED, 'svc.apply 载荷 hostFaceData 形状非法（装载管线不变量被破坏）');
+      }
       const hostFace = hostFaceArg as HostFaceData | undefined;
       const module = modules.get(rowId);
       if (module === undefined) {
