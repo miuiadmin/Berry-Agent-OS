@@ -154,6 +154,27 @@ describe('kernel-shell：动词面', () => {
     expect(deps.exitCalls.length).toBe(1);
   });
 
+  it('/shutdown 批 D 单源接线：宿主注入 requestShutdown + 恒杀全家确认语（第二击走单源编舞不回落 requestExit）', async () => {
+    const streams = makeStreams();
+    const shutdownCalls: string[] = [];
+    const deps = makeDeps(streams, {
+      requestShutdown: () => {
+        shutdownCalls.push('shutdown');
+      },
+      shutdownConfirmText:
+        '确认关停？恒杀全家：在飞 run、后台 Job、子进程树全收场（非挂起——真关机，无温柔版）——再输一次 /shutdown 执行（其他命令取消）',
+    });
+    const done = runKernelShell(deps);
+    await streams.sendLine('/shutdown');
+    await new Promise((resolve) => setImmediate(resolve));
+    const out1 = streams.readAll();
+    expect(out1).toContain('恒杀全家：在飞 run、后台 Job、子进程树全收场'); // 宿主注入单源确认语在场
+    await streams.sendLine('/shutdown'); // 第二击——走单源编舞
+    await expect(done).resolves.toBe('shutdown');
+    expect(shutdownCalls).toEqual(['shutdown']); // requestShutdown 触达
+    expect(deps.exitCalls.length).toBe(0); // 不再回落 requestExit（编舞自管收口）
+  });
+
   it('/desktop 成功接管：返回 desktop-takeover（宿主转等桌面退出路）', async () => {
     const streams = makeStreams();
     const deps = makeDeps(streams, { retryDesktop: async () => ({ ok: true }) });

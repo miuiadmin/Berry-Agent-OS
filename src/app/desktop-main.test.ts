@@ -6,6 +6,10 @@
  * Esc 回桌面（pi-tui 保屏停 + 引擎复位全量重绘）→ /exit 退出码 0。
  * 另锁 boot 序三形态：--no-desktop 显式内核 shell / 起屏失败计数回锁 /
  * 熔断回锁后 /desktop 重试成功清账接管。
+ *
+ * 批 D 增面（第八十五批批 D）：顶栏状态聚合器全链（凭证探针 → 警示槽 →
+ * /guide 同源引导文案 = describeProviderFailure 两消费面）+ /shutdown
+ * confirm 原语 → in-process 单源编舞自退全链。
  */
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +17,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { desktopMain, type DesktopMainOptions } from './desktop-main.js';
+import { DEFAULT_MODEL } from './assembly.js';
 import { fauxProvider } from '../llm/index.js';
 import { bootFailuresPath, clearBootFailures, currentPackageVersion } from './desktop-boot.js';
 import { dataDir } from './paths.js';
@@ -242,6 +247,74 @@ describe('desktopMain：首启桌面 → 进应用 → Esc 回桌面 → /exit�
     await sendLine('/exit');
     const code = await done;
     expect(code).toBe(0);
+  }, 20_000);
+});
+
+/* ---------------- 批 D：状态面全链 + 首启引导闭环 + /shutdown 全链 ---------------- */
+
+describe('desktopMain：批 D 顶栏状态面 + 首启引导闭环 + /shutdown 全链', () => {
+  it('凭证缺失（缺省模型 provider 未注册）：顶栏亮警示槽 → /guide 同源引导文案（describeProviderFailure 两消费面）', async () => {
+    const desktopIo = new FakeDesktopIO();
+    const tuiTerminal = new FakeTuiTerminal();
+    const done = desktopMain({
+      ...baseOptions(desktopIo, tuiTerminal),
+      model: DEFAULT_MODEL, // anthropic 缺省——faux-only 装配 = provider 未注册即未配置形态
+    });
+    // 顶栏五槽位行已活（聚合器首拍）
+    await waitForCond(() => desktopIo.output.includes('Berry 桌面'));
+    expect(desktopIo.output).toContain('CPU '); // 五槽位真值呈现（批 C 占位顶栏退役）
+    // boot 期探针异步落值——轮询等警示槽上屏（值变即通知的差分帧）
+    await waitForCond(() => desktopIo.output.includes('⚠ 凭证未配置（anthropic）'));
+    // /guide：describeProviderFailure 同源文案（与 berry run stderr 同一函数——禁抄第二份）
+    for (const ch of '/guide') desktopIo.push(ch);
+    desktopIo.push('\r');
+    await waitForCond(() => desktopIo.output.includes('首启引导——模型凭证未配置'));
+    const out = desktopIo.output;
+    expect(out).toContain('模型 provider「anthropic」未配置凭证');
+    expect(out).toContain('ANTHROPIC_API_KEY'); // 环境变量指路同源在场
+    // Enter 出引导回桌面 → /exit 退（退出码 0——引导不阻塞使用）
+    desktopIo.push('\r');
+    await tick(30);
+    for (const ch of '/exit') desktopIo.push(ch);
+    desktopIo.push('\r');
+    await expect(done).resolves.toBe(0);
+  }, 20_000);
+
+  it('凭证在位（模型 provider 已注册且自足）：零警示槽 + /guide 已配置说明（探针不误报）', async () => {
+    const desktopIo = new FakeDesktopIO();
+    const tuiTerminal = new FakeTuiTerminal();
+    const done = desktopMain({
+      ...baseOptions(desktopIo, tuiTerminal),
+      model: 'faux-ledger/m1', // faux provider 已注册且 auth 自足——checkAuth 真值
+    });
+    await waitForCond(() => desktopIo.output.includes('Berry 桌面'));
+    await tick(250); // 探针落值窗（boot 后一次异步——给足结算再断言缺席）
+    expect(desktopIo.output).not.toContain('凭证未配置'); // 零警示槽
+    // /guide 无警示形态：已配置说明 + 指路（引导不只在警示态可达）
+    for (const ch of '/guide') desktopIo.push(ch);
+    desktopIo.push('\r');
+    await waitForCond(() => desktopIo.output.includes('模型凭证已配置'));
+    desktopIo.push('\r');
+    await tick(30);
+    for (const ch of '/exit') desktopIo.push(ch);
+    desktopIo.push('\r');
+    await expect(done).resolves.toBe(0);
+  }, 20_000);
+
+  it('/shutdown 全链：confirm 原语二次确认（单源恒杀语）→ in-process 编舞自退（复用既有优雅退出序列）', async () => {
+    const desktopIo = new FakeDesktopIO();
+    const tuiTerminal = new FakeTuiTerminal();
+    const done = desktopMain(baseOptions(desktopIo, tuiTerminal));
+    await waitForCond(() => desktopIo.output.includes('Berry 桌面'));
+    for (const ch of '/shutdown') desktopIo.push(ch);
+    desktopIo.push('\r');
+    // confirm 视图：标题 + 单源恒杀全家确认语（host-power 同源）
+    await waitForCond(() => desktopIo.output.includes('确认关停？'));
+    expect(desktopIo.output).toContain('恒杀全家');
+    expect(desktopIo.output).toContain('在飞 run、后台 Job、子进程树全收场');
+    // Enter 确认 → requestPower → in-process selfExit = front.requestQuit → 既有退出序列收口
+    desktopIo.push('\r');
+    await expect(done).resolves.toBe(0);
   }, 20_000);
 });
 

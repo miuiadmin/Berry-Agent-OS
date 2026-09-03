@@ -14,6 +14,7 @@
 
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { Context } from '../context/types.js';
+import type { DesktopStatusAggregator } from './desktop-status.js';
 
 /**
  * 桌面应用清单条目（壳层投影——装载面的只读投影视图，非第二真相源）。
@@ -82,6 +83,53 @@ export function createDesktopService(): DesktopService {
 }
 
 /**
+ * ctx `desktop-status` 服务面（第八十五批批 D，骨架篇 §1.2——顶栏状态聚合器
+ * 的行内 provide 槽）。与 `desktop` 服务同款 holder 形态：行 apply 期构造空壳，
+ * 宿主入口构造聚合器真身后 attach；无 attach（熔断回锁 / 桌面缺席）时各法
+ * 诚实缺席（snapshot = undefined / start·stop 空操作）——壳侧顶栏回落占位时钟。
+ */
+export interface DesktopStatusService {
+  /** 挂聚合器真身（宿主入口构造后调；重复 attach 后者胜） */
+  attach(aggregator: DesktopStatusAggregator): void;
+  /** 摘真身（桌面终退时调） */
+  detach(): void;
+  /** 当前快照（无 attach = undefined——占位回落判据） */
+  snapshot(): ReturnType<DesktopStatusAggregator['snapshot']> | undefined;
+  /** 值变订阅（无 attach = 恒不通知的空订阅） */
+  onChange(cb: () => void): () => void;
+  /** 起表（无 attach = 空操作） */
+  start(): void;
+  /** 停表（无 attach = 空操作） */
+  stop(): void;
+}
+
+/** 构造状态服务 holder（行 apply 期调用——聚合器真身晚挂） */
+export function createDesktopStatusService(): DesktopStatusService {
+  let aggregator: DesktopStatusAggregator | undefined;
+  return {
+    attach(next: DesktopStatusAggregator): void {
+      aggregator = next;
+    },
+    detach(): void {
+      aggregator = undefined;
+    },
+    snapshot(): ReturnType<DesktopStatusAggregator['snapshot']> | undefined {
+      return aggregator?.snapshot();
+    },
+    onChange(cb: () => void): () => void {
+      if (aggregator === undefined) return () => undefined; // 空订阅（装拆对称恒可调）
+      return aggregator.onChange(cb);
+    },
+    start(): void {
+      aggregator?.start();
+    },
+    stop(): void {
+      aggregator?.stop();
+    },
+  };
+}
+
+/**
  * 构造 desktop 官方件模块引用（builtins 注册表 `builtin:desktop` 行——Ring 1
  * 必备行，overlay 禁用即启动断言拒启）。apply 在行作用域（ring1Anchor 派生）
  * 执行一次：构造服务 holder 并 provide 进系统区表（boot 后对根与全部装载行
@@ -96,6 +144,9 @@ export function createDesktopApp(): BuiltinAppModule {
       // channels 行同款还原断言——窄面 → 实参真身，非跨信任边界断言）
       const scope = ctx as Context;
       scope.provide('desktop', createDesktopService());
+      // 顶栏状态聚合器槽（批 D 骨架篇 §1.2）：真身由宿主入口构造后 attach——
+      // 行装载期零 os 轮询副作用（熔断回锁期聚合器不在场，顶栏回落占位时钟）
+      scope.provide('desktop-status', createDesktopStatusService());
     },
   };
 }

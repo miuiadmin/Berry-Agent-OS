@@ -35,6 +35,7 @@ import { dumpConfigMain } from './dump-config.js';
 import { relaunchUnderHostSandbox } from './host-sandbox.js';
 import { daemonCommandMain, daemonDoctorMain, daemonForegroundMain, detectDaemonHandshake } from './daemon.js';
 import { attachMain } from './attach-main.js';
+import { powerCliMain } from './host-power.js';
 import { warnIfStaleDist } from './build-meta.js';
 import { DEFAULT_WEBUI_PORT } from '../webui/index.js';
 
@@ -56,6 +57,12 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
   berry upgrade           升级维护动词：查 registry 更新 → npm 形态自升级（npm i -g
                          berry-agent-os@<版本>）/ 源码形态给指引 / 未发布态诚实告知；
                          用户显式维护动作——缺省零版本检查不变
+  berry shutdown [--yes]  关停动词（骨架篇 §1.3，批 D）：恒杀全家——停 daemon 信号序
+                         （SIGTERM→轮询→SIGKILL→清 daemon.json；无 daemon.json 幂等成
+                         0）。--yes 过确认门；缺省拒退 2 并 stderr 指路
+  berry reboot [--yes]    重启动词：shutdown 语义后接力——有活 daemon 先 stop 再
+                         start；无 daemon 诚实退 0（进程内形态的桌面 /reboot 自带
+                         spawn 接力，不经 CLI）
   berry dump-config      打印实际生效的组合树
 
 旗标：
@@ -90,7 +97,9 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
                随 macOS 漂移；④Windows 无后端——fail-closed 拒跑（退出码 1）
   --           终结符：其后的参数全作消息字面、旗标解析停摆——正当以 -- 起头的
                消息内容（如让模型解释某旗标）经 berry run -- "--foo bar" 保真送达；
-               未识别的 -- 旗标（含 --app=chat 等 = 取值形/拼写错写）全入口用法错退 2`;
+               未识别的 -- 旗标（含 --app=chat 等 = 取值形/拼写错写）全入口用法错退 2
+  --yes        shutdown/reboot 限定：恒杀全家确认门钥匙（对位桌面 UI 二次确认——
+               缺省拒退 2 并 stderr 指路本旗标）`;
 
 /**
  * 手写 argv 解析（不引 commander——第九批拍板 #15）。
@@ -118,6 +127,7 @@ const KNOWN_FLAG_WORDS: ReadonlySet<string> = new Set([
   '--app-file',
   '--standalone',
   '--no-desktop',
+  '--yes',
 ]);
 /** 命令位词（合法落在位置参数首位、由分派 switch 匹配——不算未识别旗标；
  * 越位形态〔出现在子命令位之后〕由解析层记录、分派层统一短路——执法四律⑥） */
@@ -150,6 +160,8 @@ interface ParsedArgs {
   noDesktop: boolean;
   /** 快速试件路径（--app-file <path>，开发指南 §8）：berry/run 两入口收——组合树注入临时行，零装机零挂载零落盘 */
   appFile: string | undefined;
+  /** 确认门钥匙（--yes，骨架篇 §1.3 批 D）：shutdown/reboot 限定——恒杀全家二次确认的 CLI 对位 */
+  yes: boolean;
   /** 未识别 `--` 词（终结符之前收到的——分派层统一用法错退 2，20260901-c #1） */
   unknownFlags: readonly string[];
   /** 首个越位命令位词（--help/-h/--version/-v 出现在子命令位之后——20260902-b
@@ -173,6 +185,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let standalone = false;
   let noDesktop = false;
   let appFile: string | undefined;
+  let yes = false;
   let terminated = false; // `--` 终结符已见——其后 argv 全字面（旗标解析停摆）
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -232,6 +245,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       // 跳过系统桌面（契约篇 §6.11 批 C）：裸 berry 限定直进内核最小 shell
       //（桌面起屏失败两连崩的显式绕行位）——其余入口收到时无害忽略（同律）
       noDesktop = true;
+    } else if (arg === '--yes') {
+      // 确认门钥匙（骨架篇 §1.3 批 D）：shutdown/reboot 限定——其余入口收到时
+      // 无害忽略（同 --read-only 律：语义只在动词 case 执法）
+      yes = true;
     } else if (arg.startsWith('--') && !KNOWN_FLAG_WORDS.has(arg) && !COMMAND_WORDS.has(arg)) {
       // 未识别 `--` 词（含 = 取值形/拼写错写）：收进名单交分派层统一用法错——
       // 旧形落位置参数被静默并进消息（#1：`berry run --app=chat "hi"` 送进 LLM）
@@ -262,6 +279,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     standalone,
     noDesktop,
     appFile,
+    yes,
     unknownFlags,
     strayCommandWord,
   };
@@ -325,6 +343,7 @@ function main(argv: string[]): number {
     standalone,
     noDesktop,
     appFile,
+    yes,
     unknownFlags,
     strayCommandWord,
   } = parseArgs(argv);
@@ -572,6 +591,30 @@ function main(argv: string[]): number {
           return 2;
         }
         return upgradeMain();
+      }
+      case 'shutdown':
+      case 'reboot': {
+        // 关停/重启动词（骨架篇 §1.3，批 D）：与桌面 /shutdown //reboot 一实现
+        // 两入口（host-power 单源编舞的 CLI 腿）。互斥面同 upgrade 律（形态面
+        // 互斥——run 族/端口/前台旗标不属关停动词）；--yes 过确认门
+        if (
+          args.length > 0 ||
+          readOnly ||
+          background ||
+          tick !== undefined ||
+          app !== undefined ||
+          port !== undefined ||
+          noApps ||
+          sandboxHost ||
+          foreground ||
+          appFile !== undefined
+        ) {
+          process.stderr.write(
+            `用法：berry ${command} [--yes]（不与运行形态旗标并用——${command} 是恒杀全家维护动词）\n`,
+          );
+          return 2;
+        }
+        return powerCliMain(command, { yes });
       }
       case 'dump-config':
         // 安全模式同径可见：诊断面打印的就是实际生效装配（Ring 1 行 + 标记行）

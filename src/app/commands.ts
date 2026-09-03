@@ -77,22 +77,22 @@ function formatAppRow(row: AppStatusRow): string {
 }
 
 /**
- * /reload 三面结果统一通知（queued / error / payload——组合根 reload 语义直译，
- * 壳只转述不解释；error 面附「原组合仍在运行」——预检后装的设计保证，见 §1.3 落码形态）。
- * payload.app 在场 = 单区重载（D3 per-app reload）——文案带目标应用与卸词集警示。
+ * /reload 三面结果 → 人读文本（queued / error / payload——组合根 reload 语义
+ * 直译，壳只转述不解释；error 面附「原组合仍在运行」——预检后装的设计保证，
+ * 见 §1.3 落码形态）。payload.app 在场 = 单区重载（D3 per-app reload）——文案
+ * 带目标应用与卸词集警示。桌面管理面（desktop-main 薄壳）复用同一 formatter
+ * ——TUI 通知与桌面回执两消费面单源（第八十五批批 D 起导出）。
  */
-function notifyReloadResult(ui: UiService, result: ReloadResult): void {
+export function formatReloadResult(result: ReloadResult): string {
   if (result.queued === true) {
     // 刀 2 排队语义：run 进行中不拒——结算后自动执行，结果另行通知
-    ui.notify('run 进行中——重载已排队，本次 run 结束后自动执行');
-    return;
+    return 'run 进行中——重载已排队，本次 run 结束后自动执行';
   }
   if (result.error !== undefined) {
-    ui.notify(`重载失败：${result.error}\n（原组合仍在运行——修正 overlay 后再试）`);
-    return;
+    return `重载失败：${result.error}\n（原组合仍在运行——修正 overlay 后再试）`;
   }
   const payload = result.payload;
-  if (payload === undefined) return; // 三面互斥完备，此处不可达——类型收窄守卫
+  if (payload === undefined) return '重载完成'; // 三面互斥完备，此处防御呈现
   const scope = payload.app === undefined ? '组合' : `应用 ${payload.app} 单区`;
   const parts = [`${scope}激活 ${payload.activated.length}`];
   // 失败行点名（id 级）——与 boot 期拒启清单同信息量；跳过行通常多（禁用面）不点名
@@ -102,7 +102,12 @@ function notifyReloadResult(ui: UiService, result: ReloadResult): void {
   if (payload.droppedEvents !== undefined && payload.droppedEvents.length > 0) {
     parts.push(`警示：事件词消失 ${payload.droppedEvents.join('、')}（重装即回；改名即旧词永失）`);
   }
-  ui.notify(`已重载：${parts.join('，')}`);
+  return `已重载：${parts.join('，')}`;
+}
+
+/** /reload 结果通知（formatReloadResult 的 TUI 通知消费面） */
+function notifyReloadResult(ui: UiService, result: ReloadResult): void {
+  ui.notify(formatReloadResult(result));
 }
 
 /** 字节数 → 人读体积（KiB/MiB 两档——inspect 报告的数据域体积行） */
@@ -149,8 +154,8 @@ function parseFlagArgs(args: string): {
 
 /** inspect 报告 → 人读文本（契约篇 §3.4 第二刀：execute 前的级联警示承载面——
  * 词表三档 / 受影响会话逐词点名 / 挂载行全集全量呈现，人看过才裁决；D2 键域
- * = 装机 id） */
-function formatUninstallReport(report: UninstallReport): string {
+ * = 装机 id）；桌面管理面（desktop-main 薄壳）复用同一 formatter——两消费面单源 */
+export function formatUninstallReport(report: UninstallReport): string {
   const lines: string[] = [
     `卸载检视 ${report.id}（${report.source} 源）：`,
     `  引用：${report.appRef}`,
@@ -184,8 +189,9 @@ function formatUninstallReport(report: UninstallReport): string {
   return lines.join('\n');
 }
 
-/** execute 回执 → 人读文本（四段执行事实的壳面转述；outcome 三态如实呈现） */
-function formatUninstallExec(report: UninstallExecReport): string {
+/** execute 回执 → 人读文本（四段执行事实的壳面转述；outcome 三态如实呈现；
+ * 桌面管理面（desktop-main 薄壳）复用同一 formatter——两消费面单源） */
+export function formatUninstallExec(report: UninstallExecReport): string {
   if (report.outcome === 'no-op') {
     return `无动作 ${report.id}：账本无记录且无可推导残迹（已卸载过或从未安装）`;
   }

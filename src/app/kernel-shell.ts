@@ -6,8 +6,8 @@
  * 模块——引擎崩坏场景的结构性前提：兜底面不能依赖被兜底的东西）。
  *
  * 命令面五件：/apps（清单）/start <id>（进应用视图——promise 在应用视图结束
- * 时结算）/shutdown（双确认后正常退出；恒杀全家批 D 接线）/exit（退出）/
- * /desktop（重试桌面起屏——成功清熔断账并交出 REPL）。
+ * 时结算）/shutdown（双确认后经宿主注入的单源编舞恒杀全家收场——批 D 接线）/
+ * /exit（退出）/ /desktop（重试桌面起屏——成功清熔断账并交出 REPL）。
  *
  * 依赖全注入（deps）——宿主入口（desktop-main）组合 runtime 动词与换防编舞，
  * 本文件只管行读与对话循环，可独立测试。
@@ -38,6 +38,14 @@ export interface KernelShellDeps {
   readonly retryDesktop: () => Promise<{ ok: true } | { ok: false; error: string }>;
   /** 请求退出（exit/shutdown 两动词共用——宿主接优雅退出序列） */
   readonly requestExit: () => void;
+  /**
+   * /shutdown 双确认执行钩子（批 D：宿主接 host-power 单源编舞——与桌面
+   * /shutdown、CLI berry shutdown 一实现三入口）。缺省不传 = 回落 requestExit
+   * （批 C 行为）。确认语由宿主注入（shutdownConfirmText——恒杀全家单源文案）。
+   */
+  readonly requestShutdown?: () => void;
+  /** /shutdown 双确认第一击文案（缺省 = 批 C 旧文；宿主注入恒杀全家单源语） */
+  readonly shutdownConfirmText?: string;
   /**
    * 宿主退出信号（宿主 front.quit 聚合 promise）：结算时关行读器结束 REPL
    * （返回 'exit'）——防应用视图内退出（Ctrl+D / 信号）后 REPL 挂起行读悬死进程。
@@ -101,14 +109,16 @@ export async function runKernelShell(deps: KernelShellDeps): Promise<KernelShell
       }
       const text = line.trim();
       if (text === '') continue;
-      // /shutdown 双确认：第一击武装，第二击执行；其余任何词解除武装
+      // /shutdown 双确认：第一击武装（确认语 = 宿主注入单源恒杀全家文案），
+      // 第二击执行（requestShutdown 单源编舞——缺省回落 requestExit）；其余词解除
       if (text === '/shutdown') {
         if (!shutdownArmed) {
           shutdownArmed = true;
-          write('确认关停？再输一次 /shutdown 执行（其他命令取消）');
+          write(deps.shutdownConfirmText ?? '确认关停？再输一次 /shutdown 执行（其他命令取消）');
           continue;
         }
-        deps.requestExit();
+        if (deps.requestShutdown !== undefined) deps.requestShutdown();
+        else deps.requestExit();
         return 'shutdown';
       }
       shutdownArmed = false;

@@ -24,8 +24,13 @@ import { appendCrashRecord } from './crash-log.js';
 import { VERSION_WITH_CODENAME as VERSION } from './version.js';
 import { dataDir } from './paths.js';
 import { QUICK_START_ENTRY } from './guide-text.js';
-import { createDesktopShell, type DesktopShell } from './desktop-shell.js';
-import type { DesktopAppEntry, DesktopService } from './desktop-service.js';
+import { createDesktopShell, type DesktopShell, type DesktopAdminFace } from './desktop-shell.js';
+import type { DesktopAppEntry, DesktopService, DesktopStatusService } from './desktop-service.js';
+import { createDesktopStatusAggregator, type DesktopCredentialIssue } from './desktop-status.js';
+import { runPowerAction, POWER_KILL_FAMILY_TEXT, type PowerResult } from './host-power.js';
+import { formatReloadResult, formatUninstallExec, formatUninstallReport } from './commands.js';
+import { describeProviderFailure } from '../llm/index.js';
+import type { JobsServiceFace } from '../contracts/jobs.js';
 import { runKernelShell } from './kernel-shell.js';
 import {
   DESKTOP_BOOT_FAILURES_FILE,
@@ -85,6 +90,163 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
 
   /** 桌面服务 holder（Ring 1 desktop 行 provide；熔断回锁期行仍在装载——服务面可达） */
   const desktopService = runtime.ctx.tryGet<DesktopService>('desktop');
+  /** 顶栏状态服务 holder（Ring 1 desktop 行批 D 起同 provide——骨架篇 §1.2） */
+  const statusService = runtime.ctx.tryGet<DesktopStatusService>('desktop-status');
+
+  /* ---------------- 顶栏状态聚合器（批 D，骨架篇 §1.2——行 provide 的 holder 挂真身） ---------------- */
+  /** 凭证警示 holder（boot 期探针异步落值——聚合器活读，探不到 ≠ 配置好） */
+  const credential: { issue: DesktopCredentialIssue | undefined } = { issue: undefined };
+  const aggregator = createDesktopStatusAggregator({
+    timing: {
+      now: Date.now,
+      schedule: (fn, ms) => setTimeout(fn, ms),
+      cancelSchedule: (h) => clearTimeout(h as NodeJS.Timeout),
+    },
+    sources: {
+      // 后台运行数 = ctx.jobs 活跃 Job 数（事件驱动面既有活体——running/stopping 计）
+      activeJobs: () => {
+        const jobs = runtime.ctx.tryGet<JobsServiceFace>('jobs');
+        return (jobs?.list() ?? []).filter((job) => job.status === 'running' || job.status === 'stopping').length;
+      },
+      // 已装应用数 = 装机对账面同源计数（appsService.list——禁第二真相源）
+      installedApps: () => runtime.appsService.list().length,
+      // 凭证警示 = 探针落值面（首启引导闭环）
+      credentialIssue: () => credential.issue,
+    },
+  });
+  statusService?.attach(aggregator);
+  // 凭证探针（boot 后一次异步）：缺省模型 provider 的 checkAuth——undefined = 未
+  // 配置即亮警示；文案与 berry run stderr 同源（describeProviderFailure 同一函数
+  // 两消费面，禁抄第二份）。探针失败不阻塞（警示缺席的诚实边界：探不到 ≠ 配置好）
+  void (async () => {
+    try {
+      const provider = runtime.model.split('/')[0] ?? '';
+      if (provider !== '') {
+        const check = await runtime.llm.checkAuth(provider);
+        if (check === undefined || check === null) {
+          credential.issue = {
+            provider,
+            guidance:
+              describeProviderFailure(`Provider is not configured: ${provider}`) ??
+              `模型 provider「${provider}」未配置凭证。`,
+          };
+        }
+      }
+    } catch {
+      // 探针异常吞掉（探不到 = 不亮警示——引导闭环的另一腿 /guide 恒可达）
+    }
+    aggregator.sampleOnce(); // 落值后即时采样（值变即通知——顶栏即刻亮警示槽）
+  })();
+
+  /* ---------------- 关停/重启编舞（批 D，骨架篇 §1.3——host-power 单源的桌面腿） ---------------- */
+  /** 一实现两入口的「入口一」：桌面 confirm 原语已过二次确认 → 单源编舞放行 */
+  const requestPower = (action: 'shutdown' | 'reboot'): Promise<PowerResult> =>
+    runPowerAction(action, {
+      confirmed: true, // UI 确认在前（壳内 confirm 视图）——CLI 腿的 --yes 对位
+      form: 'in-process', // 桌面动词收的是本进程：selfExit 走 front.requestQuit
+      deps: {
+        selfExit: () => {
+          front.requestQuit(); // 优雅退出序列全序在下方 finally——零新编舞
+        },
+      },
+    });
+
+  /* ---------------- 管理面薄壳（批 D——AppsService〔admin 工具族同源实现〕的桌面投影） ---------------- */
+  /** 管理动作错误 → 单行提示（AppsService 抛 AppError 的桌面回执面） */
+  const adminError = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+  const adminFace: DesktopAdminFace = {
+    /** 配置：JSON patch 解析（非对象/非 JSON 诚实拒）→ configure 写入 + 回执 */
+    async configure(id, patchJson) {
+      let patch: Record<string, unknown>;
+      try {
+        const value = JSON.parse(patchJson) as unknown;
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+          return '配置 patch 须是 JSON 对象（如 {"key":"value"}）';
+        }
+        patch = value as Record<string, unknown>;
+      } catch {
+        return '配置 patch 不是合法 JSON——未执行';
+      }
+      try {
+        const report = await runtime.appsService.configure(id, patch);
+        return {
+          title: `已配置 ${report.id}`,
+          lines: [
+            `  ${report.message}`,
+            `  写入键：${report.appliedKeys.join('、')}`,
+            `  合并后配置：${JSON.stringify(report.config)}`,
+            report.ring1RestartRequired
+              ? '  Ring 1 行——写盘后须重启进程生效（服务面提示）'
+              : '  /reload 后生效（配置面不自动链重载）',
+          ],
+        };
+      } catch (err) {
+        return `配置失败：${adminError(err)}`;
+      }
+    },
+    /** 卸载第一段：检视（inspect 不执行）——回执带确认段（Enter 才进第二段） */
+    async uninstallInspect(id) {
+      try {
+        const report = await runtime.appsService.uninstall(id, { mode: 'inspect' });
+        return {
+          title: `卸载检视 ${report.id}`,
+          lines: formatUninstallReport(report).split('\n'),
+          confirm: {
+            label: '确认卸载（保留数据域）',
+            run: () => adminFace.uninstallExecute(id, 'keep'), // 桌面腿恒 keep；purge 走 /apps-uninstall 命令面
+          },
+        };
+      } catch (err) {
+        return `卸载检视失败：${adminError(err)}`;
+      }
+    },
+    /** 卸载第二段：执行 + 组合重载（回执与命令面同 formatter） */
+    async uninstallExecute(id, dataAction) {
+      try {
+        const exec = await runtime.appsService.uninstall(id, { mode: 'execute', dataAction });
+        const reload = await runtime.reload();
+        return {
+          title: `卸载完成 ${exec.id}`,
+          lines: [...formatUninstallExec(exec).split('\n'), formatReloadResult(reload)],
+        };
+      } catch (err) {
+        return `卸载执行失败：${adminError(err)}`;
+      }
+    },
+    /** 卸挂载 + 目标区重载（单区 reload 判据与命令面同律：恰一目标才单区） */
+    async unmount(rowId) {
+      try {
+        const report = await runtime.appsService.unmount(rowId);
+        const reload = await runtime.reload(report.apps.length === 1 ? report.apps[0] : undefined);
+        return {
+          title: `已卸挂载 ${report.id}`,
+          lines: [`  ${report.message}`, ...report.warnings.map((w) => `  ⚠ ${w}`), formatReloadResult(reload)],
+        };
+      } catch (err) {
+        return `卸挂载失败：${adminError(err)}`;
+      }
+    },
+    /** 挂载 + 目标区重载（apps 目标必填——壳 prompt 视图补参） */
+    async mount(installId, apps) {
+      if (apps.length === 0) {
+        return '挂载目标必填：输入挂载到哪个应用（应用 id，逗号分隔多个 = 共享件）';
+      }
+      try {
+        const report = await runtime.appsService.mount(installId, { apps });
+        const reload = await runtime.reload(report.apps.length === 1 ? report.apps[0] : undefined);
+        return {
+          title: `已挂载 ${report.id}`,
+          lines: [
+            `  ${report.message}`,
+            `  挂载目标：apps ${report.apps.join('、')}（${report.source} 源）`,
+            formatReloadResult(reload),
+          ],
+        };
+      } catch (err) {
+        return `挂载失败：${adminError(err)}`;
+      }
+    },
+  };
 
   /* ---------------- 应用清单投影（装载面单一真相源的只读投影） ---------------- */
   const listApps = (): DesktopAppEntry[] => {
@@ -264,6 +426,9 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
         front.requestQuit();
       },
       ...(desktopService !== undefined ? { service: desktopService } : {}),
+      ...(statusService !== undefined ? { status: statusService } : {}),
+      requestPower, // 恒杀全家动词（批 D——host-power 单源编舞的桌面入口）
+      admin: adminFace, // 管理面薄壳（批 D——AppsService 同源投影）
     });
 
   /* ---------------- 内核 shell deps（兜底面的动词接线） ---------------- */
@@ -314,6 +479,12 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
     requestExit: () => {
       front.requestQuit();
     },
+    // /shutdown 双确认第二击（批 D）：恒杀全家单源编舞（与桌面 /shutdown、CLI
+    // berry shutdown 同一 runPowerAction）+ 单源确认语（首击文案）
+    requestShutdown: () => {
+      void requestPower('shutdown');
+    },
+    shutdownConfirmText: `确认关停？${POWER_KILL_FAMILY_TEXT}——再输一次 /shutdown 执行（其他命令取消）`,
     // 宿主退出信号（front.quit）：REPL 行读挂起时被结算（rl.close）——防进程悬死
     hostQuit: front.quit,
   };

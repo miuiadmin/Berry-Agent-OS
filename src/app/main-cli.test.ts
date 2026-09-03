@@ -36,6 +36,11 @@ vi.mock('./daemon.js', () => ({
 }));
 vi.mock('./attach-main.js', () => ({ attachMain: vi.fn(async () => 0) }));
 vi.mock('./upgrade.js', () => ({ upgradeMain: vi.fn(async () => 0) }));
+// 批 D：关停/重启动词主流程（host-power 单源编舞的 CLI 腿）——hoisted 单例
+// 同 run-main 律：dispatch 内 resetModules 重跑工厂须返回同一 spy，跨分派调用史
+// 才可断言（工厂内裸 vi.fn 每代换新实例——调用史分散）
+const powerMock = vi.hoisted(() => ({ spy: vi.fn(async (_action: string, _opts: { yes: boolean }) => 0) }));
+vi.mock('./host-power.js', () => ({ powerCliMain: powerMock.spy }));
 
 /** 一次真分派：改 argv → 动态 import（顶层跑 main）→ 等异步退出码落定 */
 async function dispatch(
@@ -318,5 +323,62 @@ describe('帮助面 doctor 计数锚（全面复盘 20260902 B-1/G-3②）', () 
     // 三消费面同源对照：--help 文案 / doctor 总结行自报 / 项序枚举——任一漂移即红
     expect(stdout).toContain(`doctor ${cn}项体检`);
     expect(src).toContain(`doctor：${cn}项全绿`);
+  });
+});
+
+/* ---------------- 批 D：shutdown/reboot CLI 对等动词 ---------------- */
+
+describe('CLI 分派：shutdown/reboot 对等动词（第八十五批批 D，骨架篇 §1.3）', () => {
+  it('--yes 过确认门：分派入 powerCliMain（yes 透传）', async () => {
+    const { powerCliMain } = await import('./host-power.js');
+    await dispatch(['shutdown', '--yes']);
+    expect(vi.mocked(powerCliMain)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(powerCliMain).mock.calls[0]![0]).toBe('shutdown');
+    expect(vi.mocked(powerCliMain).mock.calls[0]![1]).toMatchObject({ yes: true });
+    // dispatch 每跑一次 clearAllMocks 清调用史——reboot 腿独立断言（历史不跨分派累积）
+    await dispatch(['reboot', '--yes']);
+    expect(vi.mocked(powerCliMain)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(powerCliMain).mock.calls[0]![0]).toBe('reboot');
+    expect(vi.mocked(powerCliMain).mock.calls[0]![1]).toMatchObject({ yes: true });
+  });
+
+  it('缺 --yes 照常分派（确认门执法在 powerCliMain 内——拒退 2 是编舞语义非解析语义）', async () => {
+    const { powerCliMain } = await import('./host-power.js');
+    await dispatch(['shutdown']);
+    expect(vi.mocked(powerCliMain)).toHaveBeenCalledWith('shutdown', { yes: false });
+  });
+
+  it('互斥面同 upgrade 律：run 族旗标/端口/位置参数并用 → 用法错退 2 零触达', async () => {
+    const { powerCliMain } = await import('./host-power.js');
+    for (const argv of [
+      ['shutdown', '--port', '7000'],
+      ['reboot', '--read-only'],
+      ['shutdown', 'extra'],
+      ['reboot', '--tick', 'job1'],
+      ['shutdown', '--app-file', 'x.ts'],
+      ['reboot', '--foreground'],
+    ] as const) {
+      const { code, stderr } = await dispatch([...argv]);
+      expect(code, argv.join(' ')).toBe(2);
+      expect(stderr, argv.join(' ')).toContain('用法：berry');
+      expect(vi.mocked(powerCliMain)).not.toHaveBeenCalled();
+    }
+  });
+
+  it('--yes 是已知旗标（不落未识别闸）；拼写错写仍闸红退 2', async () => {
+    const { powerCliMain } = await import('./host-power.js');
+    const { code } = await dispatch(['shutdown', '--yes']);
+    expect(code).toBe(0);
+    expect(vi.mocked(powerCliMain)).toHaveBeenCalledTimes(1);
+    const unknown = await dispatch(['shutdown', '--yess']);
+    expect(unknown.code).toBe(2);
+    expect(unknown.stderr).toContain('未识别旗标');
+  });
+
+  it('帮助面披露：--help 含 shutdown/reboot/--yes 三词（命令面 = 产品契约）', async () => {
+    const { stdout } = await dispatch(['--help']);
+    expect(stdout).toContain('berry shutdown [--yes]');
+    expect(stdout).toContain('berry reboot [--yes]');
+    expect(stdout).toContain('--yes');
   });
 });

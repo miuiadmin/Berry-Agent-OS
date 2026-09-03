@@ -11,9 +11,11 @@
  * 闲窗（假钟 50ms）——终退断言须并发推进。
  */
 import { describe, expect, it } from 'vitest';
-import { createDesktopShell, type DesktopShellDeps } from './desktop-shell.js';
+import { createDesktopShell, type DesktopAdminFace, type DesktopShellDeps } from './desktop-shell.js';
 import { createDesktopService } from './desktop-service.js';
-import type { DesktopAppEntry } from './desktop-service.js';
+import type { DesktopAppEntry, DesktopStatusService } from './desktop-service.js';
+import type { DesktopStatusSnapshot } from './desktop-status.js';
+import { POWER_KILL_FAMILY_TEXT } from './host-power.js';
 import type { TerminalIO } from '../desktop/index.js';
 
 /* ---------------- 测试替身 ---------------- */
@@ -176,7 +178,96 @@ const KEY = {
   tab: '\t',
   backspace: '\x7f',
   m: 'm',
+  g: 'g',
 };
+
+/* ---------------- 批 D 测试替身（状态服务/管理面） ---------------- */
+
+/** 状态服务假面（快照钉值 + start/stop 记账 + emit 模拟聚合器值变通知） */
+function fakeStatus(initial: DesktopStatusSnapshot) {
+  let snapshot = initial;
+  const calls: string[] = [];
+  let listener: (() => void) | undefined;
+  return {
+    calls,
+    /** 测试驱动：换快照 + 通知（模拟聚合器值变——壳应 rerender 顶栏） */
+    emit(next: DesktopStatusSnapshot): void {
+      snapshot = next;
+      listener?.();
+    },
+    service: {
+      attach: () => undefined,
+      detach: () => undefined,
+      snapshot: () => snapshot,
+      onChange(cb: () => void): () => void {
+        listener = cb;
+        return () => {
+          listener = undefined;
+        };
+      },
+      start: () => {
+        calls.push('start');
+      },
+      stop: () => {
+        calls.push('stop');
+      },
+    } satisfies DesktopStatusService,
+  };
+}
+
+/** 标准快照（五槽位定值——顶栏断言面） */
+const SNAP: DesktopStatusSnapshot = {
+  time: '08:30:00',
+  cpuPercent: 12,
+  memoryPercent: 34,
+  backgroundJobs: 2,
+  installedApps: 3,
+};
+
+/** 管理面假面（调用记账 + 三形回执：结构/带确认段/单行提示） */
+function fakeAdmin() {
+  const calls: string[] = [];
+  const admin: DesktopAdminFace = {
+    async configure(id, patchJson) {
+      calls.push(`configure:${id}:${patchJson}`);
+      return { title: `已配置 ${id}`, lines: ['  写入键：k'] };
+    },
+    async uninstallInspect(id) {
+      calls.push(`inspect:${id}`);
+      return {
+        title: `卸载检视 ${id}`,
+        lines: ['  引用：file:./x'],
+        confirm: {
+          label: '确认卸载（保留数据域）',
+          run: async () => {
+            calls.push(`execute:${id}:keep`);
+            return { title: `卸载完成 ${id}`, lines: ['  装机物已删'] };
+          },
+        },
+      };
+    },
+    async uninstallExecute(id, dataAction) {
+      calls.push(`execute:${id}:${dataAction}`);
+      return { title: `卸载完成 ${id}`, lines: ['  装机物已删'] };
+    },
+    async unmount(rowId) {
+      calls.push(`unmount:${rowId}`);
+      return { title: `已卸挂载 ${rowId}`, lines: ['  已删行'] };
+    },
+    async mount(installId, apps) {
+      calls.push(`mount:${installId}:${apps.join('+')}`);
+      return '挂载完成（单行提示形）';
+    },
+  };
+  return { admin, calls };
+}
+
+/** 微任务冲刷（管理面 async 假面 → .then 回执链两拍——假钟测试不 await 真时序） */
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 /* ---------------- 起屏与视图 ---------------- */
 
@@ -304,11 +395,11 @@ describe('desktop-shell：键路由（desktop 视图）', () => {
       for (let i = 0; i < 5; i++) press(io, clock, KEY.down);
       press(io, clock, KEY.enter);
       // 头行 'Berry 桌面 — 应用详情' 与菜单头共前缀——差分只发 '详情' 尾段；
-      // 详情身份按内容行 + 批 D 管理提示行断言（差分真实形状）
+      // 详情身份按内容行 + 菜单指路提示行断言（差分真实形状）
       expect(io.output).toContain('id：chat');
       expect(io.output).toContain('名称：对话');
       expect(io.output).toContain('默认位：是');
-      expect(io.output).toContain('管理动作（配置/卸载/挂载族）随批 D');
+      expect(io.output).toContain('管理动作经菜单（m）');
       press(io, clock, KEY.escape, 50); // 详情 → 桌面（判定窗 + 帧两段）
       expect(io.output).toContain('[全部]');
     } finally {
@@ -316,20 +407,20 @@ describe('desktop-shell：键路由（desktop 视图）', () => {
     }
   });
 
-  it('菜单「打开」执行换防；管理四项占位回应（批 C 不造管理逻辑）', () => {
+  it('菜单「打开」执行换防；管理四项在 admin 缺席时诚实拒（不假执行）', () => {
     const { io, clock, calls, shell } = started();
     try {
       press(io, clock, KEY.m);
       press(io, clock, KEY.enter); // 菜单项 0 = 打开
       expect(calls).toEqual(['enterApp:chat', 'enterAppView']);
       expect(shell.suspended).toBe(true);
-      // 回桌面后再进菜单试「配置」（第 2 项）
+      // 回桌面后再进菜单试「配置」（第 2 项）——admin 未注入：诚实拒因
       shell.backToDesktop();
       clock.advance(17);
       press(io, clock, KEY.m);
       press(io, clock, KEY.down);
       press(io, clock, KEY.enter);
-      expect(io.output).toContain('配置：随批 D 接 admin 工具面');
+      expect(io.output).toContain('管理面未接线（宿主未注入 admin 服务）');
       // 三动词账：打开（enterApp+enterAppView）+ 测试直调回桌面（leaveAppView）
       expect(calls).toEqual(['enterApp:chat', 'enterAppView', 'leaveAppView']);
     } finally {
@@ -337,15 +428,26 @@ describe('desktop-shell：键路由（desktop 视图）', () => {
     }
   });
 
-  it('命令前缀：/exit 真退 / 未知命令与裸文本提示 / /shutdown 批 D 占位', () => {
-    const { io, clock, calls, shell } = started();
+  it('命令前缀：/exit 真退 / 未知命令与裸文本提示 / /shutdown 过 confirm 原语', () => {
+    const powerCalls: string[] = []; // 编舞记账（本测 Esc 取消——恒空）
+    const { io, clock, calls, shell } = started({
+      requestPower: (action) => {
+        powerCalls.push(action);
+        return Promise.resolve({ action, outcome: 'self-exiting', exitCode: 0, message: '' });
+      },
+    });
     try {
       for (const ch of '/exit') press(io, clock, ch);
       press(io, clock, KEY.enter);
       expect(calls).toEqual(['requestExit']);
+      // /shutdown 不再占位——恒杀全家二次确认视图（详见动词专测）
       for (const ch of '/shutdown') press(io, clock, ch);
       press(io, clock, KEY.enter);
-      expect(io.output).toContain('批 D');
+      expect(io.output).toContain('确认关停？');
+      expect(io.output).toContain('恒杀全家');
+      press(io, clock, KEY.escape, 50); // 确认视图取消回桌面
+      expect(io.output).toContain('[全部]');
+      expect(powerCalls).toEqual([]); // 未确认零编舞
       for (const ch of '/frobnicate') press(io, clock, ch);
       press(io, clock, KEY.enter);
       expect(io.output).toContain('未知命令：/frobnicate');
@@ -474,5 +576,371 @@ describe('desktop-shell：时钟定时器与起屏失败', () => {
     expect(made.io.raw).toBe(false);
     // dispose 不二炸
     void shell.dispose().catch(() => undefined);
+  });
+});
+
+/* ---------------- 顶栏五槽位与首启引导（批 D） ---------------- */
+
+describe('desktop-shell：顶栏五槽位状态行', () => {
+  it('status 在场：五槽位单行呈现（时间/CPU/内存/后台/应用）+ 聚合器驱动（占位时钟停用）', () => {
+    const status = fakeStatus(SNAP);
+    const { io, clock, shell } = started({ status: status.service });
+    try {
+      expect(io.output).toContain(' Berry 桌面 · 08:30:00 · CPU 12% · 内存 34% · 后台 2 · 应用 3');
+      expect(clock.pending()).toBe(0); // 占位时钟停用（聚合器驱动——无 30s 定时器）
+      expect(status.calls).toEqual(['start']); // 起屏即起表
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('status 缺席：回落占位时钟（批 C 形态不假死）', () => {
+    const { io, shell } = started();
+    try {
+      expect(io.output).toContain('Berry 桌面'); // 无五槽位段
+      expect(io.output).not.toContain('CPU ');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('值变通知驱动重绘：emit 换快照 → 顶栏差分帧出新值', () => {
+    const status = fakeStatus(SNAP);
+    const { io, clock, shell } = started({ status: status.service });
+    try {
+      const before = io.written.length;
+      status.emit({ ...SNAP, cpuPercent: 56, backgroundJobs: 7 });
+      clock.advance(17); // 冲差分帧
+      expect(io.written.length).toBeGreaterThan(before);
+      // pi-tui 差分帧只重写变化列起的尾段（' · CPU ' 前缀未变——'12%'→'56%'），
+      // 断言按帧内连续片段锚新值（整行 'CPU 56%' 在字节流中不连续出现）
+      expect(io.output).toContain('56% · 内存 34% · 后台 7');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('换防生命周期：进应用 stop 停表、回桌面 start 续表（挂起期零轮询）', () => {
+    const status = fakeStatus(SNAP);
+    const { io, clock, shell } = started({ status: status.service });
+    press(io, clock, KEY.enter); // 进应用（挂起）
+    expect(status.calls).toEqual(['start', 'stop']);
+    shell.backToDesktop();
+    clock.advance(17);
+    expect(status.calls).toEqual(['start', 'stop', 'start']);
+    void shell.dispose();
+  });
+});
+
+describe('desktop-shell：凭证警示槽与首启引导', () => {
+  it('警示槽恒显红条 + /guide 进引导视图（guidance 真文案同源呈现）', () => {
+    const status = fakeStatus({
+      ...SNAP,
+      credentialIssue: {
+        provider: 'anthropic',
+        guidance: '模型 provider「anthropic」未配置凭证。\n配置途径：export ANTHROPIC_API_KEY=…',
+      },
+    });
+    const { io, clock, shell } = started({ status: status.service });
+    try {
+      expect(io.output).toContain('⚠ 凭证未配置（anthropic）——/guide 进引导');
+      for (const ch of '/guide') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('首启引导——模型凭证未配置');
+      expect(io.output).toContain('未配置凭证');
+      expect(io.output).toContain('ANTHROPIC_API_KEY'); // guidance 真文案在场（同源非抄写）
+      expect(io.output).toContain('Esc 返回桌面');
+      press(io, clock, KEY.escape, 50);
+      expect(io.output).toContain('[全部]');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('g 热键：警示在场空输入即进引导；无警示时 g 照常打字', () => {
+    // 警示在场：g 热键直达引导
+    const withIssue = fakeStatus({ ...SNAP, credentialIssue: { provider: 'anthropic', guidance: 'g' } });
+    const made1 = makeDeps({ status: withIssue.service });
+    const shell1 = createDesktopShell(made1.deps);
+    shell1.start();
+    made1.clock.advance(0);
+    try {
+      press(made1.io, made1.clock, KEY.g);
+      expect(made1.io.output).toContain('首启引导——模型凭证未配置');
+      press(made1.io, made1.clock, KEY.escape, 50);
+    } finally {
+      void shell1.dispose();
+    }
+    // 无警示：g 当打字入框（提交后走未知输入面——非引导）
+    const clean = fakeStatus(SNAP);
+    const { io, clock, shell } = started({ status: clean.service });
+    try {
+      press(io, clock, KEY.g);
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('未知输入');
+      expect(io.output).not.toContain('首启引导——模型凭证未配置');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('/guide 无警示形态：已配置说明 + 指路（引导不只在警示态可达）', () => {
+    const status = fakeStatus(SNAP);
+    const { io, clock, shell } = started({ status: status.service });
+    try {
+      for (const ch of '/guide') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('模型凭证已配置');
+      expect(io.output).toContain('使用指南');
+      press(io, clock, KEY.escape, 50);
+    } finally {
+      void shell.dispose();
+    }
+  });
+});
+
+/* ---------------- 恒杀全家动词（批 D，骨架篇 §1.3） ---------------- */
+
+describe('desktop-shell：/shutdown //reboot 恒杀全家', () => {
+  /** requestPower 假面（调用记账 + self-exiting 成功形） */
+  function powerDeps() {
+    const powerCalls: string[] = [];
+    const deps: Partial<DesktopShellDeps> = {
+      requestPower: (action) => {
+        powerCalls.push(action);
+        return Promise.resolve({ action, outcome: 'self-exiting', exitCode: 0, message: '' });
+      },
+    };
+    return { powerCalls, deps };
+  }
+
+  it('/shutdown：confirm 原语二次确认（单源恒杀语）→ Enter 才触编舞；Esc 取消零调用', () => {
+    const { powerCalls, deps } = powerDeps();
+    const { io, clock, shell } = started(deps);
+    try {
+      for (const ch of '/shutdown') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      // 确认视图：标题 + 单源恒杀全家确认语（host-power 同源，禁抄第二份）
+      expect(io.output).toContain('确认关停？');
+      expect(io.output).toContain(POWER_KILL_FAMILY_TEXT);
+      expect(io.output).toContain('Enter 确认关停');
+      expect(powerCalls).toEqual([]); // 未确认零编舞
+      press(io, clock, KEY.escape, 50); // 取消
+      expect(powerCalls).toEqual([]);
+      expect(io.output).toContain('[全部]');
+      // 再走全程：Enter 确认 → 单源编舞入口触达
+      for (const ch of '/shutdown') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      press(io, clock, KEY.enter);
+      expect(powerCalls).toEqual(['shutdown']);
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('/reboot：确认语同单源 + 确认触编舞（spawn 接力语义在宿主编舞内）', () => {
+    const { powerCalls, deps } = powerDeps();
+    const { io, clock, shell } = started(deps);
+    try {
+      for (const ch of '/reboot') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('确认重启？');
+      expect(io.output).toContain(POWER_KILL_FAMILY_TEXT);
+      press(io, clock, KEY.enter);
+      expect(powerCalls).toEqual(['reboot']);
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('编舞拒/接力失败（进程未退）：回桌面 + 消息转述（诚实回执面）', async () => {
+    const { io, clock, shell } = started({
+      requestPower: () =>
+        Promise.resolve({
+          action: 'reboot' as const,
+          outcome: 'spawn-failed' as const,
+          exitCode: 1,
+          message: '重启接力 spawn 失败——本进程未退出，可重试 /reboot',
+        }),
+    });
+    try {
+      for (const ch of '/reboot') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      press(io, clock, KEY.enter);
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(io.output).toContain('spawn 失败');
+      expect(io.output).toContain('[全部]');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('requestPower 未接线：诚实拒（不假执行关停）', () => {
+    const { io, clock, shell } = started();
+    try {
+      for (const ch of '/shutdown') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('编舞未接线');
+      expect(io.output).toContain('requestPower');
+    } finally {
+      void shell.dispose();
+    }
+  });
+});
+
+/* ---------------- 菜单管理面接线（批 D——admin 服务薄壳） ---------------- */
+
+describe('desktop-shell：菜单管理面（配置/卸载/卸挂载/挂载）', () => {
+  it('配置：prompt 补参（JSON patch）→ admin.configure → 回执视图', async () => {
+    const { admin, calls } = fakeAdmin();
+    const { io, clock, shell } = started({ admin });
+    try {
+      press(io, clock, KEY.m);
+      press(io, clock, KEY.down); // 配置
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('配置「对话（chat）」');
+      expect(io.output).toContain('JSON patch');
+      for (const ch of '{"k":1}') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(calls).toEqual(['configure:chat:{"k":1}']);
+      expect(io.output).toContain('已配置 chat');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('配置 prompt：Esc 取消零调用 / 空提交拒', async () => {
+    const { admin, calls } = fakeAdmin();
+    const { io, clock, shell } = started({ admin });
+    try {
+      press(io, clock, KEY.m);
+      press(io, clock, KEY.down);
+      press(io, clock, KEY.enter);
+      press(io, clock, KEY.escape, 50); // 取消
+      expect(calls).toEqual([]);
+      expect(io.output).toContain('[全部]');
+      // 空提交：拒因提示
+      press(io, clock, KEY.m);
+      press(io, clock, KEY.down);
+      press(io, clock, KEY.enter);
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('空输入——未执行');
+      expect(calls).toEqual([]);
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('卸载两段式：inspect 检视回执 → Enter 确认执行（keep）→ 完成回执', async () => {
+    const { admin, calls } = fakeAdmin();
+    const { io, clock, shell } = started({ admin });
+    try {
+      press(io, clock, KEY.m);
+      press(io, clock, KEY.down);
+      press(io, clock, KEY.down); // 卸载
+      press(io, clock, KEY.enter);
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(calls).toEqual(['inspect:chat']); // 第一段只检视
+      // 差分帧形态：过渡帧含「卸载检视「对话」」，回执帧与过渡帧共享前缀
+      // 「卸载检视」——整行 '卸载检视 chat' 在字节流不连续，锚帧内连续片段
+      expect(io.output).toContain('卸载检视「对话」'); // 过渡帧（检视中占位）
+      expect(io.output).toContain('引用：file:./x');
+      expect(io.output).toContain('确认卸载（保留数据域）');
+      press(io, clock, KEY.enter); // 二次确认（confirm 原语复用）
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(calls).toEqual(['inspect:chat', 'execute:chat:keep']);
+      // 完成回执与检视回执共享前缀「卸载」——锚尾段片段 + 回执正文行
+      expect(io.output).toContain('完成 chat');
+      expect(io.output).toContain('装机物已删');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('卸载两段式：Esc 在检视回执处取消——不执行（恒杀类动作的取消面）', async () => {
+    const { admin, calls } = fakeAdmin();
+    const { io, clock, shell } = started({ admin });
+    try {
+      press(io, clock, KEY.m);
+      press(io, clock, KEY.down);
+      press(io, clock, KEY.down);
+      press(io, clock, KEY.enter);
+      await flushMicrotasks();
+      clock.advance(17);
+      press(io, clock, KEY.escape, 50); // 检视回执处取消
+      expect(calls).toEqual(['inspect:chat']); // 零执行
+      expect(io.output).toContain('[全部]');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('卸挂载：直执行回执（只读回执任意键返回）', async () => {
+    const { admin, calls } = fakeAdmin();
+    const { io, clock, shell } = started({ admin });
+    try {
+      press(io, clock, KEY.m);
+      for (let i = 0; i < 3; i++) press(io, clock, KEY.down); // 卸挂载
+      press(io, clock, KEY.enter);
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(calls).toEqual(['unmount:chat']);
+      expect(io.output).toContain('已卸挂载 chat');
+      expect(io.output).toContain('任意键返回');
+      press(io, clock, 'x'); // 只读回执任意键返回
+      expect(io.output).toContain('[全部]');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('挂载：prompt 补参（目标应用 id）→ admin.mount（逗号/空格分隔）', async () => {
+    const { admin, calls } = fakeAdmin();
+    const { io, clock, shell } = started({ admin });
+    try {
+      press(io, clock, KEY.m);
+      for (let i = 0; i < 4; i++) press(io, clock, KEY.down); // 挂载
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('挂载「对话（chat）」');
+      for (const ch of 'chat, extra') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(calls).toEqual(['mount:chat:chat+extra']);
+      expect(io.output).toContain('挂载完成（单行提示形）'); // string 形回执 = 桌面提示行
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('管理动作异常：诚实转述失败（回桌面不悬在中间态）', async () => {
+    const admin: DesktopAdminFace = {
+      configure: async () => {
+        throw new Error('配置炸了');
+      },
+      uninstallInspect: async () => '卸载检视失败：未知 id',
+      uninstallExecute: async () => '卸载执行失败',
+      unmount: async () => '卸挂载失败',
+      mount: async () => '挂载失败',
+    };
+    const { io, clock, shell } = started({ admin });
+    try {
+      press(io, clock, KEY.m);
+      press(io, clock, KEY.down);
+      press(io, clock, KEY.enter);
+      for (const ch of '{"k":1}') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(io.output).toContain('管理动作失败：配置炸了');
+      expect(io.output).toContain('[全部]');
+    } finally {
+      void shell.dispose();
+    }
   });
 });

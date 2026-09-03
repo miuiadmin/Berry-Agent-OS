@@ -42,7 +42,7 @@ describe('createDesktopService holder（服务面三动词）', () => {
 });
 
 describe('createDesktopApp（Ring 1 desktop 行装载体）', () => {
-  it('零依赖件形态：name=desktop、apply provide desktop 服务（scope 真跑）', async () => {
+  it('零依赖件形态：name=desktop、apply provide desktop + desktop-status 两服务（scope 真跑）', async () => {
     const app: BuiltinAppModule = createDesktopApp();
     expect(app.name).toBe('desktop');
     // 最小 scope 探针：provide 落名可 tryGet（真实装载序在 assembly 全栈锁——
@@ -56,9 +56,14 @@ describe('createDesktopApp（Ring 1 desktop 行装载体）', () => {
     };
     const result = app.apply(scope as never);
     expect(result).toBeUndefined();
-    expect(provided).toHaveLength(1);
-    expect(provided[0]![0]).toBe('desktop');
+    // 批 D 起 provide 两键：desktop（换防 face holder）+ desktop-status（顶栏
+    // 状态聚合器 holder——骨架篇 §1.2 槽位扩展，同款 attach/detach 语义）
+    expect(provided).toHaveLength(2);
+    expect(provided.map(([key]) => key)).toEqual(['desktop', 'desktop-status']);
     expect(typeof (provided[0]![1] as { backToDesktop: unknown }).backToDesktop).toBe('function');
+    const status = provided[1]![1] as { attach: unknown; snapshot: unknown };
+    expect(typeof status.attach).toBe('function');
+    expect(typeof status.snapshot).toBe('function');
   });
 
   it('零引擎声明：desktop-service.ts 不 import src/desktop/ 任何件（行装载体纯服务面）', () => {
