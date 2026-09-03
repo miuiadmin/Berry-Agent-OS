@@ -751,7 +751,11 @@ async function runGoalSummary(goal: GoalRecord, opts: SummaryMachineOpts): Promi
   const projected = sessions.deriveMessages();
   const headers = sessions.eventsOfType('request/header');
   const lastHeader = headers.at(-1);
-  const model = lastHeader !== undefined ? (lastHeader.data as { model?: string }).model : undefined;
+  // 读点形状注记：模型在 config 腿内（chat 件 writeHeader 落账形——会话篇 §1.3
+  // 事件表），顶层 .model 是修前病读点（恒 undefined 恒走 200k 回退——与
+  // compaction 同形第二处，第十一轮遗漏大扫 20260904-b CB2 同笔修死）
+  const model =
+    lastHeader !== undefined ? (lastHeader.data as { config?: { model?: string } }).config?.model : undefined;
   const contextWindow = model !== undefined ? llm.getModel(model)?.contextWindow : undefined;
   if (!shouldSummarize({ contextWindow, projectedChars: JSON.stringify(projected).length })) return;
   // 区间规划（激活锚 floor——锚前旧会话史归 compaction 管辖不越界遮蔽）

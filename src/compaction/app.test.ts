@@ -65,9 +65,14 @@ interface StubCompleteResult {
   readonly usage: { readonly input: number; readonly output: number };
 }
 
-/** 建 ctx + 三服务 + apply 件（缺省窗口 200_000 / ratio 0.5 → 阈 100_000）；opts.agent=false 建 agent 缺席形态 */
+/** 建 ctx + 三服务 + apply 件（getModel 窗 200_000 / **fallback 50_000** / ratio 0.5 → 元数据路阈 100_000、回退路阈 25_000——两路故意分岔：读点读错模型腿必被既有阈下用例抓红，第十一轮遗漏大扫 20260904-b B2 拆共谋）；opts.agent=false 建 agent 缺席形态 */
 function setup(opts?: { agent?: boolean }): Harness {
-  const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
+  const ctx = createContext({
+    logger: createLogger({ module: 'test', level: 'silent' }),
+    // 回退窗与 getModel 元数据窗分岔（拆「stub 窗 == fallback 窗」的双重共谋——
+    // 同值时读点读错模型腿也同阈，测试永红不了）
+    config: { fallbackWindowTokens: 50_000 },
+  });
   const session = new Session();
 
   // agent stub：订阅表 + 可控重播种
@@ -125,8 +130,15 @@ function setup(opts?: { agent?: boolean }): Harness {
     getModel: (_id: string): { contextWindow: number } => ({ contextWindow: 200_000 }),
   });
 
-  // 模型窗口判据源：request/header 末条 + getModel 元数据
-  session.append('request/header', { model: 'test-model', mode: 'default' });
+  // 模型窗口判据源：request/header 末条 config.model + getModel 元数据（生产
+  // 形状——chat 件 writeHeader 落账形；修前夹具 `{ model, mode }` 顶层键是照
+  // 病读点反推的非生产形状，第十一轮遗漏大扫 20260904-b B2 拆共谋随笔）
+  session.append('request/header', {
+    config: { model: 'test-model', sandbox: 'default' },
+    systemPrompt: '系统提示词',
+    toolSchemas: [],
+    reason: 'initial',
+  });
 
   const plugin: BuiltinAppModule = createCompactionApp();
   void plugin.apply(ctx as never, ctx.config);
@@ -214,6 +226,29 @@ describe('compaction 官方件 apply', () => {
     await until(() => h.reseedCalls() >= 0); // 结算链空转
     expect(h.session.events.some((e) => e.type === 'compaction/start')).toBe(false);
     expect(h.prompts()).toHaveLength(0);
+  });
+
+  it('【回归锁 第十一轮 B2】窗口读点取 request/header 的 config.model（生产形状）——元数据路与回退路两世界分岔', async () => {
+    // 修前形态：读点读顶层 .model（恒 undefined）→ 恒走 fallbackWindowTokens
+    // 回退窗——夹具 getModel 窗（200_000）与回退窗同值时两世界同阈，测试永红
+    // 不了（stub 与夹具双重共谋）。本夹具两窗故意分岔：元数据路阈 100_000、
+    // 回退路阈 25_000——50_000 在两世界判定相反，读点读错必被本用例抓红。
+    const h = setup();
+    for (let i = 0; i < 5; i++) h.addTurn();
+    h.setUsage(50_000);
+    h.fire();
+    await until(() => h.reseedCalls() >= 0);
+    // 50_000 < 元数据路阈 100_000：不触发（修前红——回退路阈 25_000 误触）
+    expect(h.session.events.some((e) => e.type === 'compaction/start')).toBe(false);
+    expect(h.prompts()).toHaveLength(0);
+    // 反向界：30_000 在元数据路阈（100_000）下不触发、在回退路阈（25_000）上
+    // 会触发——生产形状 header 在场时元数据窗必须赢。header 缺席世界（无
+    // request/header 事件）由 fallback 接管：25_000 阈下 30_000 应触发——回退
+    // 路自身的行为面由 policy 纯函数单测锁定，此处不重复造 400k 字符大投影。
+    h.setUsage(30_000);
+    h.fire();
+    await until(() => h.reseedCalls() >= 0);
+    expect(h.session.events.some((e) => e.type === 'compaction/start')).toBe(false);
   });
 
   it('complete 抛错：落 compaction/failed 孪生（冷却数据源）', async () => {

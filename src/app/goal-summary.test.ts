@@ -133,8 +133,15 @@ function setup(processKind?: 'tui' | 'run' | 'tick' | 'daemon'): Harness {
   ctx.provide('channels', { registerCommand: () => () => undefined } as never);
   ctx.provide('ui', { notify: (message: string) => notes.push(message) } as never);
 
-  // 模型窗口判据源：request/header 末条 + getModel 元数据
-  session.append('request/header', { model: 'test-model' });
+  // 模型窗口判据源：request/header 末条 config.model + getModel 元数据（生产
+  // 形状——chat 件 writeHeader 落账形；修前夹具 `{ model }` 顶层键是照病读点
+  // 反推的非生产形状，第十一轮遗漏大扫 20260904-b CB2 拆共谋随笔）
+  session.append('request/header', {
+    config: { model: 'test-model', sandbox: 'default' },
+    systemPrompt: '系统提示词',
+    toolSchemas: [],
+    reason: 'initial',
+  });
 
   // processKind 透传（tick 形态豁免用例——遗漏大扫 20260902-c #5；条件展开
   // 保持缺省 undefined = 非 tick 的既有行为面）

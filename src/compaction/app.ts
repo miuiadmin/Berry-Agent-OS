@@ -265,11 +265,11 @@ export function createCompactionApp(): BuiltinAppModule {
         return null;
       };
 
-      /** 读当前模型窗口（末条 request/header 的 model → getModel 元数据；未知 undefined） */
+      /** 读当前模型窗口（末条 request/header 的 config.model → getModel 元数据；未知 undefined——回退窗兜底）。读点形状注记：模型在 config 腿内（chat 件 writeHeader 落账形 { config: { model, sandbox }, systemPrompt, toolSchemas }——会话篇 §1.3 事件表），顶层 .model 是修前病读点（恒 undefined 恒走回退，第十一轮遗漏大扫 20260904-b B2 修死） */
       const currentContextWindow = (): number | undefined => {
         const headers = sessions.eventsOfType('request/header');
         const last = headers.at(-1);
-        const model = last !== undefined ? (last.data as { model?: string }).model : undefined;
+        const model = last !== undefined ? (last.data as { config?: { model?: string } }).config?.model : undefined;
         return model !== undefined ? llm.getModel(model)?.contextWindow : undefined;
       };
 
