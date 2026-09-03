@@ -89,15 +89,29 @@ if (process.argv[1] !== undefined && import.meta.url === new URL(`file://${proce
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--label' && argv[i + 1] !== undefined) labels.push(argv[++i]);
   }
-  if (process.env.LABELS !== undefined) labels.push(...JSON.parse(process.env.LABELS));
+  if (process.env.LABELS !== undefined) {
+    // 容错出口（与真红 exit 1 不可区分即红失效——LABELS 是 CI 注入面，注入炸
+    // 语法错不该伪装成闸红）：非法 JSON → 用法错 exit 2 + stderr 点名注入物
+    try {
+      labels.push(...JSON.parse(process.env.LABELS));
+    } catch {
+      console.error(`[PR 闸] LABELS env 非法 JSON（CI 注入面损坏）：${process.env.LABELS}`);
+      process.exit(2);
+    }
+  }
   /** --files 逗号列（BASE_SHA 缺席时的本地方便门） */
   const filesIdx = argv.indexOf('--files');
   const baseIdx = argv.indexOf('--base');
   const baseSha = baseIdx >= 0 ? argv[baseIdx + 1] : process.env.BASE_SHA;
   let changedFiles;
   if (baseSha !== undefined) {
-    // 三点形 diff = merge-base 语义（PR 面而非两条分支的全量差）；env 剥 GIT_* 防钩子泄漏错仓
-    const r = spawnSync('git', ['diff', '--name-only', `${baseSha}...HEAD`], { encoding: 'utf8', env: cleanGitEnv() });
+    // 三点形 diff = merge-base 语义（PR 面而非两条分支的全量差）；env 剥 GIT_* 防钩子泄漏错仓；
+    // -c core.quotepath=false 防 CJK 路径八进制转义——转义形 "docs/API\345.." 与
+    // ARTIFACT_FILES 裸中文串永不 matches，第二刀对已再生中文生成物的 PR 确定性假红
+    const r = spawnSync('git', ['-c', 'core.quotepath=false', 'diff', '--name-only', `${baseSha}...HEAD`], {
+      encoding: 'utf8',
+      env: cleanGitEnv(),
+    });
     if (r.status !== 0) throw new Error(`git diff ${baseSha}...HEAD 失败：${r.stderr}`);
     changedFiles = r.stdout.split('\n').filter((l) => l !== '');
   } else if (filesIdx >= 0 && argv[filesIdx + 1] !== undefined) {

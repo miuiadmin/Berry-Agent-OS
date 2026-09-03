@@ -22,7 +22,10 @@ jobs:
         with:
           # 全史拉取（BASE...HEAD 三点 diff 需要 base 可达——与 ci.yml 同律）
           fetch-depth: 0
-      - name: PR 裁决标签闸（面文件变更必带 api-break:/api-deprecate:/api-add: 之一）
+      # name 值必带引号：裸值含「api-add: 之一」（冒号+空格）会被 YAML 判嵌套映射
+      # 拒解析——整个 workflow 静默不跑（2026-09-03 全面复盘销账期实测发现：批 91
+      # 落笔起该闸从未在 CI 跑过）。同类形检查 ci.yml 零染。
+      - name: "PR 裁决标签闸（面文件变更必带 api-break:/api-deprecate:/api-add: 之一）"
         env:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

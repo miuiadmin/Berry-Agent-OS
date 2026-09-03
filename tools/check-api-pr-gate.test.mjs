@@ -15,10 +15,11 @@
  *    ——三点形 merge-base 语义的实证锁（PR 面而非全量差）。
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import yaml from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { adjudicatePrApiGate } from './check-api-pr-gate.mjs';
 
@@ -119,7 +120,7 @@ describe('check-api-pr-gate CLI：红/绿探针（spawn 真脚本）', () => {
 });
 
 describe('check-api-pr-gate CLI：BASE_SHA diff 路（三点形 merge-base 语义实证）', () => {
-  it('临时仓两 commit——base 后触面文件的 PR diff 命中，base 前的触碰不计', () => {
+  it('临时仓两 commit——CJK 生成物路径可赢形态：base 后触面文件的 PR diff 命中，base 前的触碰不计', () => {
     const dir = mkdtempSync(join(tmpdir(), 'berry-pr-gate-'));
     // env 必剥 GIT_*：钩子环境泄漏会让 -C 失效错写宿主仓（见 cleanGitEnv 注释）
     const git = (args, opts = {}) =>
@@ -135,9 +136,14 @@ describe('check-api-pr-gate CLI：BASE_SHA diff 路（三点形 merge-base 语�
       git(['add', '.']);
       git(['commit', '-q', '-m', 'base']);
       const base = git(['rev-parse', 'HEAD']).stdout.trim();
-      // PR commit：再触面文件 + 生成物伴生改（第二刀可赢条件）+ 顺手他文件
+      // PR commit：触面文件 + **CJK 生成物**伴生改（第二刀可赢条件）+ 顺手他文件。
+      // 生成物刻意取中文路径 docs/API参考.md 而非 ASCII 的 COMPATIBILITY.md：
+      // git 缺省 core.quotepath=true 会把 CJK 路径转义成 "docs/API\345\217\202…"
+      // 八进制形——与 ARTIFACT_FILES 裸中文串永不 matches，第二刀对已再生的
+      // 合规 PR 假红（quotepath 回归锁：修复〔-c core.quotepath=false〕前必红）
+      mkdirSync(join(dir, 'docs'), { recursive: true });
       writeFileSync(join(dir, 'src/contracts/api-surface.json'), '{"v":2}\n');
-      writeFileSync(join(dir, 'COMPATIBILITY.md'), '# compat v2\n');
+      writeFileSync(join(dir, 'docs/API参考.md'), '# api ref v2\n');
       writeFileSync(join(dir, 'README.md'), '# y\n');
       git(['add', '.']);
       git(['commit', '-q', '-m', 'face change']);
@@ -155,9 +161,37 @@ describe('check-api-pr-gate CLI：BASE_SHA diff 路（三点形 merge-base 语�
         encoding: 'utf8',
         env: cleanGitEnv(),
       });
-      expect(green.status).toBe(0); // 宣告即绿
+      expect(green.status).toBe(0); // 宣告即绿——CJK 生成物被认作伴生再生物（quotepath 修死后）
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('check-api-pr-gate CI 载体：workflow YAML 可解析（闸静默不跑类缺陷锁）', () => {
+  it('.github/workflows/*.yml 全部过 YAML 解析——裸冒号值让 GitHub 拒载整个 workflow', () => {
+    // 回归锁：批 91 落笔的 name 值含「api-add: 之一」（冒号+空格）未加引号——
+    // YAML 判嵌套映射拒解析，PR 闸 workflow 自落地起从未在 CI 跑过（2026-09-03
+    // 销账期实测发现）。本锁读真文件逐个 parse，任何 workflow 再犯同类形当场红。
+    const { parse } = yaml;
+    const wfDir = join(ROOT, '.github', 'workflows');
+    const files = readdirSync(wfDir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) {
+      expect(() => parse(readFileSync(join(wfDir, f), 'utf8')), f).not.toThrow();
+    }
+  });
+});
+
+describe('check-api-pr-gate CLI：LABELS env 容错（CI 注入面损坏不伪装成闸红）', () => {
+  it('LABELS 非法 JSON → exit 2 用法错 + stderr 点名注入物（与真红 exit 1 可区分）', () => {
+    const r = spawnSync(process.execPath, [SCRIPT, '--files', 'src/app/x.ts'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: { ...cleanGitEnv(), LABELS: 'not-json' },
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('LABELS');
+    expect(r.stderr).toContain('非法 JSON');
   });
 });
