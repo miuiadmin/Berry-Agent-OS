@@ -64,6 +64,10 @@ import type { DatabaseConnection } from '../persist/index.js';
 // session 边（2026-09-01 复盘 R-1「先看见的边」纪律）：llm/usage callId 判别式
 // 同源收口——与 durable.ts 前台腿 / notify.ts 折叠腿两写点共用 event-types 三函数
 import { isDelegationUsageCallId } from '../session/event-types.js';
+// 预算刀自 session 共享件导入（第九轮 #7②/#20 修死）：摘要三面（事件 text/
+// 载体 content/缓存列）同刀同文本 + 沉淀失败 error 腿 2KiB 小帽——走公开面
+// '../session/index.js'，禁深挖 budget.ts（契约篇 §6.3#2）
+import { budgetString, DURABLE_ERROR_MESSAGE_BUDGET_BYTES } from '../session/index.js';
 import type { SessionEvent } from '../contracts/events.js';
 import { GoalStore, newWakeId } from './store.js';
 import {
@@ -86,6 +90,7 @@ import {
   buildGoalSummaryPrompt,
   GOAL_SUMMARY_PREFIX,
   type GoalSummaryEventPayload,
+  type GoalSummaryFailedEventPayload,
   type SummaryMessageView,
 } from './summary.js';
 
@@ -392,8 +397,10 @@ async function applyGoalApp(
       'ctx.agent 未提供（chat 件未装载或诊断装配）——goal 续跑触发/轮间沉淀降级停用（工具/命令/预算刹车不受影响）',
     );
   } else {
-    /** ⑥ 沉淀机器（刀四 T6-A）——fire-and-forget，异常止步 debug（水位不进 =
-     * 下次结算自然重试；llm 预算拒发 LLM_BUDGET_EXCEEDED 同路让位） */
+    /** ⑥ 沉淀机器（刀四 T6-A）——fire-and-forget，异常落 goal/summary-failed
+     * durable 事件（第九轮 #20 修死：catch 只 debug 落日志 = 「只在 debug 出现
+     * 的分支其行为不是 durable 事件」红线违例——沉淀失败无账面、重试无界），
+     * 水位不进 = 下次结算自然重试（llm 预算拒发 LLM_BUDGET_EXCEEDED 同路让位） */
     const llm = ctx.get<GoalLlmFace>('llm');
     const attemptSummary = (goal: GoalRecord): void => {
       void runGoalSummary(goal, {
@@ -404,6 +411,20 @@ async function applyGoalApp(
         // 自报越限的挂钟腿（stopByBudget/evidence 在机器内——闭包在此接线）
         onBudgetStop: (goalId) => suspendWake(goalId),
       }).catch((err: unknown) => {
+        // 沉淀失败落账（compaction/failed 先例——log-only 事实源事件）：error =
+        // describeError 摘要过 2KiB 错误腿小帽（错误说明是归因线索非全文）。
+        // 内层 try/catch 防失败落账自身再炸（如 append 抛错）反噬宿主结算链
+        try {
+          sessions.appendEvent('goal/summary-failed', {
+            goalId: goal.goalId,
+            error: budgetString(describeError(err), DURABLE_ERROR_MESSAGE_BUDGET_BYTES),
+          } satisfies GoalSummaryFailedEventPayload);
+        } catch (appendErr) {
+          ctx.logger.warn('goal 轮间沉淀失败且失败事件落账失败', {
+            goalId: goal.goalId,
+            error: describeError(appendErr),
+          });
+        }
         ctx.logger.debug('goal 轮间沉淀失败（下次结算重试）', { goalId: goal.goalId, error: describeError(err) });
       });
     };
@@ -749,7 +770,11 @@ async function runGoalSummary(goal: GoalRecord, opts: SummaryMachineOpts): Promi
     escape: escapeXml,
   });
   const result = await llm.complete({ messages: [{ role: 'user', content: prompt }], priority: 'background' });
-  const text = extractSummaryText(result.message.content);
+  // 预算刀（第九轮 #7②）：LLM 单发摘要无体积硬约束——模型超产原样落 append 必
+  // 抛 SESSION_EVENT_TOO_LARGE → attemptSummary catch（debug-only）→ 每次结算
+  // 后台重烧一次 LLM 单发再失败，零账面。过刀后事件 text / 载体 content /
+  // 缓存列三面共用同一截断文本（预算一次）
+  const text = budgetString(extractSummaryText(result.message.content));
   if (text === '') return; // 模型未产出文本——诚实缺席不落空摘要
   // ① 事实源事件（goal/summary：载荷 goalId/text/summarySeq——缓存列可回填面）
   const summaryEvent = sessions.appendEvent('goal/summary', {

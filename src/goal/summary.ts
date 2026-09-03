@@ -176,10 +176,19 @@ export function buildGoalSummaryPrompt(input: {
 /** goal/summary durable 事件载荷（沉淀④步写点形状） */
 export interface GoalSummaryEventPayload {
   readonly goalId: string;
-  /** 摘要正文（载体遮蔽段之外的事实源文本） */
+  /** 摘要正文（载体遮蔽段之外的事实源文本——过预算刀，三面同刀同文本） */
   readonly text: string;
   /** 沉淀水位（本段覆盖到的事件 seq——增量 no-op 的锚） */
   readonly summarySeq: number;
+}
+
+/** goal/summary-failed durable 事件载荷（沉淀失败写点形状——第九轮 #20 修死：
+ * attemptSummary catch 落 log-only 事实源事件，compaction/failed 先例；error =
+ * describeError 摘要过 2KiB 错误腿小帽） */
+export interface GoalSummaryFailedEventPayload {
+  readonly goalId: string;
+  /** 失败归因摘要（错误说明非全文——budgetString 2KiB 小帽截断） */
+  readonly error: string;
 }
 
 /**

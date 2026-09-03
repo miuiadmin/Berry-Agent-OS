@@ -37,3 +37,15 @@ export type { ProjectedMessage, ProjectedToolCall } from './derive.js';
 export { interruptedTurnClosers, lastClosedTurnBoundary } from './recover.js';
 export type { SyntheticCloser } from './recover.js';
 export { snapshotJsonValue, deepFreeze, jsonBytes } from './snapshot.js';
+// 预算刀（第九轮 #7/#12 迁入共享件）：durable 落账前的内容预算截断——
+// compaction/goal/assembly 宿主代写面/todo 与 chat 共用（详见 budget.ts 头注）
+export {
+  DURABLE_CONTENT_BUDGET_BYTES,
+  DURABLE_ERROR_MESSAGE_BUDGET_BYTES,
+  TRUNCATED_MARKER,
+  blockBytes,
+  escapedBytes,
+  budgetString,
+  truncateForDurable,
+} from './budget.js';
+export type { DurableBlock } from './budget.js';

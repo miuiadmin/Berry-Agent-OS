@@ -230,6 +230,33 @@ describe('compaction 官方件 apply', () => {
     expect(h.session.events.some((e) => e.type === 'user/message' && e.surfaceOp)).toBe(false);
   });
 
+  it('【回归锁 第九轮 #7①】超 64KiB 摘要过预算刀落账：summary 事件与载体双面截断标记，五步照常走完', async () => {
+    const h = setup();
+    for (let i = 0; i < 5; i++) h.addTurn();
+    h.setUsage(150_000);
+    // 模型超产 70KiB 摘要（软约束只有提示词；修前 text 全量落 append 抛
+    // SESSION_EVENT_TOO_LARGE → compaction/failed，会话不可续入）
+    h.setComplete(async () => ({
+      message: { content: 'S'.repeat(70 * 1024), model: 'test-model' },
+      usage: { input: 120, output: 60 },
+    }));
+    h.fire();
+    await until(() => h.session.events.some((e) => e.type === 'compaction/end'));
+
+    // summary 事件落账成功 + 体积在护栏内 + 带截断标记（同尺刀——溯源不丢）
+    const summary = h.session.events.find((e) => e.type === 'compaction/summary')!;
+    const serialized = Buffer.byteLength(JSON.stringify(summary.data), 'utf8');
+    expect(serialized).toBeLessThanOrEqual(64 * 1024);
+    expect(String((summary.data as { text: string }).text)).toContain('truncated for durable log');
+    // 载体 content 同刀同文本（预算一次、事件与载体共用）
+    const carrier = h.session.events.find((e) => e.type === 'user/message' && e.surfaceOp !== undefined)!;
+    const carrierSerialized = Buffer.byteLength(JSON.stringify(carrier.data), 'utf8');
+    expect(carrierSerialized).toBeLessThanOrEqual(64 * 1024);
+    expect(String((carrier.data as { content: string }).content)).toContain('truncated for durable log');
+    // 五步照常走完（非 failed——触发链不被超产摘要炸断）
+    expect(h.session.events.some((e) => e.type === 'compaction/failed')).toBe(false);
+  });
+
   it('【回归锁 20260902-c #5】drain：在飞压缩汇流等待（慢 complete 未决即 drain 未决）+ 五步全落才 resolve + 无在飞直返', async () => {
     const h = setup();
     for (let i = 0; i < 5; i++) h.addTurn();
@@ -394,6 +421,24 @@ describe('compaction 溢出面 compactForOverflow', () => {
     expect(String((failed.data as { error: string }).error)).toContain('599');
     // 载体未落（失败在摘要步——无遮蔽半成品）
     expect(h.session.events.some((e) => e.type === 'user/message' && e.surfaceOp)).toBe(false);
+  });
+
+  it('【回归锁 第九轮 #7 溢出腿】超 64KiB 摘要不落 failed——预算刀后 compacted（溢出兜底可续入，retry-once 名额不虚耗）', async () => {
+    const h = setup();
+    for (let i = 0; i < 5; i++) h.addTurn();
+    // 溢出腿显式去冷却（修前恒败形态：每轮重烧一次完整 LLM 摘要调用后恒返
+    // failed——会话永久无法续入；预算刀后超产摘要照常落账）
+    h.setComplete(async () => ({
+      message: { content: 'O'.repeat(70 * 1024), model: 'test-model' },
+      usage: { input: 120, output: 60 },
+    }));
+    const verdict = await h.overflow()!.compactForOverflow();
+
+    expect(verdict).toBe('compacted');
+    expect(h.session.events.some((e) => e.type === 'compaction/failed')).toBe(false);
+    const summary = h.session.events.find((e) => e.type === 'compaction/summary')!;
+    expect(Buffer.byteLength(JSON.stringify(summary.data), 'utf8')).toBeLessThanOrEqual(64 * 1024);
+    expect(String((summary.data as { text: string }).text)).toContain('truncated for durable log');
   });
 
   it('在飞互斥（配套⑤）：阈值路压缩在飞时等待 → 结算后见新压缩终点直返 compacted 不重复压', async () => {

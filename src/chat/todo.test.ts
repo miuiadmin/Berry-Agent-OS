@@ -320,6 +320,43 @@ describe('createTodoTool', () => {
   });
 });
 
+/* ---------------- 序列化字节预算（第九轮全面复盘 20260903 #21——⑨ 算术修死） ---------------- */
+
+describe('createTodoTool·序列化字节预算（第九轮 #21——schema 静态道算术被 ⑬ 扩面击穿后的 execute 动态道）', () => {
+  /** goal 段执法桩（gates 面在场最小形——needsWrite false 不触发申报期面缺席拒绝） */
+  const enforcement = { scope: () => ({ active: true as const, activatedSeq: 1, needsWrite: false }) };
+
+  it('goal 段合法 gate 形态超 60KiB 内容预算 → execute 段响亮拒 TODO_WRITE_TOO_LARGE，不落到 append 抛错段', async () => {
+    const session = new Session({ sessionId: 's-budget' });
+    const def = createTodoTool(session, enforcement as never);
+    // ⑬ 合法形态：50 项 × gate 数组 20×500 字符（schema 段全放行——实测序列化
+    // ~500KB+，CJK 更大；修前落到 session.append 抛 SESSION_EVENT_TOO_LARGE，
+    // 与原注释「不落到 append 抛错」相反）
+    const items = Array.from({ length: 50 }, (_, i) => ({
+      content: `第${i}步`,
+      status: 'pending' as const,
+      gate: { kind: 'files' as const, spec: Array.from({ length: 20 }, () => 'e'.repeat(500)) },
+    }));
+    await expect(def.execute({ items }, { toolCallId: 'tc' } as never)).rejects.toMatchObject({
+      code: 'TODO_WRITE_TOO_LARGE',
+    });
+    // fail-closed 零落账（与段约束/gates 同拒绝语义——模型收窄重写后重试）
+    expect(session.events.filter((e) => e.type === 'todo/write')).toHaveLength(0);
+  });
+
+  it('预算内常规表照常落账（动态道零成本快路径不破既有语义）', async () => {
+    const session = new Session({ sessionId: 's-budget-ok' });
+    const def = createTodoTool(session, enforcement as never);
+    // 预算内 goal 段合法带 gate 形态（declareGateFailure files 形状配对通过）
+    const items = [
+      { content: '正常步骤', status: 'pending' as const, gate: { kind: 'files' as const, spec: ['a.ts'] } },
+    ];
+    const result = await def.execute({ items }, { toolCallId: 'tc' } as never);
+    expect(result.isError).toBeUndefined();
+    expect(session.events.filter((e) => e.type === 'todo/write')).toHaveLength(1);
+  });
+});
+
 /* ---------------- 工具件：刀二执法段（goal 段约束 + gates） ---------------- */
 
 /** 造临时工作区根（files gate 端到端——真 stat 非 mock） */

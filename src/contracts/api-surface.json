@@ -2280,6 +2280,17 @@
       ]
     },
     {
+      "symbol": "TODO_WRITE_TOO_LARGE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "TOOLS_CHANGE_EVENT",
       "module": "berryagent",
       "tier": "stable",
@@ -3867,6 +3878,17 @@
     },
     {
       "symbol": "goal/summary",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "goal/summary-failed",
       "module": "session-events",
       "tier": "stable",
       "since": "1.0",

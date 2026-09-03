@@ -7,18 +7,18 @@
 
 | 模块 | stable | experimental | deprecated | 合计 |
 |---|---|---|---|---|
-| `berryagent` | 273 | 0 | 0 | 273 |
+| `berryagent` | 274 | 0 | 0 | 274 |
 | `berryagent/llm` | 4 | 0 | 0 | 4 |
 | `berryagent/sqlite` | 1 | 0 | 0 | 1 |
 | `data-keys` | 3 | 0 | 0 | 3 |
 | `live-events` | 28 | 0 | 0 | 28 |
 | `manifest` | 10 | 0 | 0 | 10 |
 | `services` | 18 | 0 | 0 | 18 |
-| `session-events` | 27 | 0 | 0 | 27 |
+| `session-events` | 28 | 0 | 0 | 28 |
 | `typebox` | 3 | 0 | 0 | 3 |
 | `typebox/compile` | 2 | 0 | 0 | 2 |
 | `typebox/value` | 1 | 0 | 0 | 1 |
-| **合计** | 370 | 0 | 0 | **370** |
+| **合计** | 372 | 0 | 0 | **372** |
 
 能力面（capabilities）共 14 项。
 

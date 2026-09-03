@@ -403,6 +403,19 @@ describe('createRuntime 装配面', () => {
       }),
     ).rejects.toThrowError(/溯源依据在列/);
 
+    // 执法点 ⑤【回归锁 第九轮 #7③】：字符串形载体 content 过预算刀（宿主代写
+    // 面不得绕开 64KiB 护栏——修前 string 全量透传 session.append 抛
+    // SESSION_EVENT_TOO_LARGE 炸穿遮蔽事务；块数组形结构上不发生，交 schema 闸）
+    const oversized = await sessions.appendWithSurfaceOp({
+      type: 'user/message',
+      data: { content: 'S'.repeat(70 * 1024), source: 'app:compaction' },
+      surfaceOp: { op: 'replace', start: 1, end: 2 },
+      sourceEventSeqs: [0, 1, 2],
+    });
+    expect(oversized).toBeDefined();
+    expect(Buffer.byteLength(JSON.stringify(oversized!.data), 'utf8')).toBeLessThanOrEqual(64 * 1024);
+    expect(String((oversized!.data as { content: string }).content)).toContain('truncated for durable log');
+
     // 合法路径：遮 [1,2] + 依据含区间外 seq0 → 落账 + 投影读面生效
     const carrier = await sessions.appendWithSurfaceOp({
       type: 'user/message',

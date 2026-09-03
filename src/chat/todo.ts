@@ -29,7 +29,9 @@ import type { AgentToolResult, ToolCtx, ToolDefinition } from '../contracts/tool
 import type { Session } from '../session/session.js';
 import { occludedSeqs } from '../session/derive.js';
 import { Type } from '../contracts/typebox.js';
-import { AppError, GOAL_GATE_FAILED } from '../contracts/errors.js';
+import { AppError, GOAL_GATE_FAILED, TODO_WRITE_TOO_LARGE } from '../contracts/errors.js';
+// 预算刀常数（第九轮 #21）：todo 整表序列化字节预算与 durable 内容预算同值同尺
+import { DURABLE_CONTENT_BUDGET_BYTES } from '../session/index.js';
 import { declareGateFailure, renderGateFailure, runTodoGates, enforceTodoScope } from './todo-gates.js';
 import type { CommandGateRunner, DiagnosticsGateQuery, TodoGoalScope } from './todo-gates.js';
 
@@ -244,9 +246,11 @@ export interface TodoEnforcement {
  * todo 工具 def（注册位在驱动 open——`tools.register(def, { driver: sessionId,
  * domain: appId })`，fs/bash 五件同款；本函数只出 def 不碰注册表）。
  *
- * schema 上限护栏（冷读裁决⑨）：maxItems 50 / 文本字段 maxLength 160——
- * 保守合计 < 64KiB 单事件护栏，超限在 schema 段拒绝（模型收窄重写），不落
- * 到 append 抛错。effect 'read'（goal 续跑轮按 read 类自动收留，裁决⑪）。
+ * schema 上限护栏 = **静态道**（冷读裁决⑨）：maxItems 50 / 文本字段 maxLength 收
+ * 形状上限（模型侧提前收窄），但合计算术护栏被 ⑬ gate.spec 扩面击穿（第九轮
+ * #21 实测：gate.spec 数组形态 50×20×500 CJK ≈1566KiB、无 gate CJK 满长
+ * ≈96KiB，皆超 64KiB 事件护栏）——体积硬执法在 execute 段动态道（见下 3）。
+ * effect 'read'（goal 续跑轮按 read 类自动收留，裁决⑪）。
  *
  * 刀二双执法位全在 execute 段（冷读 NEW-2 拍死——schema 静态注册上下文盲，
  * 段语义无从在 schema 落；schema 对 goal 段扩字段只收形状，词法/归属/准入
@@ -256,6 +260,11 @@ export interface TodoEnforcement {
  * 2. **gates**（declareGateFailure 申报期准入 + runTodoGates 验证期执法）：
  *    置 completed 且带 gate → 同步验证；不过/超时/畸形/审批拒 = fail-closed
  *    整笔不落账（GOAL_GATE_FAILED 结构化回执）。
+ * 3. **序列化字节预算**（第九轮 #21 修死）：gates 验证后、落账前量
+ *    `JSON.stringify({items})` 的 utf8 字节（与护栏 jsonBytes 同尺），超
+ *    60KiB 内容预算响亮拒绝（TODO_WRITE_TOO_LARGE）**不截断**——todo/write
+ *    是 fold 倒扫/同段回显注入/resume_when 挂钟的机器消费面，截断毁语义；
+ *    拒绝停在工具收据段 = 账面零污染、模型可收窄重写。
  */
 export function createTodoTool(session: TodoWriteFace, enforcement?: TodoEnforcement): ToolDefinition {
   return {
@@ -352,6 +361,20 @@ export function createTodoTool(session: TodoWriteFace, enforcement?: TodoEnforce
         if (failure !== undefined) {
           throw new AppError(GOAL_GATE_FAILED, renderGateFailure(failure));
         }
+      }
+      // 3. 序列化字节预算（第九轮 #21）：gates 验证后、落账前一道——量整表
+      // utf8 字节（与护栏 jsonBytes 同尺：append 量 JSON.stringify 后体积，此处
+      // 同式含 {items} 信封）。超 60KiB 内容预算响亮拒绝不截断：todo/write 是
+      // fold/回显/挂钟的机器消费面，截断毁 gates/followUp/resume_when 语义；
+      // 拒绝停在收据段 = 零 todo/write 事件落账（账面干净），模型可收窄重写
+      //（减条目/缩内容/减 gate 载荷）。schema 静态道管不住 gate.spec 数组形态
+      //（50×20×500 合计可达 MiB 级——形状上限各自合法、乘积越护栏）
+      const serializedBytes = Buffer.byteLength(JSON.stringify({ items }), 'utf8');
+      if (serializedBytes > DURABLE_CONTENT_BUDGET_BYTES) {
+        throw new AppError(
+          TODO_WRITE_TOO_LARGE,
+          `todo 整表序列化 ${serializedBytes} 字节超 ${DURABLE_CONTENT_BUDGET_BYTES} 内容预算（64KiB 事件护栏扣元数据）——请减条目数/缩短条目内容/精简 gate 载荷后重写；整表不截断落账（机器消费面截断毁语义），本次调用零落账`,
+        );
       }
       // durable 落账 = 唯一事实源（模型可见即落日志——回执与注入皆日志派生）
       session.append('todo/write', { items });

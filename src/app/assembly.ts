@@ -106,6 +106,9 @@ import {
   usageLedgerBuckets,
   ledgerModel,
   lastClosedTurnBoundary,
+  // 预算刀（第九轮 #7③）：appendWithSurfaceOp 第五执法点——string 形态载体
+  // content 过刀再落账，宿主代写面不得绕开 64KiB 护栏
+  budgetString,
 } from '../session/index.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
@@ -1262,12 +1265,15 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     /**
      * 遮蔽载体宿主代写（会话篇 §2 增补 6，compaction 纵切装配缺口第 1 件）：
      * 应用携 surfaceOp 的 user/message 载体经宿主写权落账——核心词 user/message
-     * 应用不可伪造（appendEvent 拒），遮蔽注入是唯一例外通道且四执法点在此收口：
+     * 应用不可伪造（appendEvent 拒），遮蔽注入是唯一例外通道且五执法点在此收口：
      * ①载体型单边（仅 user/message——assistant/tool 词写权属 loop，非载体）；
      * ②必带遮蔽（无 surfaceOp 的注入一律走 sendUserMessage 归因正门）；
      * ③归因强制 app: 前缀（宿主代写 = 应用行为，归因必须落在应用名上）；
      * ④依据在列补验（冷读 M-5：sourceEventSeqs 须含区间外至少一笔——遮蔽依据
-     *   本身被遮 = 遮后不可考；区间覆盖半边由 Session.validateSurfaceOp 执法）。
+     *   本身被遮 = 遮后不可考；区间覆盖半边由 Session.validateSurfaceOp 执法）；
+     * ⑤体积预算（第九轮 #7③）：string 形态 content 过预算刀再落账——宿主代写面
+     *   不得绕开 64KiB 护栏（裸传超限文本 append 抛 SESSION_EVENT_TOO_LARGE 炸
+     *   穿遮蔽事务）；块数组形态今日载体结构性不携带，直过既有 schema 闸。
      * 写入即 flush（边缘纪律 3 宿主级落法）：遮蔽载体是模型可见性变更，flush
      * 屏障先于返回——崩溃窗内「载体丢而重播种已做」的内存/日志分叉收窄到屏障内。
      */
@@ -1303,9 +1309,16 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
           `溯源依据在列：sourceEventSeqs 须含区间 [${surfaceOp.start},${surfaceOp.end}] 外至少一笔（遮蔽依据本身被遮 = 遮后不可考）`,
         );
       }
+      // 执法点 ⑤：string 形态 content 过预算刀（块数组/其他形态直过既有闸——
+      // 今日载体结构性只携 string；刀幂等，上游 compaction/goal 已过刀的文本
+      // 零成本快路径原样通过）
+      const data =
+        typeof carrier.data.content === 'string'
+          ? { ...carrier.data, content: budgetString(carrier.data.content) }
+          : carrier.data;
       const current = registry.routed();
       if (current === undefined) return undefined;
-      const event = current.session.append('user/message', carrier.data, {
+      const event = current.session.append('user/message', data, {
         surfaceOp: { op: 'replace', start: surfaceOp.start, end: surfaceOp.end },
         sourceEventSeqs: [...carrier.sourceEventSeqs],
       });

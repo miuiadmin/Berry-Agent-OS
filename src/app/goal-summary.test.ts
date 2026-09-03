@@ -263,7 +263,7 @@ describe('goal ⑥ 轮间沉淀机器（onRunSettled → runGoalSummary）', () 
     expect(h.completeCalls().length).toBe(0);
   });
 
-  it('complete 抛错（LLM_BUDGET_EXCEEDED 形）：无事件落账，goal 保持 active（下次结算重试）', async () => {
+  it('complete 抛错（LLM_BUDGET_EXCEEDED 形）：无 goal/summary，goal 保持 active（下次结算重试）+ 【回归锁 第九轮 #20】失败落 goal/summary-failed（不再 debug-only 无痕）', async () => {
     const h = setup();
     const goalId = h.seedGoal();
     for (let i = 0; i < 5; i++) h.addTurn();
@@ -273,10 +273,47 @@ describe('goal ⑥ 轮间沉淀机器（onRunSettled → runGoalSummary）', () 
     });
     h.fire();
     await until(() => h.completeCalls().length === 1);
-    await new Promise((r) => setTimeout(r, 50));
+    await until(() => h.session.events.some((e) => e.type === 'goal/summary-failed'));
     expect(h.session.events.some((e) => e.type === 'goal/summary')).toBe(false);
     expect(h.store.getByGoalId(goalId)!.status).toBe('active');
     expect(h.store.getByGoalId(goalId)!.summary).toBeNull();
+    // 修前：catch 只 logger.debug——沉淀失败 durable 无痕、重试无界零账面（违
+    // 「只在 debug 出现的分支必须同时是 durable 事件」红线）；修后落失败事件
+    // （compaction/failed 先例——载荷 goalId + error 摘要）
+    const failed = h.session.events.find((e) => e.type === 'goal/summary-failed')!;
+    expect(failed.data).toMatchObject({ goalId });
+    expect(String((failed.data as { error: string }).error)).toContain('LLM budget exceeded');
+    // error 腿过 2KiB 错误小帽（错误说明非全文）
+    expect(Buffer.byteLength(String((failed.data as { error: string }).error), 'utf8')).toBeLessThanOrEqual(
+      2 * 1024 + 64,
+    );
+  });
+
+  it('【回归锁 第九轮 #7②】超 64KiB 摘要过预算刀落账：事件/载体/缓存列三面同刀同文本', async () => {
+    const h = setup();
+    const goalId = h.seedGoal();
+    for (let i = 0; i < 5; i++) h.addTurn();
+    // 模型超产 70KiB 摘要（修前 text 全量落 append 抛 SESSION_EVENT_TOO_LARGE
+    // → attemptSummary catch → 每次结算后台重烧一次 LLM 单发再失败，零账面）
+    h.setComplete(async () => ({
+      message: { content: 'G'.repeat(70 * 1024) },
+      usage: { input: 100, output: 50 },
+    }));
+    h.fire();
+    await until(() => h.session.events.some((e) => e.type === 'goal/summary'));
+
+    const summary = h.session.events.find((e) => e.type === 'goal/summary')!;
+    expect(Buffer.byteLength(JSON.stringify(summary.data), 'utf8')).toBeLessThanOrEqual(64 * 1024);
+    const text = (summary.data as { text: string }).text;
+    expect(text).toContain('truncated for durable log');
+    // 载体 content 同刀同文本（预算一次、三面共用）
+    const carrier = h.session.events.find((e) => e.type === 'user/message' && e.surfaceOp !== undefined)!;
+    expect(Buffer.byteLength(JSON.stringify(carrier.data), 'utf8')).toBeLessThanOrEqual(64 * 1024);
+    expect(String((carrier.data as { content: string }).content)).toContain('truncated for durable log');
+    // 缓存列 = 同一截断文本（三面同刀同文本——列只是缓存）
+    expect(h.store.getByGoalId(goalId)!.summary).toBe(text);
+    // 失败事件不落（成功路——预算刀消灭了越护栏恒败形态）
+    expect(h.session.events.some((e) => e.type === 'goal/summary-failed')).toBe(false);
   });
 
   it('自报越限同笔刹停：stopByBudget + evidence budget + 摘钟回调——不注入收尾提示', async () => {

@@ -390,6 +390,8 @@ export const GOAL_TRANSITION_INVALID = registerErrorCode('GOAL_TRANSITION_INVALI
 export const GOAL_GATE_FAILED = registerErrorCode('GOAL_GATE_FAILED');
 /** goal：todo 载荷段约束违规——非 goal 段申报 goal 段词汇（role/task_class/resume_when/deferred/follow_up），或 goal 段内 deferred 缺 resume_when、completed 缺二择一（第三十九批 T2-A 预注册，执法位 = todo 工具执行段） */
 export const GOAL_TODO_SCOPE = registerErrorCode('GOAL_TODO_SCOPE');
+/** todo：整表序列化字节超 60KiB 内容预算（第九轮 #21 修死——schema 静态形状上限被 gate.spec 数组形态击穿后，execute 段动态道响亮拒绝不截断：todo/write 是 fold/回显/gates 的机器消费面，截断毁语义）。执法位 = gates 验证后、落账前一道 */
+export const TODO_WRITE_TOO_LARGE = registerErrorCode('TODO_WRITE_TOO_LARGE');
 
 /* ------------------------------------------------------------------ */
 /* 应用面码族（契约篇 §5.4 应用面第二纵切，2026-08-25——清单文件唯一源   */

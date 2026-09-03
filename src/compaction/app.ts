@@ -36,6 +36,10 @@ import { Type } from '../contracts/typebox.js';
 import type { SessionEvent } from '../contracts/events.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { ProjectedMessage } from '../session/derive.js';
+// 预算刀自 session 共享件导入（第九轮 #7① 修死——LLM 单发摘要无体积硬约束，
+// 模型超产即击穿 64KiB 护栏且溢出兜底腿无冷却恒重烧 LLM 调用；走公开面
+// '../session/index.js'，禁深挖 budget.ts——契约篇 §6.3#2）
+import { budgetString } from '../session/index.js';
 // 词汇宿主面注册的模块副作用导入（官方件纪律，会话篇 §2.1：durable 词汇
 // 走宿主面模块级注册而非 ctx.registerSessionEventType——旧日志可读性不随
 // 组合树行装载漂移；件可禁用，曾压缩过的会话日志必须永远可读）
@@ -112,8 +116,8 @@ export const compactionConfig = Type.Object({
   summaryRatio: Type.Optional(Type.Number({ default: 0.2, minimum: 0.05, maximum: 0.5 })),
   /** 摘要预算下限（tokens） */
   summaryMin: Type.Optional(Type.Number({ default: 2000, minimum: 100 })),
-  /** 摘要预算上限（tokens） */
-  summaryMax: Type.Optional(Type.Number({ default: 12000, minimum: 1000 })),
+  /** 摘要预算上限（tokens）——schema 帽只挡配置面荒谬值（第九轮 #7：落账侧安全由写侧预算刀兜底） */
+  summaryMax: Type.Optional(Type.Number({ default: 12000, minimum: 1000, maximum: 100_000 })),
   /** 窗口未知时的兜底假设窗口（tokens——粗估判据用） */
   fallbackWindowTokens: Type.Optional(Type.Number({ default: 200_000, minimum: 10_000 })),
 });
@@ -341,7 +345,12 @@ export function createCompactionApp(): BuiltinAppModule {
           }),
         );
         const result = await llm.complete({ messages: [{ role: 'user', content: prompt }] });
-        const summaryText = extractText(result.message.content);
+        // 预算刀（第九轮 #7①）：LLM 摘要无体积硬约束——软约束只有提示词预算，
+        // 模型超产（如 summaryMax 配高 + CJK 满长）原样落 append 必抛
+        // SESSION_EVENT_TOO_LARGE → 阈值路落 compaction/failed（冷却后重试 =
+        // 重烧一次 LLM 单发再失败）；溢出兜底腿无冷却 = 每次续跑恒重烧。过刀
+        // 截断后事件 text 与遮蔽载体 content 共用同一截断文本（预算一次）
+        const summaryText = budgetString(extractText(result.message.content));
         const summaryEvent = sessions.appendEvent('compaction/summary', {
           text: summaryText,
           model: result.message.model,

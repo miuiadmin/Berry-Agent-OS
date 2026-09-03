@@ -517,6 +517,43 @@ describe('durable error 腿预算帽（第七轮 H-2——同源双载不破护�
   });
 });
 
+/* ---------------- assistant 腿 errorMessage 小帽（第九轮全面复盘 20260903 #12） ---------------- */
+
+describe('durable assistant 腿 errorMessage 预算小帽（第九轮 #12——H-2 同形漏网腿）', () => {
+  it('content 近帽 + errorMessage 6KiB 组合不炸 64KiB 护栏——errorMessage 独立 2KiB 小帽', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    // 错误 assistant 终值：content 有值（~59KiB，各自 60KiB 帽内）+ errorMessage 6KiB
+    // （pi-ai 网关/代理解析垃圾形态可达数 KiB——探针 assistant-errmsg-budget.mts
+    // 实测修前 66714B > 65536B 抛 SESSION_EVENT_TOO_LARGE）
+    const failed: AssistantMessage = {
+      ...textAssistant('A'.repeat(59 * 1024)),
+      stopReason: 'error',
+      errorMessage: 'E'.repeat(6 * 1024),
+    };
+    // 修前：errorMessage 吃 60KiB 缺省帽与 content 同帽叠加 → 击穿护栏上抛炸 run
+    expect(() => sinks.handle({ type: 'message_end', message: failed })).not.toThrow();
+    const ev = session.events.find((e) => e.type === 'assistant/message')!;
+    const serialized = Buffer.byteLength(JSON.stringify(ev.data), 'utf8');
+    expect(serialized).toBeLessThanOrEqual(64 * 1024);
+    // 错误说明保头 2KiB + 截断标记（与 tool/result error 腿同尺同源——line 308 对照腿）
+    const data = ev.data as { errorMessage?: string };
+    expect(Buffer.byteLength(data.errorMessage ?? '', 'utf8')).toBeLessThanOrEqual(2 * 1024 + 64);
+    expect(data.errorMessage).toContain('truncated for durable log');
+  });
+
+  it('短 errorMessage 原样落账（≤ 帽零截断——#43 既有往返语义不破）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    sinks.handle({
+      type: 'message_end',
+      message: { ...textAssistant('正常'), stopReason: 'error', errorMessage: 'Provider is not configured' },
+    });
+    const data = session.events.find((e) => e.type === 'assistant/message')!.data as { errorMessage?: string };
+    expect(data.errorMessage).toBe('Provider is not configured');
+  });
+});
+
 describe('护栏同尺预算——转义密集文本（遗漏大扫 20260903 fix-code D3-1 修死）', () => {
   /** 大文本 toolResult 终值（content 腿走 DURABLE_CONTENT_BUDGET_BYTES=60KiB 预算刀） */
   const bigContent = (text: string): ToolResultMessage => ({
