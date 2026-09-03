@@ -902,3 +902,140 @@ describe('TUI 彻底完善批（四增强回归锁）', () => {
     expect(plainTerm.frames.join('')).not.toContain('☐');
   });
 });
+
+/* ---------------- TUI 强化批 2（技术栈篇 §4.1 应用视图强化批 2，2026-09-04） ---------------- */
+
+/** 工具进度 update 事件（partialResult 全量快照——content 文本块为 bash 等工具的流式输出） */
+const toolUpdate = (toolCallId: string, toolName: string, text: string): AgentEvent => ({
+  type: 'tool_execution_update',
+  toolCallId,
+  toolName,
+  args: {},
+  partialResult: { content: [{ type: 'text', text }] },
+});
+
+/** turn_end 事件（message.usage 必填——增强 6 累计源） */
+const turnEnd = (usage: AssistantMessage['usage']): AgentEvent => ({
+  type: 'turn_end',
+  message: { ...assistantMessage('轮'), usage },
+  toolResults: [],
+});
+
+describe('TUI 强化批 2 增强 5——工具实时进度面板（状态面消费，正文零渲染不变）', () => {
+  it('start 无 partial 不建行；update 建行显末条非空行、原位换行；end 即摘行', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    tui.handle({ type: 'agent_start' });
+    // start 不建行（无 partial 的工具不占面板行——状态行工具名 Loader 已覆盖）
+    tui.handle({ type: 'tool_execution_start', toolCallId: 'c1', toolName: 'bash', args: {} });
+    await flush();
+    expect(terminal.frames.join('')).not.toContain('▸');
+    // 首个 update 建行：partial 末条非空行（bash 逐行吐出——尾行即最新进度；空行跳过）
+    tui.handle(toolUpdate('c1', 'bash', 'npm test\n\n✔ 3446 passed\n'));
+    await flush();
+    expect(terminal.frames.join('')).toContain('▸ bash · ✔ 3446 passed');
+    // 后续 update 原位换行（新尾行替换旧尾行）
+    tui.handle(toolUpdate('c1', 'bash', 'npm test\n\n✔ 3447 passed\n'));
+    await flush();
+    expect(terminal.frames.join('')).toContain('▸ bash · ✔ 3447 passed');
+    // end 即摘行（瞬时面——行集不跨工具生命周期滞留）
+    const mark = terminal.frames.length;
+    tui.handle({
+      type: 'tool_execution_end',
+      toolCallId: 'c1',
+      toolName: 'bash',
+      result: { content: [] },
+      isError: false,
+    });
+    await flush();
+    expect(terminal.frames.slice(mark).join('')).not.toContain('▸ bash');
+  });
+
+  it('无文本块行退化 `▸ 名 …`；帽 4 行溢出折叠；agent_end / repaint 清板', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    tui.handle({ type: 'agent_start' });
+    // 无文本块（空 partial / 纯图像内容）→ 退化形态（工具在场但无文本进度可显）
+    tui.handle({
+      type: 'tool_execution_update',
+      toolCallId: 'c0',
+      toolName: 'probe',
+      args: {},
+      partialResult: { content: [] },
+    });
+    await flush();
+    expect(terminal.frames.join('')).toContain('▸ probe …');
+    // 摘掉 c0（下方帽断言的干净基数——面板空板起步）
+    tui.handle({
+      type: 'tool_execution_end',
+      toolCallId: 'c0',
+      toolName: 'probe',
+      result: { content: [] },
+      isError: false,
+    });
+    await flush();
+    // 帽 4：6 个并行工具各 update → 前 4 行可见 + 「… + 2 更多」折叠行
+    for (let i = 1; i <= 6; i++) tui.handle(toolUpdate(`c${i}`, `tool${i}`, `进度${i}`));
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain('▸ tool1 · 进度1');
+    expect(all).toContain('▸ tool4 · 进度4');
+    expect(all).not.toContain('▸ tool5'); // 超帽折叠（后建的 5/6 不占行）
+    expect(all).toContain('… + 2 更多');
+    // agent_end 清板（run 收场——瞬时面不滞留）
+    const mark = terminal.frames.length;
+    tui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    await flush();
+    expect(terminal.frames.slice(mark).join('')).not.toContain('▸');
+    // repaint 清板（瞬时面不跨 repaint 保存——切入时在飞工具的行不跨会话带）
+    tui.handle({ type: 'agent_start' });
+    tui.handle(toolUpdate('c9', 'bash', '在飞输出'));
+    await flush();
+    const mark2 = terminal.frames.length;
+    tui.repaint('session-other');
+    await flush();
+    expect(terminal.frames.slice(mark2).join('')).not.toContain('▸ bash');
+  });
+});
+
+describe('TUI 强化批 2 增强 6——usage 状态行（run 级累计，状态面消费）', () => {
+  it('turn_end 逐轮累计、agent_end 落「✓ 用量」行（k/M 紧凑格式）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    tui.handle({ type: 'agent_start' });
+    // 两轮累计：{400 入/100 出/total 500} + {2000 入/4000 出/total 6000} → {2400/4100/6500}
+    tui.handle(turnEnd({ input: 400, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 500 }));
+    tui.handle(turnEnd({ input: 2000, output: 4000, cacheRead: 0, cacheWrite: 0, totalTokens: 6000 }));
+    await flush();
+    // run 期间不可见（尾注在 agent_end 才落状态行）
+    expect(terminal.frames.join('')).not.toContain('用量');
+    tui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    await flush();
+    expect(terminal.frames.join('')).toContain('✓ 用量 6.5k（入 2.4k · 出 4.1k）');
+  });
+
+  it('cost 在场追加货币段；agent_start / repaint 清除（run 级尾注生命周期）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    tui.handle({ type: 'agent_start' });
+    // 小数值原样（<1000 不缩写）；cost.total 累计后追加 `· $N.NN` 段
+    tui.handle(turnEnd({ input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0.042 } }));
+    tui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    await flush();
+    expect(terminal.frames.join('')).toContain('✓ 用量 2（入 1 · 出 1） · $0.04');
+    // agent_start 清除（新 run 起跑——尾注让位「工作中」，归零重计）
+    const mark = terminal.frames.length;
+    tui.handle({ type: 'agent_start' });
+    await flush();
+    expect(terminal.frames.slice(mark).join('')).not.toContain('用量');
+    // 再一 run 收场后 repaint 清除（聚焦切换——尾注不跨会话滞留）
+    tui.handle(turnEnd({ input: 5, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 10 }));
+    tui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    await flush();
+    expect(terminal.frames.join('')).toContain('✓ 用量 10（入 5 · 出 5）');
+    const mark2 = terminal.frames.length;
+    tui.repaint('session-x');
+    await flush();
+    expect(terminal.frames.slice(mark2).join('')).not.toContain('用量');
+  });
+});

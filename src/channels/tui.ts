@@ -37,8 +37,9 @@ import { ProcessTerminal } from '@earendil-works/pi-tui';
 import type { AgentEvent } from '../agent/events.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import { isStandardMessage } from '../contracts/messages.js';
+import type { AgentToolResult } from '../contracts/tools.js';
 import { chainBackground } from '../context/chain.js';
-import { assistantErrorLine, assistantText, assistantToolLines, renderAgentMessage } from './render.js';
+import { assistantErrorLine, assistantText, assistantToolLines, renderAgentMessage, truncate } from './render.js';
 import { accentColorizer } from './theme.js';
 import { createPromptQueue } from './prompt.js';
 import { createFileSegmentProvider, createMentionProvider, type FilesFace, type SymbolsFace } from './mention.js';
@@ -284,6 +285,12 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const statusLoader = new Loader(tui, (s: string) => loaderSpinnerColor.fn(s), identity, '');
   /** todo 面板容器（增强 4）：状态行与输入框之间；todoFor 未注入或空表恒空容器 */
   const todoPanel = new Container();
+  /**
+   * 活动面板容器（强化批 2 增强 5）：状态行与 todo 面板之间——工具实时进度行
+   * （瞬时面：update 建行 / end 摘行 / agent_start·agent_end·repaint 清板，
+   * 行集永不入正文——直播路渲染单源纪律不变，状态面消费家族）。
+   */
+  const activityPanel = new Container();
   /** 最近聚焦会话键（增强 4——todoFor 查询参数；repaint 显式带键时更新，起屏路 undefined = 当前聚焦） */
   let trackedSessionId: string | undefined;
   const editor = new Editor(tui, EDITOR_THEME);
@@ -391,6 +398,7 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   // 分支的死对象〔'setLayoutRoot' in tui 恒 false〕，连同假注释一并删除）
   tui.addChild(messages);
   tui.addChild(statusLoader);
+  tui.addChild(activityPanel);
   tui.addChild(todoPanel);
   tui.addChild(editorContainer);
   tui.addChild(footerText);
@@ -585,6 +593,84 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     tui.requestRender();
   };
 
+  /* ---- 工具实时进度面板（强化批 2 增强 5，技术栈篇 §4.1——状态面消费家族） ---- */
+  /** 进度行登记簿：toolCallId → 展示串（Map 插入序 = 调用序；瞬时面不落正文、不跨 repaint 保存） */
+  const activityById = new Map<string, string>();
+  /** 面板行帽：并行流 partial 的工具超帽折叠「… + N 更多」（并行工具调用的常见量级） */
+  const ACTIVITY_MAX = 4;
+  /**
+   * partial 输出取尾行：文本块倒扫末条非空行（工具流式输出通常尾部追加——bash
+   * 逐行吐出，尾行即最新进度）；截断与正文行同款码点安全 truncate（TUI-5）。
+   * 无文本块 = 空串（行退化为 ` ▸ 名 …`）。
+   */
+  const activityTail = (partial: AgentToolResult): string => {
+    for (let i = partial.content.length - 1; i >= 0; i--) {
+      const block = partial.content[i]!;
+      if (block.type === 'text') {
+        const lines = block.text.split('\n').filter((line) => line.trim() !== '');
+        if (lines.length > 0) return truncate(lines[lines.length - 1]!, 100);
+      }
+    }
+    return '';
+  };
+  /**
+   * 重建活动面板：登记簿前 ACTIVITY_MAX 行 + 溢出折叠行。整行暗淡——瞬时次级
+   * 信息（着色克制律：不与 todo 进行中条目抢 accent）。行集永不入正文。
+   */
+  const refreshActivity = (): void => {
+    activityPanel.clear();
+    let shown = 0;
+    for (const line of activityById.values()) {
+      if (shown >= ACTIVITY_MAX) break;
+      activityPanel.addChild(new Text(` ${DIM(line)}`, 1));
+      shown++;
+    }
+    const hidden = activityById.size - shown;
+    if (hidden > 0) activityPanel.addChild(new Text(` ${DIM(`… + ${hidden} 更多`)}`, 1));
+    activityPanel.invalidate();
+    tui.requestRender();
+  };
+  /** 清板（agent_start / agent_end / repaint 三时点——瞬时态靠事件重建；幂等） */
+  const clearActivity = (): void => {
+    if (activityById.size === 0) return;
+    activityById.clear();
+    refreshActivity();
+  };
+
+  /* ---- run 级用量累计（强化批 2 增强 6，技术栈篇 §4.1——状态面消费家族） ---- */
+  /**
+   * 本 run 用量累计（agent_start 归零、turn_end 累加、agent_end 状态行呈现——
+   * run 间常驻尾注，repaint / agent_start 清除）。message.usage 必填字段直读
+   * （零新管道零新表）；累计值只反映本视图收到的 turn（repaint 切走期间的 turn
+   * 归非聚焦摘要——不重复累计，尾注如实覆盖本视角所见轮次）。
+   */
+  let usageAcc: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    totalTokens: number;
+    costTotal: number;
+    costSeen: boolean;
+    currency: string | undefined;
+  } | null = null;
+  /** token 数紧凑格式化（<1000 原样；k/M 档一位小数） */
+  const fmtTokens = (n: number): string =>
+    n < 1000 ? String(n) : n < 1_000_000 ? `${(n / 1000).toFixed(1)}k` : `${(n / 1_000_000).toFixed(1)}M`;
+  /**
+   * agent_end 状态行文案（增强 6）：` ✓ 用量 …`——totalTokens 与入/出直读累计、
+   * cost 在场追加货币段（缺省按 USD 符号 $，非 USD 缀三字码）。run 零累计
+   * （空转 / 即刻失败）= 空串清行（不虚报零用量）。
+   */
+  const usageLine = (): string => {
+    if (usageAcc === null) return '';
+    const costSeg =
+      usageAcc.costSeen && usageAcc.costTotal > 0
+        ? ` · $${usageAcc.costTotal.toFixed(2)}${usageAcc.currency !== undefined && usageAcc.currency !== 'USD' ? ` ${usageAcc.currency}` : ''}`
+        : '';
+    return ` ✓ 用量 ${fmtTokens(usageAcc.totalTokens)}（入 ${fmtTokens(usageAcc.input)} · 出 ${fmtTokens(usageAcc.output)}）${costSeg}`;
+  };
+
   const handle = (event: AgentEvent): void => {
     switch (event.type) {
       case 'agent_start':
@@ -592,19 +678,53 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         // 「工作中」长文本不着（着色克制律）
         statusLoader.setMessage(' 工作中');
         statusLoader.start();
+        // 增强 5：新 run 清板（上一 run 残留行不跨 run）；增强 6：用量归零重计
+        clearActivity();
+        usageAcc = null;
         break;
       case 'agent_end':
         // 防漏关（S3）：在飞占位槽开着一轮无 message_end 即结束（abort 中断路）
         // ——空终值关槽（closeStreaming 内 filter 空串，零追加行）
         if (streaming) closeStreaming('', []);
-        // 增强 3：停轮清状态；todo 面板随收场刷新（增强 4 第三触发时点——廉价）
+        // 增强 3：停轮；增强 6：用量尾注落状态行（run 间常驻——下一 agent_start
+        // / repaint 清除；零累计 = 空串清行）；todo 面板随收场刷新（增强 4 第三
+        // 触发时点——廉价）；增强 5：run 收场清板
         statusLoader.stop();
-        statusLoader.setMessage('');
+        statusLoader.setMessage(usageLine());
         refreshTodo();
+        clearActivity();
         break;
       case 'turn_start':
-      case 'turn_end':
         break; // 消息级事件已覆盖展示；turn 边界不额外渲染
+      case 'turn_end': {
+        // 增强 6（状态面消费——正文零渲染不变）：run 级用量累计，agent_end 状态
+        // 行呈现；message.usage 契约层必填，防御缺席跳过（不虚报）
+        const usage = event.message.usage;
+        if (usage !== undefined) {
+          const acc = usageAcc ?? {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            costTotal: 0,
+            costSeen: false,
+            currency: undefined,
+          };
+          usageAcc = acc;
+          acc.input += usage.input;
+          acc.output += usage.output;
+          acc.cacheRead += usage.cacheRead;
+          acc.cacheWrite += usage.cacheWrite;
+          acc.totalTokens += usage.totalTokens;
+          if (usage.cost?.total !== undefined) {
+            acc.costTotal += usage.cost.total;
+            acc.costSeen = true;
+            acc.currency = usage.cost.currency ?? acc.currency;
+          }
+        }
+        break;
+      }
       case 'message_start':
         // assistant 开流式块；user/toolResult/自定义角色按终值即席渲染
         if (isStandardMessage(event.message) && event.message.role === 'assistant') {
@@ -649,12 +769,21 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         // 转轮持续（agent_start 已启）。正文 ⚙ 行仍随 assistant message_end 单源落
         statusLoader.setMessage(` ⚙ ${event.toolName} …`);
         break;
-      case 'tool_execution_update':
-        break; // 工具进度 M1 不展示（进度渲染随 Web 通道形态定稿再补）
+      case 'tool_execution_update': {
+        // 增强 5（状态面消费——正文零渲染不变）：有 partial 输出的工具占面板行
+        // ——首个 update 建行、后续 update 原位换行、end 即摘行（瞬时面；无
+        // partial 的工具不占行——状态行工具名 Loader 已覆盖）
+        const tail = activityTail(event.partialResult);
+        activityById.set(event.toolCallId, `▸ ${event.toolName} ${tail === '' ? '…' : `· ${tail}`}`);
+        refreshActivity();
+        break;
+      }
       case 'tool_execution_end':
         // 增强 4：todo 工具写后即显——面板刷新触发器（非渲染）；↳ 正文行仍随
         // toolResult message_start 的 renderAgentMessage 单源落（历史投影同款）
         if (event.toolName === 'todo') refreshTodo();
+        // 增强 5：摘行（无行的工具 end 摘除是幂等 no-op——无 partial 工具不占行）
+        if (activityById.delete(event.toolCallId)) refreshActivity();
         break;
     }
   };
@@ -747,6 +876,12 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     // 复位顺序先于清空：streaming 槽引用的容器随 messages.clear() 一并摘除，
     // 先置 null 防孤儿引用继续 setText 到已弃容器
     streaming = null;
+    // 增强 5：进度面板清板（瞬时面不跨 repaint 保存——切入会话的在飞工具行不
+    // 跨会话带）；增强 6：用量尾注清除 + 累计归零（尾注只属本视角所见轮次——
+    // 切走期间的 turn 归非聚焦摘要不累计，归零防跨会话混账；聚焦侧状态行由
+    // 下方 running 两态分支覆写）
+    clearActivity();
+    usageAcc = null;
     messages.clear();
     messages.invalidate();
     renderHistoryInto(sessionId);
