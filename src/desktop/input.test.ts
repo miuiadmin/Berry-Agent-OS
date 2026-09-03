@@ -266,11 +266,38 @@ describe('bracketed paste（严格整段）', () => {
     expect(d.take()).toEqual([{ kind: 'paste', text: 'ab' }]);
   });
 
-  it('discardPending 连悬置尾一并弃：换防后半截终界不成残留态', () => {
+  it('discardPending 连悬置尾一并弃：粘贴态换防入吸收态，残余体吞到真终界（第九轮 #16 修死）', () => {
     const d = new InputDecoder();
     d.feed('\x1b[200~hi\x1b[2'); // 悬置尾 '\x1b[2' 在场
-    d.discardPending(); // 换防吞在途——悬置尾必须同弃
-    expect(feed(d, '01~')).toEqual([{ kind: 'text', text: '01~' }]); // 按地面态重解
+    d.discardPending(); // 换防吞在途——悬置尾同弃且入吸收态（不回地面）
+    // 修前 '01~' 按地面态重解成 text 事件——残余粘贴体不得伪造键事件
+    expect(feed(d, '01~')).toEqual([]);
+    // 真终界到达即回地面：后续键正常
+    expect(feed(d, '\x1b[201~ok')).toEqual([{ kind: 'text', text: 'ok' }]);
+  });
+
+  it('超帽冲刷入吸收态：残余体含命令形文本零键事件（第九轮 #16 回归锁）', () => {
+    const d = new InputDecoder();
+    // 单 chunk 超 4MiB 帽：先冲刷交付一段，随后入吸收态（修前冲刷回地面态）
+    const body = 'A'.repeat(4 * 1024 * 1024 + 16);
+    expect(feed(d, '\x1b[200~' + body)).toEqual([{ kind: 'paste', text: body }]);
+    // 残余粘贴体含命令形文本（空框 enter 开应用视图 / '/exit'+CRLF 触退出的
+    // 实弹形状）：修前按地面态解出 enter/text 事件——伪造命令行输入
+    expect(feed(d, '\r\n/exit\r\n')).toEqual([]);
+    // 真终界到达回地面：后续键正常
+    expect(feed(d, '\x1b[201~')).toEqual([]);
+    expect(feed(d, 'ok')).toEqual([{ kind: 'text', text: 'ok' }]);
+  });
+
+  it('吸收态终界跨 chunk 分裂：真前缀悬置拼回，不吞真终界字节', () => {
+    const d = new InputDecoder();
+    d.feed('\x1b[200~sec');
+    d.discardPending();
+    d.feed('ret\x1b[20'); // 终界真前缀 '\x1b[20' 悬在 chunk 尾——悬置待拼
+    expect(d.take()).toEqual([]);
+    d.feed('1~'); // 补齐真终界 → 回地面
+    expect(d.take()).toEqual([]);
+    expect(feed(d, 'ok')).toEqual([{ kind: 'text', text: 'ok' }]);
   });
 });
 
@@ -297,10 +324,29 @@ describe('畸形流防御与换防吞在途', () => {
     expect(evs).toEqual([{ kind: 'text', text: 'u' }]);
   });
 
-  it('粘贴体跨态被换防吞：半截粘贴体不泄漏', () => {
+  it('粘贴体跨态被换防吞：吸收态吞残余体到真终界（第九轮 #16 修死）', () => {
     const d = new InputDecoder();
     d.feed('\x1b[200~sec');
     d.discardPending();
-    expect(feed(d, 'ret\x1b[201~')).toEqual([{ kind: 'text', text: 'ret' }]); // 裸尾包吞
+    // 修前 'ret' 按地面态解成 text 事件泄漏；吸收态全吞（含其后的裸终界）
+    expect(feed(d, 'ret\x1b[201~')).toEqual([]);
+    expect(feed(d, 'ok')).toEqual([{ kind: 'text', text: 'ok' }]); // 真终界后回地面
+  });
+
+  it('kitty 文本子域码点界检：坏码点矩阵不炸不产 NUL（第九轮 #17 回归锁）', () => {
+    const d = new InputDecoder();
+    // 越界/巨值/负值/非数/空白子域：修前 String.fromCodePoint 对越界与 NaN
+    // 抛 RangeError 未捕获即杀整进程；Number(' ')===0 静默产 NUL 字符事件
+    expect(() => feed(d, '\x1b[0;;1114112u')).not.toThrow(); // 0x10FFFF + 1 越界
+    expect(feed(d, '\x1b[0;;1114112u')).toEqual([]);
+    expect(() => feed(d, '\x1b[0;;999999999999u')).not.toThrow(); // 巨值
+    expect(feed(d, '\x1b[0;;999999999999u')).toEqual([]);
+    expect(() => feed(d, '\x1b[0;;-5u')).not.toThrow(); // 负值
+    expect(feed(d, '\x1b[0;;-5u')).toEqual([]);
+    expect(() => feed(d, '\x1b[0;;!u')).not.toThrow(); // 非数字（NaN——取 '!'：字母形不可达，小写字母是终点字节）
+    expect(feed(d, '\x1b[0;;!u')).toEqual([]);
+    expect(feed(d, '\x1b[0;; u')).toEqual([]); // 空白子域 Number(' ')===0 → 修前 NUL
+    // 合法码点形态不受扰（IME 提交形：单码点 97 = 'a'）
+    expect(feed(d, '\x1b[0;;97u')).toEqual([{ kind: 'ime', composing: false, text: 'a' }]);
   });
 });

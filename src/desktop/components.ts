@@ -357,9 +357,19 @@ export class SingleLineInput implements Renderable {
   /** 在光标处插入文本（IME 提交/普通输入共用路） */
   insertText(text: string): void {
     if (text.length === 0) return;
+    // 串路直拼（第九轮 #5 修死）：修前 graphemesOf(text) 的 N 元素 spread 进
+    // splice 触 V8 实参栈上限（~12 万——150KB 粘贴即 RangeError 未捕获杀整
+    // 进程）。改为光标位切前后串直接拼接，元素计数另算（光标仍按字素位推进）
     const gs = graphemesOf(this.content);
-    gs.splice(this.cursorIdx, 0, ...graphemesOf(text));
-    this.content = gs.map((g) => g.segment).join('');
+    const before = gs
+      .slice(0, this.cursorIdx)
+      .map((g) => g.segment)
+      .join('');
+    const after = gs
+      .slice(this.cursorIdx)
+      .map((g) => g.segment)
+      .join('');
+    this.content = before + text + after;
     this.cursorIdx += graphemesOf(text).length;
   }
 

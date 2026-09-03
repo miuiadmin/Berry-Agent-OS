@@ -176,6 +176,26 @@ describe('SingleLineInput：操作面', () => {
     expect(input.cursor).toBe(0);
   });
 
+  it('insertText 巨量粘贴串路存活（第九轮 #5 回归锁——修前 spread 实参栈溢出）', () => {
+    const input = h(SingleLineInput, {});
+    // ~215KiB：修前 graphemesOf(text) 的 N 元素 spread 进 splice 触 V8 实参
+    // 栈上限（探针实测 10 万实参过 / 15 万殁——RangeError 未捕获即杀整进程）
+    const big = 'A'.repeat(220_000);
+    expect(() => input.insertText(big)).not.toThrow();
+    expect(input.text).toBe(big);
+    expect(input.cursor).toBe(220_000);
+    // 尾部追加与光标字素位不漂（串路直拼不做逐元素搬运）
+    input.insertText('中');
+    expect(input.text).toBe(big + '中');
+    expect(input.cursor).toBe(220_001);
+    // 清空后再灌 CJK 巨量：字素分解路径同样不炸（每字素 3 字节仍 15 万元素）
+    input.clear();
+    const cjk = '中'.repeat(150_000);
+    expect(() => input.insertText(cjk)).not.toThrow();
+    expect(input.text).toBe(cjk);
+    expect(input.cursor).toBe(150_000);
+  });
+
   it('emoji 字素整删（ZWJ 家族一步退格）', () => {
     const input = h(SingleLineInput, {});
     const family = '\u{1F468}‍\u{1F469}‍\u{1F467}';

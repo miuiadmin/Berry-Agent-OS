@@ -123,8 +123,12 @@ const CSI_CAP = 64;
 export class InputDecoder {
   /** 事件积压队列（take 排空后换新数组——feed 不回调，避免重入） */
   private queue: InputEvent[] = [];
-  /** 解析态：ground 地面 / esc 转义挂起 / csi 参数积攒 / ss3 / paste 粘贴体 */
-  private mode: 'ground' | 'esc' | 'csi' | 'ss3' | 'paste' = 'ground';
+  /**
+   * 解析态：ground 地面 / esc 转义挂起 / csi 参数积攒 / ss3 / paste 粘贴体 /
+   * paste-drain 粘贴吸收态（第九轮 #16 修死——粘贴态被换防丢弃或超帽冲刷后
+   * 残余粘贴体不得按地面态解码成伪造键事件，吞到真终界 PASTE_END 再回地面）
+   */
+  private mode: 'ground' | 'esc' | 'csi' | 'ss3' | 'paste' | 'paste-drain' = 'ground';
   /** CSI 参数积攒缓冲（含私用标记 ?/> 与参数字节） */
   private csiBuf = '';
   /** CSI 超帽毒化旗标：序列已判畸形——吞到终点字节整序丢弃（残段不漏成文本） */
@@ -291,6 +295,29 @@ export class InputDecoder {
           }
           continue;
         }
+        case 'paste-drain': {
+          // 粘贴吸收态（第九轮 #16 修死）：粘贴体已被换防丢弃/超帽冲刷——残余
+          // 粘贴体字节全吞（含 CRLF/命令形文本，防空框 enter 开应用、'/exit'+
+          // CRLF 触退出的伪造命令行事件），直到真终界 PASTE_END 到达回地面。
+          // 终端协议保证 200~ 后必有 201~——吸收态必终止。跨 chunk 分裂终界
+          // 复用 paste 态同款悬置尾（真前缀悬置拼回，不吞真终界字节）
+          const tail = this.pendingPasteTail;
+          this.pendingPasteTail = '';
+          const rest = tail + chunk.slice(i);
+          const end = rest.indexOf(PASTE_END);
+          if (end < 0) {
+            // 未命中：全吞；尾部真前缀悬置（下 chunk 拼回再搜）
+            const hold = pasteMarkerPrefixLen(rest);
+            this.pendingPasteTail = rest.slice(rest.length - hold);
+            i = chunk.length;
+          } else {
+            // 真终界命中：回地面，续解其后字节（推进量还账悬置字节——同 paste 态）
+            this.mode = 'ground';
+            this.escPendingAt = null;
+            i += end + PASTE_END.length - tail.length;
+          }
+          continue;
+        }
       }
     }
     // chunk 尽：地面态文本游程冲刷（每 chunk 一个 text 事件——跨 chunk 不滞留；
@@ -316,9 +343,14 @@ export class InputDecoder {
   /**
    * 换防吞在途（契约篇 §6.11）：丢弃解析中途的转义/粘贴/预编辑/文本游程——
    * 换防瞬间 stdin 在途序列一窗全丢，不漏进新栈。
+   *
+   * 粘贴态例外（第九轮 #16 修死）：粘贴体半截被弃后残余字节若按地面态重解
+   * 会伪造命令行事件（空框 enter 开应用、'/exit'+CRLF 触退出）——粘贴态/
+   * 吸收态换防改入吸收态（paste-drain），吞残余到真终界 PASTE_END 再回地面；
+   * CSI/ESC 半序列无续作义务，仍回地面。
    */
   discardPending(): void {
-    this.mode = 'ground';
+    this.mode = this.mode === 'paste' || this.mode === 'paste-drain' ? 'paste-drain' : 'ground';
     this.csiBuf = '';
     this.csiPoisoned = false;
     this.pasteBuf = '';
@@ -467,11 +499,16 @@ export class InputDecoder {
     const mods = decodeMods(modParts[0]);
     const evTypeNum = modParts.length > 1 ? Number(modParts[1]) : 1;
     const eventType = evTypeNum === 2 ? 'repeat' : evTypeNum === 3 ? 'release' : undefined;
-    // 文本子域：冒号分隔码点列表
+    // 文本子域：冒号分隔码点列表。码点界检（第九轮 #17 修死）：String.fromCodePoint
+    // 对越界/负值/NaN 抛 RangeError——未捕获即杀整进程；Number(' ')===0 静默产
+    // NUL。kitty 文本子域结构上只该是 1..0x10FFFF 整数码点，非法子域丢弃
+    // （全弃后 keyCode 0 无文本 → 整事件吞——fail-closed，kittyKeyName 界检同尺）
     const text = (fields[2] ?? '')
       .split(':')
       .filter((s) => s.length > 0)
-      .map((s) => String.fromCodePoint(Number(s)))
+      .map((s) => Number(s))
+      .filter((n) => Number.isInteger(n) && n >= 1 && n <= 0x10ffff)
+      .map((n) => String.fromCodePoint(n))
       .join('');
 
     // IME/文本优先裁决：key 0 纯文本事件（终端拿不到键信息 = OS/IME 组装）
@@ -551,13 +588,17 @@ export class InputDecoder {
   /** IME 跟随窗（ms）：两发 CSI 0 在窗内构成前缀链 = 流式预编辑（kitty 单发提交不受影响） */
   private readonly imeFollowWindowMs = 100;
 
-  /** 粘贴体防护帽：超帽强制冲刷并回地面（畸形流不锁死键盘） */
+  /**
+   * 粘贴体防护帽：超帽强制冲刷并转吸收态（畸形流不锁死键盘）。修前冲刷回
+   * 地面态——残余粘贴体按地面态重解会伪造命令行事件（第九轮 #16 修死），
+   * 故冲刷后入吸收态吞残余到真终界 PASTE_END。
+   */
   private enforcePasteCap(): void {
     if (this.pasteBuf.length > PASTE_CAP) {
       const text = this.pasteBuf;
       this.pasteBuf = '';
-      this.pendingPasteTail = ''; // 悬置尾同弃（已回地面态——半截终界无意义）
-      this.mode = 'ground';
+      this.pendingPasteTail = ''; // 悬置尾同弃（已离粘贴态——半截终界无意义）
+      this.mode = 'paste-drain';
       if (text.length > 0) this.queue.push({ kind: 'paste', text });
     }
   }
