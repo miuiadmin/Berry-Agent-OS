@@ -4,7 +4,7 @@
  * 同款收编（vitest 窄面 spawn 真脚本 + 纯函数单测，tsc 视门外纯 node 语义直跑）。
  *
  * 层锁：
- * 1. 净树 spawn：八查全绿 exit 0（门禁链占位在岗——脚本被删/依赖断链先在此红）；
+ * 1. 净树 spawn：九查全绿 exit 0（门禁链占位在岗——脚本被删/依赖断链先在此红）；
  * 2. 查 1 可红探针：CHECK_API_SNAPSHOT env 缝注入篡改快照（tier 改形）→ exit 1
  *    且 stderr 点名 [查 1]——drift 侦测不静默退化（守护炮负例探针纪律）；
  * 3. 查 3/查 4 可红探针：CHECK_API_DEPRECATIONS env 缝注入假注册簿（批 3）——
@@ -18,7 +18,10 @@
  * 7. 扫描侧可红探针（就绪度审计 20260903 P1）：CHECK_API_ROOT 夹具树缝 +
  *    CHECK_API_SURFACE 面注入缝——查 2 tier 三支与自由符号 / 查 3c 两方向 /
  *    查 5 实验隔离 / 查 6 compat / 查 7 两形态各得负例（原本硬锚真树恒绿
- *    不可证伪）；夹具基线先证 exit 0（红归因前提——基线不净红即夹具噪音非探针命中）。
+ *    不可证伪）；夹具基线先证 exit 0（红归因前提——基线不净红即夹具噪音非探针命中）；
+ * 8. 查 9 面动号不动可红探针（就绪度审计 20260903 P2）：CHECK_API_ARCHIVES
+ *    归档族缝 + CHECK_API_SNAPSHOT 快照缝——ignited + 面 diff + 号未 bump 红；
+ *    号已 bump / 纪元 pre-ignition / 归档族空三休眠形不红（机制常驻休眠语义锁）。
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -41,8 +44,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** 被测脚本（cwd=ROOT 相对路径——与本仓门禁同一调用形态） */
 const SCRIPT = join('tools', 'check-api.mjs');
 
-describe('check-api 机器闸：净树全绿（八查集成锁）', () => {
-  it('spawn 真脚本 exit 0——快照与抽取真值同步 + 生成物与渲染真值同步 + 八查零问题', () => {
+describe('check-api 机器闸：净树全绿（九查集成锁）', () => {
+  it('spawn 真脚本 exit 0——快照与抽取真值同步 + 生成物与渲染真值同步 + 九查零问题', () => {
     const r = spawnSync(process.execPath, [SCRIPT], { cwd: ROOT, encoding: 'utf8' });
     expect(r.status).toBe(0);
   }, 60_000);
@@ -350,6 +353,68 @@ describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE �
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+describe('check-api 查 9：面动号不动可红探针（CHECK_API_ARCHIVES 归档族缝 + 快照缝——就绪度审计 20260903 P2）', () => {
+  /**
+   * 缝纪律同查 1：注入夹具归档族 + 注入快照证查 9 可红，不动真归档位（真位
+   * 现役为空——基线形成前恒休眠）。注入快照同途触发查 1/查 8 红属预期噪音
+   * （快照缝的既定联动），断言只取 [查 9] 在场/缺席。
+   */
+  /** 迷你面快照工厂（n 条导出——n 变即面 diff；apiVersion/enforcement 逐探针覆写） */
+  const face = (n, over = {}) => ({
+    apiVersion: '1.0',
+    enforcement: 'ignited',
+    exports: Array.from({ length: n }, (_, i) => ({
+      symbol: `Sym${i}`,
+      module: 'berryagent',
+      tier: 'stable',
+      since: '1.0',
+      formFactors: ['standalone'],
+    })),
+    capabilities: [],
+    ...over,
+  });
+
+  /** 建夹具（归档族一版 + 当前快照注入位），返回 spawn 结果 */
+  const runArchives = (archiveSurface, snapshotSurface) => {
+    const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-arch-'));
+    const archives = join(dir, 'snapshots');
+    mkdirSync(archives, { recursive: true });
+    if (archiveSurface !== null) writeFileSync(join(archives, '1.0.0.json'), JSON.stringify(archiveSurface));
+    const snap = join(dir, 'current-surface.json');
+    writeFileSync(snap, JSON.stringify(snapshotSurface, null, 2) + '\n');
+    try {
+      return spawnSync(process.execPath, [SCRIPT], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, CHECK_API_ARCHIVES: archives, CHECK_API_SNAPSHOT: snap },
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('ignited + 面增一条 + 号未 bump → exit 1 且 stderr 点名 [查 9] 与 bump 指引', () => {
+    const r = runArchives(face(1), face(2));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('[查 9]');
+    expect(r.stderr).toContain('面动号不动');
+    expect(r.stderr).toContain('1.0.0');
+    expect(r.stderr).toContain('apiVersion');
+  }, 60_000);
+
+  it('三休眠形不红：号已 bump / 纪元 pre-ignition / 归档族空（机制常驻休眠语义锁）', () => {
+    // ① 号已 bump：面 diff 在而 apiVersion 1.0 → 1.1，坐标有锚——合法演进
+    const bumped = runArchives(face(1), face(2, { apiVersion: '1.1' }));
+    expect(bumped.stderr).not.toContain('[查 9]');
+    // ② 纪元休眠：pre-ignition 窗口容忍态（面/号自由——点火日即执法日）
+    const dormant = runArchives(face(1, { enforcement: 'pre-ignition' }), face(2, { enforcement: 'pre-ignition' }));
+    expect(dormant.stderr).not.toContain('[查 9]');
+    // ③ 基线休眠：归档族空（首 release 前）无比较基准
+    const baseline = runArchives(null, face(2));
+    expect(baseline.stderr).not.toContain('[查 9]');
+  }, 120_000);
 });
 
 describe('classifyFaceDiff：两版面 diff 四类分桶（§6.13.6——纯函数）', () => {

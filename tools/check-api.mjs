@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * API 治理机器执法层（契约篇 §6.13.8 check-api 八查，第八十七批批 2 起——
- * 查 8 随第九十一批增设）。
+ * API 治理机器执法层（契约篇 §6.13.8 check-api 九查，第八十七批批 2 起——
+ * 查 8 随第九十一批、查 9 随就绪度审计 20260903 P2 增设）。
  *
- * 进 lint:topology 链（CI 同一套）。八查形态（落码节奏——批表 §6.13.11）：
+ * 进 lint:topology 链（CI 同一套）。九查形态（落码节奏——批表 §6.13.11）：
  * 1. drift——快照 src/contracts/api-surface.json ≠ 抽取真值即红（面漂移当场抓）；
  * 2. tier 全标——快照逐条 tier 词汇合法 + 公开根直导出（自由符号，现役为零）必带
  *    JSDoc 标签；typebox 转发条目（forwarded）记载不承诺、不参与执法（冷读 M4）；
@@ -17,7 +17,11 @@
  *    装载门裁决非 legacy）；与官方三清单回填同批落——生效日即绿（冷读 M3）。
  * 8. 生成物 drift（第九十一批）——COMPATIBILITY.md / docs/API参考.md ≠ 生成器
  *    真值（面快照 + 注册簿 + 归档族派生）即红：生成物是提交件，手改或面变更后
- *    漏再生即漂移（再生入口 = npm run build 尾挂或生成器 CLI --write）。
+ *    漏再生即漂移（再生入口 = npm run build 尾挂或生成器 CLI --write）；
+ * 9. 面动号不动（就绪度审计 20260903 P2）——执法纪元 ignited 且归档族非空时，
+ *    当前快照 vs 最新归档面 diff 非零而 apiVersion 相同即红（面号是 since/
+ *    removalIn 版本坐标的基准）；纪元 pre-ignition 或基线前休眠——机制常驻、
+ *    点火日即执法日（同查 5 律）。
  *
  * 出口：零问题静默过（门禁链惯例）；有问题 stderr 逐条 + exit 1。
  */
@@ -27,7 +31,13 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { createJiti } from 'jiti';
 import { extractSurface, scanTopLevelExports, serializeSurface } from './extract-api-surface.mjs';
-import { renderCompatibility, loadArchivedSnapshots, COMPATIBILITY_PATH } from './generate-compatibility.mjs';
+import {
+  renderCompatibility,
+  loadArchivedSnapshots,
+  classifyFaceDiff,
+  eraOf,
+  COMPATIBILITY_PATH,
+} from './generate-compatibility.mjs';
 import { renderApiReference, API_REFERENCE_PATH } from './generate-api-reference.mjs';
 
 /** 仓库根（脚本位置上一级） */
@@ -372,6 +382,41 @@ const DEPRECATIONS =
       v(
         `[查 8] 生成物 ${label} 漂移：与生成器真值不符（面快照 + DEP 注册簿 + 归档族派生）——` +
           `手改生成物或面变更后漏再生；重跑 \`npm run build\`（或 node tools/generate-*.mjs --write）`,
+      );
+    }
+  }
+}
+
+/* ---------------- 查 9：面动号不动（就绪度审计 20260903 P2——apiVersion bump 提醒机器化） ---------------- */
+
+{
+  // 纪元门 + 基线门双休眠：执法纪元 ignited（面快照 enforcement 纪元章——eraOf
+  // 归一）且归档族非空（首 release 前基线未成 = 无比较基准）才执法——机制常驻、
+  // 点火日即执法日（同查 5 律）。比较基准 = 提交位快照 vs 最新归档快照（与查 8
+  // 同源——面快照与兼容档案一币两面）；面 diff 非零而两者 apiVersion 相同 = 红
+  // （面号是 since/removalIn 版本坐标的基准，动了面不动号即坐标失锚）。
+  // `CHECK_API_ARCHIVES` env 缝 = 回归锁换片位（CHECK_API_SNAPSHOT 同款纪律：
+  // 注入夹具归档族证查 9 可红，不动真归档位；缺省真位）。
+  const archives = loadArchivedSnapshots(
+    process.env.CHECK_API_ARCHIVES !== undefined ? resolve(REPO_ROOT, process.env.CHECK_API_ARCHIVES) : undefined,
+  );
+  const snapFace = JSON.parse(snapshotText);
+  if (archives.length > 0 && eraOf(snapFace) === 'ignited') {
+    const last = archives[archives.length - 1];
+    const diff = classifyFaceDiff(last.surface, snapFace);
+    const faceMoved =
+      diff.added.length > 0 ||
+      diff.removed.length > 0 ||
+      diff.changed.length > 0 ||
+      diff.reTiered.length > 0 ||
+      diff.capabilitiesChanged;
+    if (faceMoved && snapFace.apiVersion === last.surface.apiVersion) {
+      v(
+        `[查 9] 面动号不动：当前快照 vs 最新归档（${last.version}）面 diff 非零` +
+          `（新增 ${diff.added.length} / 移除 ${diff.removed.length} / 改形 ${diff.changed.length} / ` +
+          `重定级 ${diff.reTiered.length}${diff.capabilitiesChanged ? ' / capabilities 有变' : ''}）` +
+          `而 apiVersion 同为 ${snapFace.apiVersion}——面变更须同笔 bump package.json apiVersion ` +
+          `并再生成快照（面号是 since/removalIn 版本坐标的基准，§6.13.8 查 9）`,
       );
     }
   }

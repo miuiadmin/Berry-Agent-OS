@@ -213,8 +213,12 @@ export function isValidApiVersion(v: string): boolean {
  * - `true`（首个 dist-tag=latest 当笔翻转）= 点火：api 块缺席从 warn 变拒载
  *   （`API_VERSION_MISMATCH`），min fail-loud 对全体应用生效。
  *
- * **散拷禁令**：常量消费面只 adjudicateApiGate 出口 4 一处（测试经纯函数
- * `ignited` 参数注入两态，不改常量）；点火日翻转 = 改此单点 + 同笔测试。
+ * **散拷禁令**：常量消费面恰两处（全面复盘 20260903-91 刀五扩面——就绪度审计
+ * 20260903 P2 勘正注释）——adjudicateApiGate 出口 4（行为面：缺块 warn/拒载）
+ * 与抽取器 enforcement 纪元章（tools/extract-api-surface.mjs——只读单源盖章
+ * 进面快照，不改不散播，§6.13.4 点火可见性立条）；测试经纯函数 `ignited`
+ * 参数注入两态，不改常量。点火日翻转 = 改此单点 + 同笔测试 + 快照再生成
+ * （enforcement 纪元章随翻转变色——查 1 自然拦）。
  */
 export const API_ENFORCEMENT_IGNITED = false;
 
