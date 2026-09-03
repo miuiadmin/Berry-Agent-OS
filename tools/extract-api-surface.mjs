@@ -3,7 +3,10 @@
  * API 治理抽取器（契约篇 §6.13.1 六真相源 → surface.json，第八十七批批 2）。
  *
  * 产机器可读 API 面清单：顶层 exports[]（逐符号 { symbol, module, tier, since,
- * formFactors, forwarded?, deprecated? }）+ 顶层 capabilities[]（能力面声明）。
+ * formFactors, forwarded?, deprecated? }）+ 顶层 capabilities[]（能力面声明）+
+ * 顶层 enforcement 纪元章（§6.13.4 点火可见性——全面复盘 20260903-91 刀五：
+ * 从 API_ENFORCEMENT_IGNITED 常量单源盖章 'pre-ignition'|'ignited'，点火翻转日
+ * 即面快照 diff → PR 裁决标签闸接管 + COMPATIBILITY.md 纪元行渲染）。
  * 消费方两处：
  * - `check-api` 查 1 drift 闸——快照 ≠ 抽取真值即红（面漂移当场抓）；
  * - 构建链拷入 `dist/api/surface.json`（装载门 §6.13.4 / ctx.host §6.13.5 运行时读）。
@@ -421,10 +424,16 @@ export async function extractSurface() {
   // 宿主 apiVersion（package.json 预置号——快照自描述，drift 闸随 release 版本联动）
   const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
 
+  // —— 点火位盖章（§6.13.4 点火可见性——全面复盘 20260903-91 刀五）——
+  // enforcement 纪元章从 API_ENFORCEMENT_IGNITED 单源派生：点火翻转日即面快照
+  // diff（PR 裁决标签闸强制接走——api-break: 语义）+ COMPATIBILITY.md 纪元行。
+  // 散拷禁律不破：此处只读常量（与 adjudicateApiGate 消费面同源同值），不改不散播
+  const enforcement = apiMod.API_ENFORCEMENT_IGNITED ? 'ignited' : 'pre-ignition';
+
   exports.sort((a, b) =>
     a.module !== b.module ? (a.module < b.module ? -1 : 1) : a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0,
   );
-  return { apiVersion: pkg.apiVersion, exports, capabilities };
+  return { apiVersion: pkg.apiVersion, enforcement, exports, capabilities };
 }
 
 /** 快照 JSON 稳定序列化（drift diff 可读——2 空格缩进 + 尾换行） */
@@ -439,7 +448,7 @@ if (isCli) {
   if (process.argv.includes('--write')) {
     writeFileSync(SNAPSHOT_PATH, serializeSurface(surface));
     console.log(
-      `已落 API 面快照：${SNAPSHOT_PATH}（exports ${surface.exports.length} / capabilities ${surface.capabilities.length}）`,
+      `已落 API 面快照：${SNAPSHOT_PATH}（exports ${surface.exports.length} / capabilities ${surface.capabilities.length} / enforcement ${surface.enforcement}）`,
     );
   } else {
     console.log(serializeSurface(surface));

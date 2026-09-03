@@ -10,6 +10,9 @@
  * - 归档激活后 = 逐版 diff 判级小节（判级携 DEP 语境：sanctioned 销账 = MINOR、
  *   无 DEP 的 removed/changed = MAJOR、added = MINOR）+ 未发布面变更预告节
  *   （面快照 vs 最新归档——待下版快照归档定判级）。
+ * - 执法纪元渲染（§6.13.4 点火可见性——全面复盘 20260903-91 刀五）：头部当前
+ *   纪元行 + 归档族相邻两版纪元翻转行（eraOf 归一读取——键缺席 = pre-ignition）
+ *   + 未发布纪元预告（面快照纪元 ≠ 最新归档纪元）。
  *
  * 守护：check-api 查 8 对本文件做生成物 drift 执法（≠ 生成器真值即红）；
  * `npm run build` 尾挂再生。CLI 形态：`--write` 落盘（缺省打印 stdout）；
@@ -115,6 +118,19 @@ export function loadArchivedSnapshots(dir = SNAPSHOTS_DIR) {
 }
 
 /**
+ * 执法纪元归一读取（§6.13.4 点火可见性——全面复盘 20260903-91 刀五）。
+ * 归一语义：`enforcement` 键缺席（纪元章落地前的归档快照）= 'pre-ignition'
+ * ——该时期语义本就是窗口容忍态，老快照零假翻转行；任何非 'ignited' 值（含
+ * 垃圾值）同归 pre-ignition（fail-closed 反向：纪元章只认显式 'ignited'，
+ * 误写不放大执法宣称）。导出供 check-api.test.mjs 直锁归一语义。
+ * @param {object} surface 面快照（当前提交位或归档位任一形态）
+ * @returns {'pre-ignition' | 'ignited'}
+ */
+export function eraOf(surface) {
+  return surface.enforcement === 'ignited' ? 'ignited' : 'pre-ignition';
+}
+
+/**
  * 两版面 diff 分类（§6.13.6 四类）。changed = 除 tier/deprecated 外字段有变
  * （形状/语义变）；re-tiered = 仅 tier 变（含 DEP 登记日 tier→deprecated 与
  * 撤销日 deprecated→原级——治理动作非形状变更，走 api-deprecate: 裁决类）；
@@ -215,6 +231,14 @@ export function renderCompatibility({ surface, deprecations, snapshots }) {
   lines.push('');
   lines.push(`能力面（capabilities）共 ${surface.capabilities.length} 项。`);
   lines.push('');
+  // 当前执法纪元行（§6.13.4 点火可见性——刀五）：面快照 enforcement 纪元章归一
+  // 读取；两态文案各带执法语义速览（读者不翻规范即知当前容忍/拒载形态）
+  lines.push(
+    eraOf(surface) === 'ignited'
+      ? '执法纪元：`ignited`（兼容执法已点火——清单 api 块缺席拒载、min fail-loud 对全体应用生效）。'
+      : '执法纪元：`pre-ignition`（兼容执法未点火——清单 api 块缺席为 legacy 容忍态，仅聚合 warn）。',
+  );
+  lines.push('');
 
   // —— DEP 注册簿节 ——
   lines.push('## 废弃登记（DEP 注册簿）');
@@ -255,14 +279,28 @@ export function renderCompatibility({ surface, deprecations, snapshots }) {
       lines.push('');
       continue;
     }
+    // 纪元翻转行（§6.13.4 点火可见性——刀五）：先于面 diff 单列——零面变更的
+    // 纯翻转 release 也有迹可查（翻转本身是执法行为变更，api-break: 语义裁决）
+    const prevEra = eraOf(prev.surface);
+    const curEra = eraOf(cur.surface);
+    if (prevEra !== curEra) {
+      lines.push(
+        `- **执法纪元翻转**（\`${prevEra}\` → \`${curEra}\`——本版起 api 块缺席从聚合 warn 变拒载、min fail-loud 对全体应用生效，\`api-break:\` 语义裁决）`,
+      );
+      lines.push('');
+    }
     renderDiffSection(lines, classifyFaceDiff(prev.surface, cur.surface), cur.surface.apiVersion, deprecations);
   }
   // 未发布面变更预告节（面快照 vs 最新归档——判级待下版归档）
   const latest = snapshots[snapshots.length - 1];
   const pending = classifyFaceDiff(latest.surface, surface);
+  // 纪元预告（§6.13.4 点火可见性——刀五）：面快照纪元 ≠ 最新归档纪元 = 点火位
+  // 已翻而尚未归档——点火日 PR 的快照 diff 必落本节，裁决义务（api-break:）点名
+  const eraFlipPending = eraOf(latest.surface) !== eraOf(surface);
   const hasPending =
     pending.added.length + pending.removed.length + pending.changed.length + pending.reTiered.length > 0 ||
-    pending.capabilitiesChanged;
+    pending.capabilitiesChanged ||
+    eraFlipPending;
   lines.push(`### 未发布面变更（对照最新归档 ${latest.version}——判级待下版快照归档）`);
   lines.push('');
   if (!hasPending) {
@@ -270,6 +308,10 @@ export function renderCompatibility({ surface, deprecations, snapshots }) {
     lines.push('');
   } else {
     const parts = [];
+    if (eraFlipPending)
+      parts.push(
+        `执法纪元待翻转（\`${eraOf(latest.surface)}\` → \`${eraOf(surface)}\`——点火位已翻、快照已 diff；本 PR 须带 \`api-break:\` 裁决标签）`,
+      );
     if (pending.added.length > 0)
       parts.push(`新增 ${pending.added.length}：${pending.added.map((k) => `\`${k}\``).join('、')}`);
     if (pending.removed.length > 0)

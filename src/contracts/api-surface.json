@@ -1,5 +1,6 @@
 {
   "apiVersion": "1.0",
+  "enforcement": "pre-ignition",
   "exports": [
     {
       "symbol": "ACCENT_COLOR_NAMES",

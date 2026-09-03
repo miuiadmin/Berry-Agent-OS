@@ -26,6 +26,7 @@ import { scanTopLevelExports } from './extract-api-surface.mjs';
 import {
   classifyFaceDiff,
   compareSemver,
+  eraOf,
   judgeBreakages,
   loadArchivedSnapshots,
   renderCompatibility,
@@ -413,6 +414,65 @@ describe('renderCompatibility：登记日端到端渲染（api-deprecate 裁决�
     // 1.30.0 小节：窗口未走完的删除断 MAJOR、不得进销账行
     expect(text).toContain('removed 无 DEP（判 MAJOR');
     expect(text).not.toContain('DEP-001 销账');
+  });
+});
+
+describe('§6.13.4 点火可见性：enforcement 纪元章（全面复盘 20260903-91 刀五）', () => {
+  /** 迷你导出条目（纪元渲染不涉面内容——形状凑齐即可） */
+  const e = (symbol) => ({
+    symbol,
+    module: 'berryagent',
+    tier: 'stable',
+    since: '1.0',
+    formFactors: ['standalone'],
+  });
+  it('eraOf 归一：键缺席/垃圾值 → pre-ignition（老快照零假翻转、误写不放大执法宣称）；显式 ignited 是唯一通路', () => {
+    // 归一语义双闸：纪元章落地前的归档快照无键 = 窗口容忍态；非 'ignited' 值
+    // 一律回落——纪元宣称只认显式点火（fail-closed 反向）
+    expect(eraOf({})).toBe('pre-ignition');
+    expect(eraOf({ enforcement: undefined })).toBe('pre-ignition');
+    expect(eraOf({ enforcement: 'on-fire' })).toBe('pre-ignition');
+    expect(eraOf({ enforcement: 'ignited' })).toBe('ignited');
+  });
+  it('提交位快照带 enforcement 纪元章且为合法两态（抽取器盖章在档——与点火常量同步由查 1 drift 执法）', () => {
+    const surface = JSON.parse(readFileSync(join(ROOT, 'src/contracts/api-surface.json'), 'utf8'));
+    expect(['pre-ignition', 'ignited']).toContain(surface.enforcement);
+  });
+  it('renderCompatibility 纪元三面：头部纪元行 + 归档族翻转行（零面变更也单列）+ 纪元一致预告节不噪声', () => {
+    // 1.0.0 基线无 enforcement 键（纪元章前老快照形）→ 1.1.0 纯翻转零面变更；
+    // 当前面快照 ignited 与最新归档一致 → 预告节零纪元项
+    const text = renderCompatibility({
+      surface: { apiVersion: '1.0', enforcement: 'ignited', exports: [e('A')], capabilities: [] },
+      deprecations: [],
+      snapshots: [
+        { version: '1.0.0', surface: { apiVersion: '1.0', exports: [e('A')], capabilities: [] } },
+        {
+          version: '1.1.0',
+          surface: { apiVersion: '1.0', enforcement: 'ignited', exports: [e('A')], capabilities: [] },
+        },
+      ],
+    });
+    expect(text).toContain('执法纪元：`ignited`');
+    expect(text).toContain('执法纪元翻转');
+    expect(text).toContain('`pre-ignition` → `ignited`');
+    expect(text).toContain('api-break:');
+    // 纯翻转 release 保留零面变更行——翻转与面变更是两件事，各自留痕不互吞
+    expect(text).toContain('与上版快照一致（零面变更 release）');
+    // 纪元一致（面快照 = 最新归档）→ 预告节不带纪元项
+    expect(text).toContain('面快照与最新归档一致（零未发布面变更）');
+  });
+  it('点火日形态：当前面快照 ignited 而最新归档 pre-ignition → 未发布预告节点名纪元待翻转与 api-break: 裁决义务', () => {
+    // 点火日 PR 的快照 diff 必落预告节——裁决义务（api-break:）由生成器点名，
+    // 不靠 PR 作者自觉记忆规范条款
+    const text = renderCompatibility({
+      surface: { apiVersion: '1.0', enforcement: 'ignited', exports: [e('A')], capabilities: [] },
+      deprecations: [],
+      snapshots: [{ version: '1.0.0', surface: { apiVersion: '1.0', exports: [e('A')], capabilities: [] } }],
+    });
+    expect(text).toContain('执法纪元待翻转');
+    expect(text).toContain('`pre-ignition` → `ignited`');
+    expect(text).toContain('api-break:');
+    expect(text).not.toContain('面快照与最新归档一致');
   });
 });
 
