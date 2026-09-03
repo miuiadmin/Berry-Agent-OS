@@ -166,8 +166,9 @@ export function pickAttachSession(
 
 /**
  * attach 主流程（阻塞至用户退出）。
- * @returns 进程退出码（0 = 正常退出 / 1 = 前置失败〔无 daemon、握手失败、
- *   token 缺失、无活会话〕——错误行 + 指引后即返）
+ * @returns 进程退出码（0 = 正常退出 / 1 = 失败〔无 daemon、握手失败、token 缺失、
+ *   无活会话、会话中 token 失效（401）——失败与干净退出脚本可分辨〕——错误行 +
+ *   指引后即返）
  */
 export async function attachMain(options: AttachMainOptions = {}): Promise<number> {
   const dataRoot = options.dataRoot ?? dataDir();
@@ -224,6 +225,10 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
   const accentBySession = new Map<string, string | undefined>();
   /** 退出旗（收尾期静音断线/迟到通知） */
   let quitting = false;
+  /** 认证失败旗（会话中 401——退出码标记：与干净退出可分辨，⑥） */
+  let authFailed = false;
+  /** 重拉代际（重连窗内两代 repull 并发时，旧代迟到响应不得覆盖新代投影，⑦） */
+  let repullGeneration = 0;
 
   /** 退出请求（多路汇流：Ctrl+D / requestQuit / SIGTERM / token 失效） */
   let quitResolve!: () => void;
@@ -300,11 +305,15 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
 
   /* ---- 重拉三发（连接即拉 + 重连恒重拉：投影 + 会话清单 + approvals） ---- */
   const repull = async (): Promise<void> => {
+    const generation = ++repullGeneration;
     const [messagesRes, sessionsRes, approvalsRes] = await Promise.all([
       fetchMessages(port, token, focusId),
       listSessions(port, token),
       listApprovals(port, token),
     ]);
+    // 代际 + 退出双守卫（⑦）：旧代迟到响应（新代已上屏或已在收尾）直接弃——
+    // historyCache 是整代换 + repaint 清屏重画，旧代覆盖 = 用户可见的画面回潮
+    if (generation !== repullGeneration || quitting) return;
     if (messagesRes !== undefined && messagesRes.status === 200 && messagesRes.messages !== undefined) {
       historyCache = projectedToAgentMessages(messagesRes.messages as Parameters<typeof projectedToAgentMessages>[0]);
       tui.repaint(focusId); // 清屏重画（repaint 经 history 闭包读缓存）
@@ -374,9 +383,14 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
       void repull();
     },
     onDisconnected: () => {
-      if (connectedOnce && !quitting) notifyUi('与 daemon 断线——重连中……', 'warn');
+      // ②首连静默修死（TUI 第十一轮盲区 3）：connectedOnce 门曾吞掉首连失败
+      //（帽满 503 循环——握手不在 SSE 帽内照常通过，横幅已出、历史永不拉、
+      // 零反馈空白屏）——分档披露：首连未通 vs 已连后断，两条路都要用户可见
+      if (quitting) return;
+      notifyUi(connectedOnce ? '与 daemon 断线——重连中……' : 'SSE 流未接通（连接帽满/降级）——重连中……', 'warn');
     },
     onAuthFailure: () => {
+      authFailed = true; // ⑥——退出码标记：认证失败与干净退出脚本可分辨
       notifyUi('token 不符（401）——daemon 重签发后重试（berry daemon stop → start）', 'error');
       quitResolve();
     },
@@ -423,6 +437,13 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
     signals.dispose();
     tui.stop();
   }
-  // SIGINT 首次优雅完成 = 0；SIGTERM/SIGHUP 采纳记账码（143/129）
-  return signals.exitCode;
+  // SIGINT 首次优雅完成 = 0；SIGTERM/SIGHUP 采纳记账码（143/129）；会话中
+  // token 失效（401）= 1（与前置闸失败同码族——失败归失败，干净退出归干净退出）
+  if (authFailed) {
+    // ⑥配对披露：401 的屏内警示与收尾渲染竞速（quitResolve 微任务续体恒先于
+    // 渲染 tick——屏内行结构性必丢），退出码之外再补一行终端恢复后的 stderr
+    //——认证失败给用户的确定性可见面（exit code + stderr 双通道）
+    err('token 不符（401）——daemon 重签发后重试（berry daemon stop → start）');
+  }
+  return authFailed ? 1 : signals.exitCode;
 }
