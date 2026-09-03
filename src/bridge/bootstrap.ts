@@ -163,13 +163,13 @@ export function registerHostHandlers(t: HostHandlersTarget): void {
         name: meta.name,
         description: meta.description,
         parameters: meta.parameters,
-        ...(meta.effect !== undefined ? { effect: meta.effect } : {}),
-        ...(meta.timeoutMs !== undefined ? { timeoutMs: meta.timeoutMs } : {}),
-        ...(meta.label !== undefined ? { label: meta.label } : {}),
+        ...(meta.effect === undefined ? {} : { effect: meta.effect }),
+        ...(meta.timeoutMs === undefined ? {} : { timeoutMs: meta.timeoutMs }),
+        ...(meta.label === undefined ? {} : { label: meta.label }),
         execute: (args, ctx) =>
           t.endpoint.call('svc', 'tool-invoke', [rowId, meta.name, args, { toolCallId: ctx.toolCallId }], {
             signal: ctx.signal,
-            ...(meta.timeoutMs !== undefined ? { timeoutMs: meta.timeoutMs } : {}),
+            ...(meta.timeoutMs === undefined ? {} : { timeoutMs: meta.timeoutMs }),
           }),
       };
       // D1 注册面路由（契约篇 §5.1 挂载目标两档，SF9）：路由权威 = host 侧按行
@@ -361,9 +361,9 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   const launchUrl = new URL('./carrier-launch.mjs', import.meta.url);
   const worker = new Worker(isTs ? launchUrl : workerUrl, {
     ...(isTs ? { workerData: { workerId, realmEntry: workerUrl.href } } : { workerData: { workerId } }),
-    ...(opts.execArgv !== undefined ? { execArgv: [...opts.execArgv] } : {}),
-    ...(opts.resourceLimits !== undefined ? { resourceLimits: { ...opts.resourceLimits } } : {}),
-    ...(opts.env !== undefined ? { env: { ...opts.env } } : {}),
+    ...(opts.execArgv === undefined ? {} : { execArgv: [...opts.execArgv] }),
+    ...(opts.resourceLimits === undefined ? {} : { resourceLimits: { ...opts.resourceLimits } }),
+    ...(opts.env === undefined ? {} : { env: { ...opts.env } }),
   });
 
   /** 行绑定簿（applyRow 登记、行作用域回卷时清——onTell/emit 的行锚点） */
@@ -415,7 +415,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   // 签名 "Worker terminated due to reaching memory limit"，exit code 与普通崩溃
   // 同码 1，签名是唯一判据）
   let lastWorkerError: string | undefined;
-  worker.on('error', (err) => {
+  worker.on('error', (err: Error) => {
     lastWorkerError = `${err.constructor.name}: ${err.message}`;
   });
 
@@ -441,8 +441,8 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
           workerId,
           code,
           rows: rowIds,
-          ...(killReason !== undefined ? { reason: killReason } : {}),
-          ...(lastWorkerError !== undefined ? { diagnostic: lastWorkerError } : {}),
+          ...(killReason === undefined ? {} : { reason: killReason }),
+          ...(lastWorkerError === undefined ? {} : { diagnostic: lastWorkerError }),
         });
       }
     });
@@ -456,7 +456,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
     metaCache,
     toolRunSeq: 0,
     root: opts.root,
-    ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
+    ...(opts.tools === undefined ? {} : { tools: opts.tools }),
   });
 
   const domain: WorkerDomain = {
