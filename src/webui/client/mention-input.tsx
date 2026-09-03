@@ -22,7 +22,10 @@
  * 候选来源键（契约篇 §6.8 补裁，全面复盘 20260903 #13）：候选数组永远记生成
  * 它的查询身份（档位+pathPrefix）；取数落定与查询换代竞速、消费面读前键比对
  * 两腿守门——陈旧候选不渲染也不可接受（Enter 落回原文提交），防抖窗内新查询
- * 弹层呈空列表（loading 期空列表是诚实态）。
+ * 弹层呈空列表（loading 期空列表是诚实态）。符号段前缀过滤（A13，第十一轮
+ * 遗漏大扫 20260904-b）：取数键只锚 pathPrefix，# 后续打的片段在客户端按
+ * name.startsWith 过滤（与 TUI 侧 channels/mention.ts 同形）；零命中出诚实
+ * 「无匹配符号」行。
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
@@ -128,9 +131,19 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
     query !== null && query.symbolPrefix !== undefined && candidatesKey === `symbols:${query.pathPrefix}`
       ? symbols
       : NO_SYMBOLS;
+  /**
+   * 符号段前缀过滤（A13，第十一轮遗漏大扫 20260904-b——与 TUI 侧
+   * channels/mention.ts 同形 name.startsWith）：取数键只锚 pathPrefix（# 后
+   * 续打不换键不重取），符号段已输入片段按名前缀客户端过滤——不过滤则全量
+   * 罗列喧宾夺主（弹层本该随输入收敛）。空前缀 = 全量（startsWith('') 恒真）
+   */
+  const symbolsFiltered: readonly SymbolItem[] =
+    query?.symbolPrefix === undefined
+      ? symbolsShown
+      : symbolsShown.filter((s) => s.name.startsWith(query.symbolPrefix!));
 
-  /** 当前档候选总数（高亮循环上界）——读经键门数组（陈旧候选不计入） */
-  const count = query?.symbolPrefix === undefined ? filesShown.length : symbolsShown.length;
+  /** 当前档候选总数（高亮循环上界）——读经键门+过滤数组（陈旧/不匹配候选不计入） */
+  const count = query?.symbolPrefix === undefined ? filesShown.length : symbolsFiltered.length;
 
   /* 值/光标变化 → 判档 + 防抖取数（弹层生命周期随 token 存亡） */
   useEffect(() => {
@@ -250,7 +263,7 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
         if (query.symbolPrefix === undefined) {
           const f = filesShown[active] ?? '';
           accept(fileInsertion(f), fileSuffix(f)); // 目录不补尾空格（TUI-7 续钻）
-        } else accept(`@${query.pathPrefix}#${symbolsShown[active]?.name ?? ''}`);
+        } else accept(`@${query.pathPrefix}#${symbolsFiltered[active]?.name ?? ''}`);
         return;
       }
     }
@@ -313,12 +326,12 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
               )}
             </>
           ) : (
-            /* 第二段：documentSymbol 候选（404/warming/空集 → 提示行） */
+            /* 第二段：documentSymbol 候选（A13 前缀过滤后呈现；404/warming/空集 → 提示行） */
             <>
               <div className="border-b border-neutral-800 px-3 py-1 text-xs text-neutral-500">
-                {query.pathPrefix} 的符号{loading ? '…' : `（${symbolsShown.length}）`}
+                {query.pathPrefix} 的符号{loading ? '…' : `（${symbolsFiltered.length}）`}
               </div>
-              {symbolsShown.map((s, i) => (
+              {symbolsFiltered.map((s, i) => (
                 <button
                   key={`${s.name}-${i}`}
                   className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-xs ${
@@ -336,6 +349,11 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
                 </button>
               ))}
               {symbolHint !== '' && !loading && <div className="px-3 py-2 text-xs text-neutral-600">{symbolHint}</div>}
+              {/* 前缀过滤零命中（A13）：服务端有符号但无一匹配已输入片段——诚实行
+                  （与服务端档提示 symbolHint 互斥：hint 非空时它先说完了） */}
+              {symbolHint === '' && !loading && symbolsFiltered.length === 0 && (
+                <div className="px-3 py-2 text-xs text-neutral-600">无匹配符号</div>
+              )}
             </>
           )}
         </div>

@@ -153,7 +153,7 @@ describe('App 乐观提交', () => {
     fireEvent.change(screen.getByPlaceholderText(/输入消息/), { target: { value: '新消息' } });
     fireEvent.click(screen.getByText('发送'));
     expect(screen.getByText('新消息')).toBeTruthy(); // 乐观行同步现
-    expect(api.submitMessage).toHaveBeenCalledWith('live-1', '新消息');
+    expect(api.submitMessage).toHaveBeenCalledWith('live-1', '新消息', expect.any(String)); // 第三参 = requestId 幂等键（A12）
     // getByPlaceholderText 返 HTMLElement——输入框值断言窄型到 HTMLInputElement
     expect((screen.getByPlaceholderText(/输入消息/) as HTMLInputElement).value).toBe('');
   });
@@ -351,9 +351,120 @@ describe('App 审批应答 superseded（刀三——TUI 先决幂等回执）', 
     api.decideApproval.mockResolvedValue({ accepted: false });
     fireEvent.click(screen.getAllByText('允许')[0]!);
     await waitFor(() => {
-      expect(screen.getByText('该审批已在 TUI 侧应答（web 端操作未生效）')).toBeTruthy();
+      // A16 中性化文案：accepted:false 只证「已应答」——本端在飞守门已挡本端
+      // 重发，TUI 先决与另一 web 会话先决不可区分（修前文案误归因 TUI）
+      expect(screen.getByText('该审批已被应答（本端或他端先行）')).toBeTruthy();
     });
     expect(screen.queryByText('删除文件')).toBeNull(); // 乐观摘除兜底
+  });
+});
+
+describe('App 活体尾部多消息（A10——run 内第二条消息流式时先前消息不蒸发）', () => {
+  it('message_start 开条收束前条：两条 assistant 文本 + 其间工具卡同屏且保序（修前红：单条 streamText 被整体替换，第一条蒸发）', async () => {
+    render(<App />);
+    await untilLoaded();
+    const es = FakeEventSource.instances[0]!;
+    /** display 族 message 帧驱动（message 载荷按帧型递进——CR-13 累积快照） */
+    const msgFrame = (type: string, text: string) =>
+      sendFrame(es, {
+        kind: 'display',
+        sessionId: 'live-1',
+        payload: { type, message: { content: [{ type: 'text', text }] } },
+      });
+    // run 第一条消息：start → update → end（收束）
+    msgFrame('message_start', '');
+    msgFrame('message_update', '第一条回答');
+    msgFrame('message_end', '第一条回答');
+    // 工具执行（两消息之间的交错——帧序即活体序）+ 第二条消息开条流式
+    sendFrame(es, {
+      kind: 'display',
+      sessionId: 'live-1',
+      payload: { type: 'tool_execution_start', toolCallId: 'c1', toolName: 'bash', args: {} },
+    });
+    msgFrame('message_start', '');
+    msgFrame('message_update', '第二条流式中');
+    // 修前红位：message_update 只改单条 streamText——第二条整体替换第一条，
+    // '第一条回答' 从屏上蒸发（投影落账前的窗口内不可见）
+    expect(screen.getByText('第一条回答')).toBeTruthy();
+    expect(screen.getByText(/第二条流式中/)).toBeTruthy();
+    // DOM 保序：已收束消息 → 工具卡 → 流式末条（display 帧无时序锚——固定层序）
+    const first = screen.getByText('第一条回答');
+    const tool = screen.getByText('bash');
+    const second = screen.getByText(/第二条流式中/);
+    expect(first.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tool.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe('App 提交失败防线（A12——requestId 幂等键 + 用户文本不蒸发）', () => {
+  it('网络类失败同键重试一次成功：两次调用 requestId 同值（服务端同键早退不双投）+ 输入不回填', async () => {
+    render(<App />);
+    await untilLoaded();
+    let calls = 0;
+    api.submitMessage.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError('fetch failed'); // 网络腿（fetch reject——非 ApiError）
+      return undefined;
+    });
+    fireEvent.change(screen.getByPlaceholderText(/输入消息/), { target: { value: '重试可活' } });
+    fireEvent.click(screen.getByText('发送'));
+    // 修前红位：只调一次且不带 requestId——瞬断网络错直接进 catch 回滚重拉
+    await waitFor(() => {
+      expect(api.submitMessage).toHaveBeenCalledTimes(2);
+    });
+    const [c1, c2] = api.submitMessage.mock.calls;
+    expect(c1?.[0]).toBe('live-1');
+    expect(c1?.[1]).toBe('重试可活');
+    expect(typeof c1?.[2]).toBe('string'); // 第三参 = 幂等键（修前缺席）
+    expect(c2?.[2]).toBe(c1?.[2]); // 同键重试——服务端 LRU 去重早退
+    expect((screen.getByPlaceholderText(/输入消息/) as HTMLInputElement).value).toBe(''); // 终态成功不回填
+  });
+
+  it('HTTP 级失败不重试直接收场：输入回填不蒸发 + 状态条示错（服务端已应答，重试无意义）', async () => {
+    render(<App />);
+    await untilLoaded();
+    api.submitMessage.mockRejectedValue(new ApiError(503, 'submit → 503'));
+    fireEvent.change(screen.getByPlaceholderText(/输入消息/), { target: { value: '失败要保住' } });
+    fireEvent.click(screen.getByText('发送'));
+    await waitFor(() => {
+      expect((screen.getByPlaceholderText(/输入消息/) as HTMLInputElement).value).toBe('失败要保住'); // 修前红：''
+    });
+    expect(api.submitMessage).toHaveBeenCalledTimes(1); // ApiError = HTTP 级——不重试
+    expect(screen.getByText(/submit → 503（HTTP 503）/)).toBeTruthy();
+  });
+});
+
+describe('App checkpoint/rewind 刷清单（A14——fork 产新会话不等全局刷新）', () => {
+  it('rewind 帧驱动 refreshSessions：侧栏清单即时前进（修前红：只挂转录行不刷清单）', async () => {
+    render(<App />);
+    await untilLoaded();
+    const es = FakeEventSource.instances[0]!;
+    const before = api.fetchSessions.mock.calls.length; // 首载一次（onopen 未触发）
+    sendFrame(es, {
+      kind: 'session',
+      sessionId: 'live-1',
+      payload: { type: 'checkpoint/rewind', data: { id: 'snap-1', newSessionId: 'new-1', files: 2 } },
+    });
+    expect(screen.getByText(/已回退至 snap-1/)).toBeTruthy(); // 转录行在场（既有行为不回归）
+    expect(api.fetchSessions.mock.calls.length).toBe(before + 1); // 修前红：rewind 分支无 refreshSessions
+  });
+});
+
+describe('App 审批卡在飞防双击（A16——应答在飞窗二连击只发一次 decide）', () => {
+  it('永悬应答窗二连击「允许」：decideApproval 只被调一次（修前红：两次 POST）', async () => {
+    render(<App />);
+    await untilLoaded();
+    const es = FakeEventSource.instances[0]!;
+    sendFrame(es, {
+      kind: 'session',
+      sessionId: 'live-1',
+      payload: { type: 'approval/asked', data: { approvalId: 'ap-3', summary: '双击测试' } },
+    });
+    expect(await screen.findByText('双击测试')).toBeTruthy();
+    api.decideApproval.mockImplementation(() => new Promise(() => {})); // 永悬——在飞窗持续张开
+    fireEvent.click(screen.getAllByText('允许')[0]!);
+    fireEvent.click(screen.getAllByText('允许')[0]!); // 渲染帧前的双击（闭包态看不到的窗口）
+    expect(api.decideApproval).toHaveBeenCalledTimes(1); // 修前红：2 次
   });
 });
 

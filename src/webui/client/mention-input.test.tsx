@@ -125,6 +125,32 @@ describe('MentionInput 第二段：@path# 符号补全', () => {
     expect(screen.getByText('无符号（文件不在盘或语言不支持）')).toBeTruthy();
     expect(screen.queryByText(/:6/)).toBeNull(); // 无行号徽标（零符号列表）
   });
+
+  it('符号段前缀过滤（A13——与 TUI 侧 channels/mention.ts 同形 name.startsWith）：@a.ts#be 只列 betaB', async () => {
+    // 取数键只锚 pathPrefix（symbolPrefix 续打不换键不重取）——客户端按符号前缀
+    // 过滤候选。修前红位：全量罗列不过滤，alphaA 同屏喧宾夺主
+    api.fetchSymbols.mockResolvedValue(
+      symbolsOf([
+        ['alphaA', 10],
+        ['betaB', 20],
+      ]),
+    );
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@a.ts#be');
+    expect(api.fetchSymbols).toHaveBeenCalledWith('a.ts'); // 键仍只锚 pathPrefix（不重取）
+    expect(screen.getByText('betaB')).toBeTruthy();
+    expect(screen.queryByText('alphaA')).toBeNull(); // 修前红：不过滤同屏在场
+  });
+
+  it('符号段前缀过滤后零命中：诚实「无匹配符号」行（A13）', async () => {
+    api.fetchSymbols.mockResolvedValue(symbolsOf([['alphaA', 10]]));
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@a.ts#zz');
+    expect(screen.getByText('无匹配符号')).toBeTruthy(); // 修前红：该行不存在（全量罗列）
+    expect(screen.queryByText('alphaA')).toBeNull();
+  });
 });
 
 describe('MentionInput 候选来源键（全面复盘 20260903 #13——陈旧候选双竞速守门）', () => {

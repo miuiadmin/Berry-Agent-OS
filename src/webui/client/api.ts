@@ -52,12 +52,17 @@ export function fetchTodo(sessionId: string): Promise<TodoItem[] | null> {
   );
 }
 
-/** 提交用户消息（202 fire-and-forget——轮次活态走 SSE，应答不等轮次） */
-export async function submitMessage(sessionId: string, text: string): Promise<void> {
+/**
+ * 提交用户消息（202 fire-and-forget——轮次活态走 SSE，应答不等轮次）。
+ * requestId 幂等键（A12，第十一轮遗漏大扫 20260904-b）：服务端同键 LRU 早退
+ * 去重（成功投递才记账——404 应答不记键，迟到存活会话可原键重投）；调用方
+ * 网络类失败**同键**重试一次不双投。
+ */
+export async function submitMessage(sessionId: string, text: string, requestId: string): Promise<void> {
   const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, requestId }),
   });
   if (!res.ok) throw new ApiError(res.status, `submit → ${res.status}`);
 }

@@ -107,8 +107,7 @@ describe('ChatView 工具卡三态（CR-2 半程态合并）', () => {
 
   it('活体帧补窗口期：live.tools 的卡（未入投影）按帧状态渲染', () => {
     const live: LiveState = {
-      streamText: '',
-      streamDone: false,
+      messages: [],
       tools: new Map([
         ['live-a', { name: 'bash', argsText: 'ls', done: false }],
         ['live-b', { name: 'fs_write', output: '写失败', isError: true, done: true }],
@@ -123,17 +122,64 @@ describe('ChatView 工具卡三态（CR-2 半程态合并）', () => {
 });
 
 describe('ChatView 活体流式文本（CR-13 累积快照）', () => {
-  it('streamText 未入投影 → 流式行呈现（尾部光标 ◍）', () => {
-    const live: LiveState = { streamText: '流式中回答', streamDone: false, tools: new Map() };
+  it('流式消息未入投影 → 流式行呈现（尾部光标 ◍）', () => {
+    const live: LiveState = { messages: [{ text: '流式中回答', done: false }], tools: new Map() };
     render(<ChatView messages={[]} {...baseProps()} live={live} />);
     expect(screen.getByText(/流式中回答/)).toBeTruthy();
   });
 
-  it('投影尾部同文去重：turn 落账与 message_end 镜像双时序都不双渲染', () => {
+  it('投影尾段同文去重：turn 落账与 message_end 镜像双时序都不双渲染', () => {
     const messages = [assistantText(2, '同文回答')];
-    const live: LiveState = { streamText: '同文回答', streamDone: true, tools: new Map() };
+    const live: LiveState = { messages: [{ text: '同文回答', done: true }], tools: new Map() };
     render(<ChatView messages={messages} {...baseProps()} live={live} />);
     expect(screen.queryAllByText('同文回答')).toHaveLength(1);
+  });
+});
+
+describe('ChatView 活体尾部多消息（A10——多消息队列 + 展平层序，第十一轮遗漏大扫 20260904-b）', () => {
+  it('已收束消息 → 工具卡 → 流式末条的固定层序（display 帧无时序锚，稳定呈现）', () => {
+    const live: LiveState = {
+      messages: [
+        { text: '已收束一条', done: true },
+        { text: '流式二条', done: false },
+      ],
+      tools: new Map([['c9', { name: 'bash', argsText: 'ls', done: true }]]),
+    };
+    render(<ChatView messages={[]} {...baseProps()} live={live} />);
+    const m1 = screen.getByText(/已收束一条/);
+    const tool = screen.getByText('bash');
+    const m2 = screen.getByText(/流式二条/);
+    expect(m1.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tool.compareDocumentPosition(m2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('投影尾段对齐去重：投影已含 A1 时活体头段 A1 让位（不双渲染），A2 照渲染', () => {
+    const messages = [assistantText(2, 'A1 落账')];
+    const live: LiveState = {
+      messages: [
+        { text: 'A1 落账', done: true },
+        { text: 'A2 流式', done: false },
+      ],
+      tools: new Map(),
+    };
+    render(<ChatView messages={messages} {...baseProps()} live={live} />);
+    expect(screen.queryAllByText('A1 落账')).toHaveLength(1); // 投影一份——活体头段让位
+    expect(screen.getByText(/A2 流式/)).toBeTruthy();
+  });
+
+  it('末条收束后渲染为非流式行（done 消光标 ◍）', () => {
+    const live: LiveState = { messages: [{ text: '收束了', done: true }], tools: new Map() };
+    render(<ChatView messages={[]} {...baseProps()} live={live} />);
+    expect(screen.getByText('收束了')).toBeTruthy(); // 无 ◍ 尾——精确匹配即证非流式
+    expect(screen.queryByText(/收束了 ◍/)).toBeNull();
+  });
+});
+
+describe('ChatView markdown 渲染面（A15——远程图片零信标）', () => {
+  it('assistant markdown 远程图片不渲染 img 元素（加载即隐私信标——修前红：默认 img 在场）', () => {
+    const messages = [assistantText(2, '看图 ![探针](http://beacon.example/x.png) 完')];
+    render(<ChatView messages={messages} {...baseProps()} />);
+    expect(document.querySelector('img')).toBeNull(); // 修前红：<img src="http://beacon.example/x.png"> 在场
   });
 });
 

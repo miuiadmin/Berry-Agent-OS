@@ -5,7 +5,9 @@
  * - 消息主列表恒来自拉投影腿（GET messages，SPA 零折叠逻辑）；SSE display
  *   族只驱动「当前 run 未入投影的尾部增量」；
  * - message_update.message 是累积快照——流式文本**整体替换**渲染（CR-13），
- *   非 token delta 追加；
+ *   非 token delta 追加；run 内多消息按 message_start 序入 live.messages
+ *   队列（A10，第十一轮遗漏大扫 20260904-b）——前条收束后条流式同屏不蒸发
+ *   （修前单条 streamText 被第二条整体替换）；
  * - durable 镜像（session 族）到达 = 投影已前进，**只重拉当前查看会话**
  *   （CR-14）：turn/end → 全量重拉；user/message → 重拉 + todo 面板归零
  *   （CR-1——『用户输入段』边界：新段旧表不越界）；todo/write → 面板全量
@@ -61,19 +63,30 @@ export interface LiveTool {
   done: boolean;
 }
 
+/** 当前 run 的活体 assistant 消息条目（A10——run 内多消息队列的成员形态） */
+export interface LiveMessage {
+  /** 累积快照文本（message_update.message 整体替换——CR-13） */
+  text: string;
+  /** 是否收束（message_end 后 true；message_start 遇未收束前条时防御置 true） */
+  done: boolean;
+}
+
 /** 当前 run 的活体增量（display 族累积；turn 落账重拉后整体清空） */
 export interface LiveState {
-  /** 流式 assistant 文本（累积快照——message_update.message 整体替换） */
-  streamText: string;
-  /** 流是否已收束（message_end 后停光标闪烁） */
-  streamDone: boolean;
+  /**
+   * 本 run 的 assistant 消息队列（按 message_start 开条序——A10，第十一轮
+   * 遗漏大扫 20260904-b）：run 内第二条消息流式时前条不蒸发。修前单条
+   * streamText 被 message_update 整体替换——投影落账前的窗口内前条从屏上
+   * 消失。展平层序（已收束 → 工具卡 → 流式末条）见 chat-view.tsx
+   */
+  messages: LiveMessage[];
   /** 工具卡活态：toolCallId → LiveTool */
   tools: Map<string, LiveTool>;
 }
 
 /** 活体增量空态（agent_start 复位用） */
 function emptyLive(): LiveState {
-  return { streamText: '', streamDone: false, tools: new Map() };
+  return { messages: [], tools: new Map() };
 }
 
 /** todo/write 事件载荷防御归一（镜像 chat 件 normalizeItems——坏项丢弃不炸读） */
@@ -441,6 +454,12 @@ export function App() {
               ...prev,
               { sessionId: sid, id: rid, newSessionId: rnew, files: Number(data?.files) || 0 },
             ]);
+            // 刷清单（A14，第十一轮遗漏大扫 20260904-b）：rewind = fork + 切前台
+            // ——新会话条目即时可点。只挂转录行不刷清单 = 用户在侧栏看不到新会话
+            // 直到下一次全局 turn/end（原会话已被 fork 接管可能永不再来）。
+            // 视图切换不代劳：rewind 后查看会话切到新会话是服务端切前台语义，
+            // 由后续 turn/end 镜像自然收口
+            refreshSessions();
             return;
           }
           default:
@@ -455,15 +474,28 @@ export function App() {
           case 'agent_start':
             setLive(emptyLive()); // 新 run 复位
             return;
+          case 'message_start':
           case 'message_update':
           case 'message_end': {
-            // 累积快照替换渲染（CR-13）：message 整体替换，不追加
+            // 累积快照替换（CR-13）+ 多消息队列（A10）：message_start 开新条
+            // （前条未收束即开新条 = 丢帧窗——防御收束），update/end 改写末条
+            // （末条缺席即补条——中途接线/丢 start 帧的防御位）
             const text = textOf((ev.message as { content?: unknown } | undefined)?.content);
-            setLive((prev) => ({
-              streamText: text,
-              streamDone: ev.type === 'message_end',
-              tools: prev?.tools ?? new Map(),
-            }));
+            const isStart = ev.type === 'message_start';
+            setLive((prev) => {
+              const base = prev ?? emptyLive();
+              const messages = [...base.messages];
+              const last = messages.length - 1;
+              if (isStart) {
+                if (last >= 0) messages[last] = { ...messages[last]!, done: true };
+                messages.push({ text, done: false });
+              } else if (last >= 0) {
+                messages[last] = { text, done: ev.type === 'message_end' };
+              } else {
+                messages.push({ text, done: ev.type === 'message_end' });
+              }
+              return { messages, tools: base.tools };
+            });
             return;
           }
           case 'tool_execution_start': {
@@ -490,7 +522,7 @@ export function App() {
             return;
           }
           default:
-            return; // turn_*/message_start/tool_execution_update v1 不消费
+            return; // turn_*/tool_execution_update v1 不消费
         }
       }
       if (env.kind === 'notify') {
@@ -524,20 +556,43 @@ export function App() {
   }, [select, noteError]);
 
   /**
+   * 审批应答在飞守门·同步腿（A16，第十一轮遗漏大扫 20260904-b）：闭包态在
+   * 渲染帧前的双击窗内不可见（state 经重渲染才更新）——ref 集合同步判同档
+   * 二连击只发一次 decide。渲染腿（按钮 disable）见 deciding state
+   */
+  const decidingRef = useRef<Set<string>>(new Set());
+  /** 审批应答在飞守门·渲染腿：在飞审批 id 集（按钮 disable 呈现） */
+  const [deciding, setDeciding] = useState<ReadonlySet<string>>(new Set());
+
+  /**
    * 审批应答（刀三）：POST decide 只 resolve 服务端 resolver——durable 写在
-   * 服务端单写漏斗；superseded（TUI 先决）如实示警。终结呈现双保险：decided
-   * SSE 帧是真值，乐观摘除兜底 SSE 断线窗（帧迟到时幂等）。
+   * 服务端单写漏斗；superseded 如实示警（A16 文案中性化：accepted:false 只
+   * 证「已应答」，本端在飞守门已挡本端重发——他端先决与本端先决不可区分）。
+   * 终结呈现双保险：decided SSE 帧是真值，乐观摘除兜底 SSE 断线窗（帧迟到
+   * 时幂等）。
    */
   const onDecide = useCallback(
     async (approvalId: string, decision: ApprovalDecision) => {
+      // 同步守门（A16）：同档在飞即收——渲染帧前的二连击窗闭包态看不见，ref
+      // 同步可见
+      if (decidingRef.current.has(approvalId)) return;
+      decidingRef.current.add(approvalId);
+      setDeciding((prev) => new Set(prev).add(approvalId));
       try {
         const res = await decideApproval(approvalId, decision);
-        if (!res.accepted) setNotice('该审批已在 TUI 侧应答（web 端操作未生效）');
+        if (!res.accepted) setNotice('该审批已被应答（本端或他端先行）');
         const drop = (list: readonly PendingApproval[]) => list.filter((a) => a.approvalId !== approvalId);
         setApprovals(drop);
         setLiveCards(drop);
       } catch (err) {
         noteError(err);
+      } finally {
+        decidingRef.current.delete(approvalId); // 失败后允许重试（守门只防在飞窗，不罚终态）
+        setDeciding((prev) => {
+          const next = new Set(prev);
+          next.delete(approvalId);
+          return next;
+        });
       }
     },
     [noteError],
@@ -567,7 +622,14 @@ export function App() {
     }
   }, []);
 
-  /** 提交（乐观 user 行先行——durable 镜像重拉后由真值替换；失败回滚重拉） */
+  /**
+   * 提交（乐观 user 行先行——durable 镜像重拉后由真值替换）。失败防线
+   * （A12，第十一轮遗漏大扫 20260904-b）：requestId 幂等键客户端生成随 body
+   * 上送（服务端同键 LRU 早退去重——daemon 刀一·协议正确性层的客户端补腿）；
+   * 网络类失败（fetch reject，非 ApiError）**同键**重试一次不双投；HTTP 级
+   * 失败（ApiError = 服务端已应答）不重试直接收场；终态失败回填输入——用户
+   * 文本不蒸发（乐观行由 loadView 真值重拉替换回收）
+   */
   const onSubmit = useCallback(async () => {
     const text = input.trim();
     const id = viewedRef.current;
@@ -579,11 +641,25 @@ export function App() {
     }
     setInput('');
     setMessages((prev) => [...prev, { type: 'user', seq: -Date.now(), content: text }]);
-    try {
-      await submitMessage(id, text);
-    } catch (err) {
+    const requestId = crypto.randomUUID(); // 幂等键（localhost/https 均为 secure context——crypto.randomUUID 恒可用）
+    /** 终态失败收场：示错 + 回填输入 + 重拉真值（乐观行回收） */
+    const fail = (err: unknown): void => {
       noteError(err);
+      setInput(text);
       void loadView(id);
+    };
+    try {
+      await submitMessage(id, text, requestId);
+    } catch (err1) {
+      if (err1 instanceof ApiError) {
+        fail(err1); // HTTP 级——服务端已应答，重试无意义
+        return;
+      }
+      try {
+        await submitMessage(id, text, requestId); // 网络腿同键重试一次（瞬断自愈；同键 = 服务端不双投）
+      } catch (err2) {
+        fail(err2);
+      }
     }
   }, [input, sessions, noteError, loadView]);
 
@@ -645,6 +721,7 @@ export function App() {
           live={live}
           approvals={viewedCards}
           rewinds={viewedRewinds}
+          decidingIds={deciding}
           onDecide={(id, d) => void onDecide(id, d)}
         />
         <TodoPanel todo={todo} />

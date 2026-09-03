@@ -6,9 +6,11 @@
  *   展示档——assistant 已落账、工具还在跑）；
  * - display 族 tool_execution_* 帧按 **toolCallId 同键**覆盖卡片状态/输出
  *   （活体先到 = 卡片先动；投影随后到 = 真值替换）；
- * - 活体流式文本只在「投影尚未包含同文本」时渲染（assistant/message 落账
- *   时序与 turn_end 镜像之间存在窗口——按投影尾部同文比对去重，两时序都
- *   不双渲染）。
+ * - 活体流式消息只在「投影尚未包含同文」时渲染（assistant/message 落账
+ *   时序与 turn_end 镜像之间存在窗口——投影尾段 × 活体头段贪心对齐去重，
+ *   两时序都不双渲染）。多消息队列 + 展平层序（已收束消息 → 工具卡 →
+ *   流式末条）是 A10（第十一轮遗漏大扫 20260904-b）的推广形态——display
+ *   帧无时序锚，固定层序是稳定呈现。
  */
 
 import { useEffect, useMemo, useRef } from 'react';
@@ -28,6 +30,16 @@ type RenderItem =
   | { kind: 'tool'; call: ProjectedToolCall; result: ToolResultMessage | undefined; liveTool: LiveTool | undefined }
   | { kind: 'error'; text: string };
 
+/**
+ * markdown 呈现的自定义渲染器集（模块级常量——每次渲染重建对象既浪费又使
+ * ReactMarkdown 失去引用稳定性）。img 恒不渲染（A15，第十一轮遗漏大扫
+ * 20260904-b）：渲染 `<img src="http://…">` 即向远程发起请求——会话内不可信
+ * 内容（工具输出/模型转述的任意 URL）一上屏就成隐私信标（IP/时点/UA 泄露），
+ * jsdom 不发请求但真浏览器照发；返回 null = 图片位整体不出（alt 也不留——
+ * 呈现面是纯文本语境，链接与代码块不受影响）
+ */
+const MD_COMPONENTS = { img: () => null } as const;
+
 /** 视图属性 */
 interface ChatViewProps {
   readonly messages: readonly ProjectedMessage[];
@@ -36,12 +48,14 @@ interface ChatViewProps {
   readonly approvals: readonly PendingApproval[];
   /** checkpoint 转录行（SSE rewind 帧驱动——surface 词不进投影，活体 only） */
   readonly rewinds: readonly RewindRow[];
+  /** 应答在飞的审批 id 集（A16——按钮 disable 呈现腿；App 的 ref 同步腿防双发） */
+  readonly decidingIds?: ReadonlySet<string>;
   /** 审批应答上抛（App 决定 POST + 终结呈现） */
   readonly onDecide: (approvalId: string, decision: ApprovalDecision) => void;
 }
 
 /** 对话主视图（自动滚底——投影或活体变化即贴底） */
-export function ChatView({ messages, live, approvals, rewinds, onDecide }: ChatViewProps) {
+export function ChatView({ messages, live, approvals, rewinds, decidingIds, onDecide }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   /** 投影 → 渲染项：user 行 / assistant 文本 / 工具卡（toolResult 回并配对卡） */
@@ -88,13 +102,25 @@ export function ChatView({ messages, live, approvals, rewinds, onDecide }: ChatV
         });
       }
     }
-    // 活体尾部：流式文本（投影尾部同文去重）+ 未入投影的工具卡
+    // 活体尾部（A10——多消息队列）：投影尾段 × 活体头段贪心对齐去重（CR-2
+    // 同文去重的多消息推广——镜像窗口内投影已含的活体消息让位不双渲染；对齐
+    // 只对拍 assistant 文本，user/toolResult 夹在中间不阻断对齐），让位后的
+    // 新鲜段按固定层序入列：已收束消息 → 工具卡 → 流式末条（display 帧无
+    // 时序锚，工具卡与消息的真实交错不可重建——稳定呈现优先）
     if (live !== null) {
-      const lastAssistant = [...messages].reverse().find((m) => m.type === 'assistant');
-      const duplicated =
-        live.streamText !== '' && lastAssistant !== undefined && textOf(lastAssistant.content) === live.streamText;
-      if (live.streamText !== '' && !duplicated) {
-        out.push({ kind: 'assistant', text: live.streamText, streaming: !live.streamDone });
+      const projAssistantTexts = messages.filter((m) => m.type === 'assistant').map((m) => textOf(m.content));
+      let k = 0; // 活体头段让位数（投影尾部倒数第 k+1 条 assistant 与活体第 k 条同文）
+      while (
+        k < live.messages.length &&
+        k < projAssistantTexts.length &&
+        live.messages[k]!.text !== '' &&
+        projAssistantTexts[projAssistantTexts.length - 1 - k] === live.messages[k]!.text
+      ) {
+        k += 1;
+      }
+      const fresh = live.messages.slice(k);
+      for (const m of fresh.slice(0, -1)) {
+        if (m.text !== '') out.push({ kind: 'assistant', text: m.text, streaming: false });
       }
       for (const [callId, tool] of live.tools) {
         if (seenCalls.has(callId)) continue; // 投影已含（tool/call 落账）——真值面
@@ -104,6 +130,10 @@ export function ChatView({ messages, live, approvals, rewinds, onDecide }: ChatV
           result: undefined,
           liveTool: tool,
         });
+      }
+      const last = fresh[fresh.length - 1];
+      if (last !== undefined && last.text !== '') {
+        out.push({ kind: 'assistant', text: last.text, streaming: !last.done });
       }
     }
     return out;
@@ -132,8 +162,8 @@ export function ChatView({ messages, live, approvals, rewinds, onDecide }: ChatV
           if (item.kind === 'assistant') {
             return (
               <div key={i} className="md self-start max-w-full">
-                {/* streaming：尾部光标块（animate-pulse）——收束后隐 */}
-                <ReactMarkdown>{item.text + (item.streaming ? ' ◍' : '')}</ReactMarkdown>
+                {/* streaming：尾部光标块（animate-pulse）——收束后隐；img 不渲染（A15 零信标） */}
+                <ReactMarkdown components={MD_COMPONENTS}>{item.text + (item.streaming ? ' ◍' : '')}</ReactMarkdown>
               </div>
             );
           }
@@ -167,7 +197,12 @@ export function ChatView({ messages, live, approvals, rewinds, onDecide }: ChatV
         ))}
         {/* inline 审批卡（帧序堆叠——approvalId 为卡键，待决置底最醒目） */}
         {approvals.map((a) => (
-          <ApprovalCard key={a.approvalId} approval={a} onDecide={onDecide} />
+          <ApprovalCard
+            key={a.approvalId}
+            approval={a}
+            deciding={decidingIds?.has(a.approvalId) === true}
+            onDecide={onDecide}
+          />
         ))}
         {items.length === 0 && approvals.length === 0 && (
           <div className="py-10 text-center text-sm text-neutral-600">空会话——发送第一条消息</div>
@@ -180,6 +215,8 @@ export function ChatView({ messages, live, approvals, rewinds, onDecide }: ChatV
 /** 审批卡属性 */
 interface ApprovalCardProps {
   readonly approval: PendingApproval;
+  /** 本卡应答在飞（A16——按钮 disable；App 侧 ref 同步腿是防双发的本体） */
+  readonly deciding: boolean;
   readonly onDecide: (approvalId: string, decision: ApprovalDecision) => void;
 }
 
@@ -187,8 +224,9 @@ interface ApprovalCardProps {
  * inline 审批卡（刀三 web 应答面）：归属会话着色（var(--accent) 左条——随查看
  * 会话清单 accent 单源）+ 三态按钮（always 仅 suggestedEntry 草案在场呈现）。
  * 点击 = POST decide；卡终结真值走 approval/decided SSE 帧（App 侧摘卡）。
+ * 在飞期三键全禁（A16）——双击窗只有 disable 呈现腿 + App ref 同步腿双闸都关死。
  */
-function ApprovalCard({ approval, onDecide }: ApprovalCardProps) {
+function ApprovalCard({ approval, deciding, onDecide }: ApprovalCardProps) {
   const draft = approval.suggestedEntry;
   return (
     <div
@@ -215,14 +253,16 @@ function ApprovalCard({ approval, onDecide }: ApprovalCardProps) {
       )}
       <div className="mt-2 flex gap-2">
         <button
-          className="rounded-md px-3 py-1 text-xs font-medium text-neutral-950"
+          className="rounded-md px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
           style={{ background: 'var(--accent)' }}
+          disabled={deciding}
           onClick={() => onDecide(approval.approvalId, 'approve')}
         >
           允许
         </button>
         <button
-          className="rounded-md border border-neutral-600 px-3 py-1 text-xs text-neutral-200 hover:border-red-500 hover:text-red-400"
+          className="rounded-md border border-neutral-600 px-3 py-1 text-xs text-neutral-200 hover:border-red-500 hover:text-red-400 disabled:opacity-50"
+          disabled={deciding}
           onClick={() => onDecide(approval.approvalId, 'reject')}
         >
           拒绝
@@ -230,8 +270,9 @@ function ApprovalCard({ approval, onDecide }: ApprovalCardProps) {
         {/* 三态按钮：草案在场才呈现（服务端无草案 always 恒 400——前端同律收钮） */}
         {draft !== undefined && (
           <button
-            className="rounded-md border border-neutral-600 px-3 py-1 text-xs text-neutral-400 hover:border-amber-500 hover:text-amber-400"
+            className="rounded-md border border-neutral-600 px-3 py-1 text-xs text-neutral-400 hover:border-amber-500 hover:text-amber-400 disabled:opacity-50"
             title="始终允许（写入 allowlist 草案）"
+            disabled={deciding}
             onClick={() => onDecide(approval.approvalId, 'always')}
           >
             始终允许
