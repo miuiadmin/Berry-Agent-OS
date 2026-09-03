@@ -2115,6 +2115,18 @@
       ]
     },
     {
+      "symbol": "Static",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ],
+      "forwarded": true
+    },
+    {
       "symbol": "StopReason",
       "module": "berryagent",
       "tier": "stable",
@@ -2476,6 +2488,18 @@
         "server",
         "standalone"
       ]
+    },
+    {
+      "symbol": "TSchema",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ],
+      "forwarded": true
     },
     {
       "symbol": "TextContent",

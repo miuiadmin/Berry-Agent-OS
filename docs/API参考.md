@@ -3,7 +3,7 @@
 > 本文件由 `tools/generate-api-reference.mjs` 从 `src/contracts/api-surface.json` 生成（`npm run build` 尾挂再生，check-api 查 8 drift 守护）——勿手编。
 > 稳定性分级与兼容承诺的语义权威 = 设计文档「应用契约与扩展点」API 治理章（§6.13）；本文件只派生符号面。
 
-当前 apiVersion：`1.0`。导出 372 项、能力 14 项。
+当前 apiVersion：`1.0`。导出 374 项、能力 14 项。
 
 ## 目录
 
@@ -233,6 +233,7 @@
 - `SKILLS_PROVIDER_INVALID` — stable（minor 只增不破），since 1.0，全形态
 - `SkillSourceLevel` — stable（minor 只增不破），since 1.0，全形态
 - `SkillsProvider` — stable（minor 只增不破），since 1.0，全形态
+- `Static` — stable（minor 只增不破），since 1.0，全形态（forwarded 转发——tier 承诺归上游 typebox）
 - `StopReason` — stable（minor 只增不破），since 1.0，全形态
 - `StreamFn` — stable（minor 只增不破），since 1.0，全形态
 - `StreamFnOptions` — stable（minor 只增不破），since 1.0，全形态
@@ -282,6 +283,7 @@
 - `TOOLS_CHANGE_EVENT` — stable（minor 只增不破），since 1.0，全形态
 - `ToolsService` — stable（minor 只增不破），since 1.0，全形态
 - `ToolUpdateCallback` — stable（minor 只增不破），since 1.0，全形态
+- `TSchema` — stable（minor 只增不破），since 1.0，全形态（forwarded 转发——tier 承诺归上游 typebox）
 - `Type` — stable（minor 只增不破），since 1.0，全形态（forwarded 转发——tier 承诺归上游 typebox）
 - `Usage` — stable（minor 只增不破），since 1.0，全形态
 - `UserMessage` — stable（minor 只增不破），since 1.0，全形态

@@ -71,10 +71,13 @@ const imp = (rel) => jiti.import(fileURLToPath(new URL(rel, import.meta.url)));
  * - stars = 星出模块说明符清单（一文件可多条；internal 由调用方递归——公开根
  *   条目数随公开面演进，不锚定具体数字〔遗漏大扫 20260904 #18——硬编码计数
  *   必再漂〕）
- * - tags = 自由符号标级载体（§6.13.3 批 2 tier 载体分职）：声明形直导出名 →
- *   紧前 JSDoc 标签（'stable'|'experimental'|'deprecated'）；无紧前 JSDoc 块或
- *   块内无标签词 → null；转译形（具名转发/命名空间转发）不入 Map。check-api
- *   查 2 自由符号半边与 freeSymbolTier 裁决消费
+ * - tags = 自由符号标级载体（§6.13.3 批 2 tier 载体分职）：本地声明形直导出
+ *   名（export const/function/... 声明形、export { A } 无 from 花括清单形——含
+ *   export type { A } 前置 type 形，第十一轮遗漏大扫 20260904-b A5/A7 补全）
+ *   → 紧前 JSDoc 标签（'stable'|'experimental'|'deprecated'）；无紧前 JSDoc 块
+ *   或块内无标签词 → null；转译形（具名转发/命名空间转发）不入 Map——键集即
+ *   「根本地直导出全集」，freeSymbolTier 的 undefined 分支因此 = 真转译形。
+ *   check-api 查 2 自由符号半边与 freeSymbolTier 裁决消费
  */
 export function scanTopLevelExports(sourceText) {
   const scanner = ts.createScanner(99 /* ESNext */, /* skipTrivia */ true);
@@ -147,6 +150,37 @@ export function scanTopLevelExports(sourceText) {
       ) {
         t = step();
       }
+      /**
+       * 花括清单体解析（export { A, B as C, type D } [from 'mod']）：收集导出名
+       * （别名后名）+ from 说明符。直书花括形与 `export type { T }` 前置 type
+       * 关键字形同体共用（第十一轮遗漏大扫 20260904-b A7 修死：修前 type 前置
+       * 形被 isDeclKeyword 分支吃掉——该分支 step 后只认 Identifier，`{` 直接
+       * 蒸发，整条语句零记账，类型面静默缺席快照）。调用时 scanner 停在 `{`。
+       */
+      const parseBraceList = () => {
+        let t = step();
+        while (t !== ts.SyntaxKind.CloseBraceToken && t !== ts.SyntaxKind.EndOfFile) {
+          if (t === ts.SyntaxKind.Identifier) {
+            const id = text();
+            t = step();
+            // `A as B`：导出名 = B（别名后名）；裸 A：导出名 = A
+            if (t === ts.SyntaxKind.AsKeyword) {
+              t = step(); // 越过 as → 别名标识符 B
+              if (t === ts.SyntaxKind.Identifier) exported.push(text());
+              t = step();
+            } else {
+              exported.push(id);
+            }
+          } else {
+            t = step(); // 逗号 / type 关键字（inline type 修饰，名在后续 Identifier）
+          }
+        }
+        t = step(); // 越过 CloseBrace
+        if (t === ts.SyntaxKind.FromKeyword) {
+          step(); // 'mod'
+          moduleSpec = stripQuotes(text());
+        }
+      };
       if (t === ts.SyntaxKind.AsteriskToken) {
         // export * [as N] from 'mod'
         star = true;
@@ -168,41 +202,33 @@ export function scanTopLevelExports(sourceText) {
         }
       } else if (t === ts.SyntaxKind.OpenBraceToken) {
         // export { A, B as C, type D } [from 'mod']
-        t = step();
-        while (t !== ts.SyntaxKind.CloseBraceToken && t !== ts.SyntaxKind.EndOfFile) {
-          if (t === ts.SyntaxKind.Identifier) {
-            const id = text();
-            t = step();
-            // `A as B`：导出名 = B（别名后名）；裸 A：导出名 = A
-            if (t === ts.SyntaxKind.AsKeyword) {
-              t = step(); // 越过 as → 别名标识符 B
-              if (t === ts.SyntaxKind.Identifier) exported.push(text());
-              t = step();
-            } else {
-              exported.push(id);
-            }
-          } else {
-            t = step(); // 逗号 / type 关键字（inline type 修饰，名在后续 Identifier）
-          }
-        }
-        t = step(); // 越过 CloseBrace
-        if (t === ts.SyntaxKind.FromKeyword) {
-          step();
-          moduleSpec = stripQuotes(text());
-        }
+        parseBraceList();
       } else if (isDeclKeyword(t)) {
-        // export const/function/class/interface/enum/type X —— 名 = 首个标识符
-        // （type 关键字歧义：`export type X = ...` 声明 vs `export type { A }` 转发；
-        // 后者下一 token 是 {，已被上方 OpenBrace 分支的顺序兜住——此处必是声明）
+        // export const/function/class/interface/enum/type X —— 名 = 首个标识符。
+        // type 关键字歧义（勘正——第十一轮遗漏大扫 20260904-b A7）：`export type
+        // X = ...` 声明 vs `export type { A }` 转发；修前行内注释宣称「后者下一
+        // token 是 {，已被上方 OpenBrace 分支的顺序兜住」不实——该分支只测
+        // export 后首 token，type 后的 `{` 到不了那里，实况是整条漏收。此处
+        // 显式分腿：type 后 `{` 形转花括清单体（同体解析），Identifier 形照旧
+        const isTypeKw = t === ts.SyntaxKind.TypeKeyword;
         t = step();
-        if (t === ts.SyntaxKind.Identifier) exported.push(text());
-        // 声明形 = 自由符号（非转译）：紧前 JSDoc 标级入 tags（§6.13.3 批 2
-        // tier 载体分职——直导出形用标签声明标级；无块/无标签词均记 null，
-        // 由查 2 逐符号执法点名，freeSymbolTier 再 fail-loud 兜底）
+        if (isTypeKw && t === ts.SyntaxKind.OpenBraceToken) {
+          parseBraceList();
+        } else if (t === ts.SyntaxKind.Identifier) {
+          exported.push(text());
+        }
+      }
+      const forwarded = moduleSpec !== null && !moduleSpec.startsWith('.');
+      // 无 from 的具名清单（直书花括形与 type 前置形）= 本地声明形直导出（头注
+      // 形态分类「local」列）：紧前 JSDoc 标级入 tags——与声明关键字形同律统一
+      // 在语句尾收口（声明形恒无 from，行为不变）。修前该形收名不收标签：自由
+      // 符号静默落键级 tier、@experimental 意图被丢弃（第十一轮遗漏大扫
+      // 20260904-b A5）——rootTags 键集因此补全为「根本地直导出全集」，
+      // freeSymbolTier 的 undefined 分支即真转译形，查 2 与抽取侧双闸同闭
+      if (moduleSpec === null) {
         const tier = jsdocTierBefore(sourceText, exportStart);
         for (const n of exported) tags.set(n, tier);
       }
-      const forwarded = moduleSpec !== null && !moduleSpec.startsWith('.');
       for (const n of exported) names.set(n, { forwarded });
       if (star && moduleSpec !== null) stars.push(moduleSpec);
     }
@@ -213,9 +239,17 @@ export function scanTopLevelExports(sourceText) {
 
 /**
  * 取紧前 JSDoc 块的标级标签（自由符号标级载体提取——§6.13.3 批 2）。
- * 「紧前」判据：export 关键字之前、与其只隔空白的最后一个块注释；开器取最后
- * 出现（叠置注释时只有紧贴 export 的那块算数——前置 JSDoc 会被紧随的普通
- * 注释截断）。块形必须是 JSDoc（双星开器）——单星普通注释形不认。
+ * 「紧前」判据：export 关键字之前、与其只隔空白的最后一个块注释；块形必须是
+ * JSDoc（双星开器）——单星普通注释形不认。
+ * 开器定位（第十一轮遗漏大扫 20260904-b A6 修死）：块注释词法上不可嵌套——
+ * 真开器与 close 之间不可能存在别的 `*/ `，但体内可含任意 `; /*` 文本（glob 示例
+ * `src/*.ts` 等）；修前无界 `lastIndexOf('/*')` 会把开器错定位到体内最后一个
+ * `/*` 上（块起点错位 → 非双星形 → 标签静默丢失假红）。修后从 close 端向前
+ * 迭代候选开器，取第一个满足「双星形起 + 其后首个闭器恰为 close」者：体内
+ * glob 序列被跳过（非双星形）；穿越中间代码抓到更早 JSDoc 的候选被拒（其
+ * 首闭器是该 JSDoc 自己的 close 而非目标 close）；紧随的单星普通注释截断
+ * 前置 JSDoc 的既有行为由两判据同守（普通注释非双星被跳过 + 其前方
+ * JSDoc 的首闭器不指向目标 close）。
  * @param {string} sourceText 源文件全文
  * @param {number} exportStart export 关键字的源内起点（scanTopLevelExports 内锚）
  * @returns {'stable'|'experimental'|'deprecated'|null} 标签词；无紧前 JSDoc 块或块内无标签词 → null
@@ -226,10 +260,19 @@ function jsdocTierBefore(sourceText, exportStart) {
   if (close === -1) return null; // 前文无注释块
   // 紧前性：注释闭器与 export 之间只允许空白——夹有实码即非本声明的文档块
   if (before.slice(close + 2).trim() !== '') return null;
-  const open = before.lastIndexOf('/*');
-  if (open === -1 || open > close) return null; // 防御：无开器或区间倒置（不可达，形状自证）
+  // 开器候选向前迭代（词法正确形——见函数头注）：全部候选失败 = 无紧前 JSDoc
+  let open = -1;
+  for (let from = close - 1; from >= 0;) {
+    const cand = before.lastIndexOf('/*', from);
+    if (cand === -1) break;
+    if (before.startsWith('/**', cand) && before.indexOf('*/', cand + 2) === close) {
+      open = cand;
+      break;
+    }
+    from = cand - 1;
+  }
+  if (open === -1) return null;
   const block = before.slice(open, close + 2);
-  if (!block.startsWith('/**')) return null; // 紧前是普通 /* */ 注释——非 JSDoc 形不认
   const m = block.match(/@(stable|experimental|deprecated)\b/);
   return m === null ? null : m[1];
 }

@@ -280,6 +280,26 @@ describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE �
     }
   }, 60_000);
 
+  it('查 2 自由符号半边可红（花括清单形）：export { x } 无 from 无标签 → exit 1 点名符号（第十一轮 A5）', () => {
+    const root = makeFixtureRoot();
+    try {
+      // 花括清单无 from = 本地声明形直导出（头注形态分类「local」列）——修前该
+      // 形收名不收标签：查 2 barrelScan.tags 无键不红、freeSymbolTier 走
+      // undefined 分支静默落键级 stable，双闸均漏（端到端实证：追加此形后
+      // check-api exit=0）
+      writeFileSync(
+        join(root, 'src/contracts/index.ts'),
+        "export * from './fixture-face.js';\nconst zzBraced = 1;\nexport { zzBraced };\n",
+      );
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 2]');
+      expect(r.stderr).toContain('zzBraced');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('查 3 扫描面不穿透符号链接：linked 目录不入 walkFiles 面（遗漏大扫 20260904 #13——兑现「不跟随」注释）', () => {
     const root = makeFixtureRoot();
     const outside = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'berry-outside-')));
@@ -820,6 +840,70 @@ describe('scanTopLevelExports：手写扫描器单测（tsgo unstable/ast 依赖
     expect(scan.tags.get('zzNoTier')).toBe(null);
     expect(scan.tags.get('zzCut')).toBe(null);
     expect(scan.tags.has('zzA')).toBe(false);
+  });
+
+  it('【回归锁 第十一轮 A5】export { x }（无 from）声明形直导出入 tags 执法面：紧前 JSDoc 标级收得、无标签记 null、有 from 转译形仍不入', () => {
+    // 修前形态：OpenBrace 分支收名不收标签——花括无 from 形（头注形态分类
+    // 「local」列）整族逃出 tags，自由符号静默落键级 stable、@experimental
+    // 意图被丢弃，查 2 逐符号执法与 freeSymbolTier 双闸均漏
+    const src = [
+      "export * from './star.js';",
+      '/** @experimental */',
+      'export { zzBraced };', // 花括清单无 from + 紧前 JSDoc → tier 收得
+      'const zzPlain = 1;',
+      'export { zzPlain };', // 紧前是实码（const 声明的 JSDoc 不算 export 的紧前）→ null
+      'export { zzFwd } from "./other.js";', // 有 from = 转译形不入 tags
+    ].join('\n');
+    const scan = scanTopLevelExports(src);
+    expect(scan.tags.get('zzBraced')).toBe('experimental');
+    expect(scan.tags.get('zzPlain')).toBe(null);
+    expect(scan.names.get('zzBraced')).toEqual({ forwarded: false });
+    expect(scan.tags.has('zzFwd')).toBe(false);
+  });
+
+  it('【回归锁 第十一轮 A6】JSDoc 体内含 /* 序列（glob 示例）不击穿开器定位：标级照常收得 + 普通注释截断与穿越候选两回归面保持', () => {
+    // 修前形态：jsdocTierBefore 用无界 lastIndexOf('/*') 找开器——体内 glob 字样
+    // （src/*.ts）成为「最后开器」，块起点错位 → 非双星形 → 标签静默丢失假红。
+    // 修后从 close 端向前迭代词法合法候选：体内序列被跳过；紧随普通注释截断
+    // 前置 JSDoc、更早 JSDoc 不被穿越误挂两既有行为同守
+    const src = [
+      '/**',
+      ' * @experimental',
+      ' * 扫描 src/*.ts 与 docs/* 下的文件。',
+      ' */',
+      'export const zzGlob = 1;',
+      '/** @stable */',
+      '/* 紧随的普通注释截断前置 JSDoc */',
+      'export const zzCut = 2;',
+      '/** @experimental */',
+      'const zzHelper = 3;',
+      '/* 归属说明 */',
+      'export const zzNotMine = 4;',
+    ].join('\n');
+    const scan = scanTopLevelExports(src);
+    expect(scan.tags.get('zzGlob')).toBe('experimental'); // 修前红：开器被体内 docs/* 击穿 → null
+    expect(scan.tags.get('zzCut')).toBe(null); // 普通注释截断行为保持（非双星候选被跳过）
+    expect(scan.tags.get('zzNotMine')).toBe(null); // 穿越候选被拒——不误挂 zzHelper 的 JSDoc
+  });
+
+  it('【回归锁 第十一轮 A7】export type { T } 前置 type 关键字花括清单形整条收得：有 from 转发记号正确 + 无 from 入 tags 执法面', () => {
+    // 修前形态：type 前置形被 isDeclKeyword 分支吃掉——该分支 step 后只认
+    // Identifier，`{` 直接蒸发，整条语句零记账（类型面静默缺席快照）；行内注释
+    // 宣称「已被上方 OpenBrace 分支的顺序兜住」与实际行为相悖，同笔勘正
+    const src = [
+      "export type { ZzType } from './types.js';", // 前置 type 具名转发——修前整条漏收
+      "export { type ZzInline, ZzValue } from './other.js';", // 对照：inline type 修饰正常收
+      '/** @stable */',
+      'export type { ZzLocal };', // 无 from 本地形——入 tags（紧前 JSDoc 收得）
+      'type ZzOnly = string;', // 非导出不收
+    ].join('\n');
+    const scan = scanTopLevelExports(src);
+    expect(scan.names.get('ZzType')).toEqual({ forwarded: false });
+    expect(scan.names.get('ZzInline')).toEqual({ forwarded: false });
+    expect(scan.names.get('ZzValue')).toEqual({ forwarded: false });
+    expect(scan.names.get('ZzLocal')).toEqual({ forwarded: false });
+    expect(scan.tags.get('ZzLocal')).toBe('stable');
+    expect(scan.names.has('ZzOnly')).toBe(false);
   });
 
   it('命名空间转发形不进 stars：export * as ns 的目标模块不收编（遗漏大扫 20260904 #12——幻影面符号修死）', () => {
