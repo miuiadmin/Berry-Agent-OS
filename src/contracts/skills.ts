@@ -63,6 +63,8 @@ export type SkillDiagnosticCode =
   | 'package-missing' // 应用声明的技能目录缺失（package 层专用，2026-08-26 技能包应用纵切：
   //   声明了却缺失是真异常——与 project/user 层「缺目录是常态刻意静默」相反，故发声；
   //   warning 不杀行，行主体可用就不因技能目录缺失回卷）
+  | 'skills-over-cap' // 技能快照超数帽被裁尾（B11——第十一轮遗漏大扫 20260904-b，契约篇
+  //   §4.3 硬规则 3②：100 帽外技能不进渐进披露清单——被裁计数披露非静默）
   | 'collision'; // 同名冲突落选（§4.4 first-wins 诊断）
 
 /** 技能加载诊断（warning = 单点问题不断流；collision = 同名落选记录） */
@@ -73,8 +75,10 @@ export interface SkillDiagnostic {
   readonly code: SkillDiagnosticCode;
   /** 人读信息（中文） */
   readonly message: string;
-  /** 关联路径（SKILL.md 文件或扫描目录） */
-  readonly path: string;
+  /** 关联路径（SKILL.md 文件或扫描目录；快照级诊断无单路径可指——B11
+   *  第十一轮遗漏大扫 20260904-b：skills-over-cap 数帽诊断以注册表整体为
+   *  归因面，缺省不设；唯一消费面 commands.ts 已 falsy-safe 渲染） */
+  readonly path?: string;
   /** 同名冲突明细（仅 type='collision' 时携带） */
   readonly collision?: {
     /** 冲突技能名 */

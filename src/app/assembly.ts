@@ -52,10 +52,12 @@ import {
   APPROVAL_ANSWER_EVENT,
   bridgeApprovalSignal,
   createApprovalService,
+  canonicalPath,
   createRootsProvider,
   createSandboxService,
   externalEffectiveRoots,
   installSafetyGate,
+  isInsideRoot,
 } from '../safety/index.js';
 import type {
   ApprovalDecisionValue,
@@ -118,6 +120,7 @@ import { resolveRowCarrier } from '../contracts/app.js';
 import type { AppLoadResult } from '../contracts/app.js';
 import {
   EVENT_HANDLER_TIMEOUT,
+  FS_OUTSIDE_WRITABLE_ROOTS,
   PERSIST_BATCH_WRITE_FAILED,
   APP_EVENT_RATE,
   SESSION_CORE_TYPE_FORBIDDEN,
@@ -2187,6 +2190,20 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     createSkillManageTool({
       skills,
       projectSkillsDir: projectSkillLocation?.dir ?? join(workspace, '.agents', 'skills'),
+      // 写面 fence 同律断言（B5——第十一轮遗漏大扫 20260904-b，骨架篇 §7.5 宿主
+      // 直写件同律条款）：skill_manage 是宿主直写便捷件不经 tools/fs 管道，可写根
+      // 铁律由本断言随身——与 fs 工具族同一 rootsProvider 推导源（两防线同源不
+      // 漂移；mode 取值器闭包，会话档位翻转即时生效——read-only 档空根即拒同码）
+      assertWritable: (absPath) => {
+        const roots = rootsProvider();
+        const canonical = canonicalPath(absPath);
+        if (!roots.some((root) => isInsideRoot(canonical, root))) {
+          throw new AppError(
+            FS_OUTSIDE_WRITABLE_ROOTS,
+            `[FS_OUTSIDE_WRITABLE_ROOTS] skill_manage 写面目标不在可写根内：${absPath}（可写根：${roots.join('、')}）`,
+          );
+        }
+      },
       // 写后收口 = skills_change 处理器同款（重物化 + 非装载窗口即时落 header）；
       // 工具只可能在模型回合内被调（boot 装载窗口必已收口），loadWindow 分支照写
       // 保持与事件路同构——防御性而非必需

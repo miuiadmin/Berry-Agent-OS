@@ -114,7 +114,12 @@ export class ObservedFiles {
     return this.files.get(path);
   }
 
-  /** 观察是否来自本次写（fs.ts 跳过冗余 stat 用；测试辅助） */
+  /**
+   * 清空观察登记簿（B12——第十一轮遗漏大扫 20260904-b 勘正：原头注引用
+   * 不存在的消费方「fs.ts 跳过冗余 stat」——fs.ts 只读 get() 做写意图
+   * 判定，从不 clear；本方法唯一消费方是测试重置。注释承诺实现里不存在
+   * 的东西是稳定缺陷族，随手修死）
+   */
   clear(): void {
     this.files.clear();
   }

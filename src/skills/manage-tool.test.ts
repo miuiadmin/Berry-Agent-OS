@@ -4,17 +4,30 @@
  * 与层别拒改 / onChange 触发时机。文件系统用临时目录全真（不 mock fs）。
  */
 
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createSkillManageTool } from './manage-tool.js';
 import { createSkillsService } from './registry.js';
 import { parseSkillMd } from './skill-md.js';
+import { AppError, FS_OUTSIDE_WRITABLE_ROOTS } from '../contracts/errors.js';
 import type { SkillLocation } from './types.js';
 
+/**
+ * read-only 空根断言（B5——第十一轮遗漏大扫 20260904-b）：模拟 safety
+ * deriveWritableRoots 在 read-only 档的空根推导——一切目标均在根外，抛
+ * fence 同码 AppError（与装配注入的真实断言同形——错误码与文案族一致）。
+ */
+function rejectAllGuard(absPath: string): void {
+  throw new AppError(
+    FS_OUTSIDE_WRITABLE_ROOTS,
+    `[FS_OUTSIDE_WRITABLE_ROOTS] skill_manage 写面目标不在可写根内：${absPath}（可写根：）`,
+  );
+}
+
 /** 组装测试件：真实 skills 服务 + 临时目录（project 层 + user 层各一） */
-function setup() {
+function setup(opts?: { assertWritable?: (absPath: string) => void }) {
   const root = mkdtempSync(join(tmpdir(), 'skill-manage-test-'));
   const projectDir = join(root, 'workspace', '.agents', 'skills');
   const userDir = join(root, 'home', '.berry', 'skills');
@@ -36,6 +49,8 @@ function setup() {
   const tool = createSkillManageTool({
     skills,
     projectSkillsDir: projectDir,
+    // B5 fence 同律断言：缺省放行（既有行为测试面）；read-only 锁注入拒全量形态
+    assertWritable: opts?.assertWritable ?? (() => {}),
     onChange: () => {
       changeCount += 1;
       skills.refresh();
@@ -308,5 +323,41 @@ describe('skill_manage 工具', () => {
     expect(text).toContain('proj-skill [项目层]');
     expect(text).toContain('溯源 1 条记忆');
     expect(text).toContain('user-skill [用户层]');
+  });
+
+  it('create：read-only 空根 → fence 同律拒 + 盘上零痕迹（B5 第十一轮遗漏大扫 20260904-b——修复前必红：直写 writeFileSync 绕过 fence 成功落盘）', async () => {
+    const ro = setup({ assertWritable: rejectAllGuard });
+    try {
+      await expect(
+        ro.tool.execute({ action: 'create', name: 'ro-skill', description: '只读档新建', content: 'X' }, {} as never),
+      ).rejects.toThrow('FS_OUTSIDE_WRITABLE_ROOTS');
+      // 盘上零痕迹（含目录——断言先于 mkdir，read-only 承诺不留半成品）
+      expect(existsSync(join(ro.projectDir, 'ro-skill'))).toBe(false);
+      expect(existsSync(join(ro.projectDir, 'ro-skill', 'SKILL.md'))).toBe(false);
+      expect(ro.changeRef.get()).toBe(0); // 拒路径零刷新
+    } finally {
+      rmSync(ro.root, { recursive: true, force: true });
+    }
+  });
+
+  it('patch：read-only 空根 → fence 同律拒 + 原文件不动（B5 同上——修复前必红）', async () => {
+    const ro = setup({ assertWritable: rejectAllGuard });
+    try {
+      // 目标技能由测试直写盘上 + refresh 入册（read-only 档下 create 不可用是前提不是绕道）
+      mkdirSync(join(ro.projectDir, 'victim'), { recursive: true });
+      writeFileSync(
+        join(ro.projectDir, 'victim', 'SKILL.md'),
+        '---\nname: victim\ndescription: "原文件"\n---\n原正文',
+        'utf-8',
+      );
+      ro.skills.refresh();
+      await expect(
+        ro.tool.execute({ action: 'patch', name: 'victim', find: '原正文', replace: '被改' }, {} as never),
+      ).rejects.toThrow('FS_OUTSIDE_WRITABLE_ROOTS');
+      expect(readFileSync(join(ro.projectDir, 'victim', 'SKILL.md'), 'utf-8')).toContain('原正文');
+      expect(ro.changeRef.get()).toBe(0);
+    } finally {
+      rmSync(ro.root, { recursive: true, force: true });
+    }
   });
 });

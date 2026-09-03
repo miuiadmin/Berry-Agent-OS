@@ -8,7 +8,10 @@
  * - fence（tools/fs）：路径在可写根外 → FS_OUTSIDE_WRITABLE_ROOTS（防误操作护栏）；
  * - 本行：路径在根内但命中 carve-out 例外（.git / .env 类）→ 升权审批面
  *   ——allowed-once 放行本次，其余 block（denial marker + 升权 hint）。
- * - read-only 档：可写根为空，fence 已拒全量写，本行不再二次审批；
+ * - read-only 档：可写根为空，fence 已拒全量写（本行不再二次审批）；
+ *   宿主直写件（skill_manage 等不经 tools/fs 管道者）不经 fence，铁律由
+ *   件内可写根断言随身（B5——第十一轮遗漏大扫 20260904-b，骨架篇 §7.5
+ *   宿主直写件同律条款）；
  *   danger-full-access：全放行，本行跳过。
  */
 

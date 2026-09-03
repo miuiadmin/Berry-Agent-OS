@@ -701,10 +701,14 @@ describe('fork 种子（前缀 + end-seed 边界）', () => {
     s.append('user/message', { content: '中段乙' }); // seq 3 —— 待遮蔽
     s.append('turn/end', { reason: 'completed' }); // seq 4
     s.append('turn/start', {}); // seq 5 敞开 turn（委派/溢出压缩发生处）
-    s.append('user/message', { content: '[COMPACTION-SUMMARY] 摘要' }, {
-      surfaceOp: { op: 'replace', start: 2, end: 3 }, // 载体 seq 6，遮蔽前缀内 2-3
-      sourceEventSeqs: [2, 3],
-    });
+    s.append(
+      'user/message',
+      { content: '[COMPACTION-SUMMARY] 摘要' },
+      {
+        surfaceOp: { op: 'replace', start: 2, end: 3 }, // 载体 seq 6，遮蔽前缀内 2-3
+        sourceEventSeqs: [2, 3],
+      },
+    );
     // 父投影：锚 + 载体（中段 2-3 被遮蔽）
     expect(s.deriveMessages().map((m) => (m as { content?: string }).content)).toEqual([
       '头部锚',
@@ -735,19 +739,20 @@ describe('fork 种子（前缀 + end-seed 边界）', () => {
     s.append('turn/end', { reason: 'completed' }); // seq 4
     s.append('turn/start', {}); // seq 5 敞开
     s.append('assistant/message', { content: '敞开答' }); // seq 6 —— 与中段一起被遮蔽（区间跨界）
-    s.append('user/message', { content: '[SUMMARY] 摘要' }, {
-      surfaceOp: { op: 'replace', start: 2, end: 6 }, // 载体 seq 7，区间横跨边界 5
-      sourceEventSeqs: [2, 3, 4, 5, 6],
-    });
+    s.append(
+      'user/message',
+      { content: '[SUMMARY] 摘要' },
+      {
+        surfaceOp: { op: 'replace', start: 2, end: 6 }, // 载体 seq 7，区间横跨边界 5
+        sourceEventSeqs: [2, 3, 4, 5, 6],
+      },
+    );
     const boundary = lastClosedTurnBoundary(s.events); // = 5
     const child = s.fork({ boundary, origin: 'delegation' });
     // 载体进种且区间夹取 [2,4]：后段 5-6 不在子日志，不夹取则重编载体（seq 5）滑进原区间自遮蔽
     expect(child.events[5]!.surfaceOp).toEqual({ op: 'replace', start: 2, end: 4 });
     expect(child.events[6]!.type).toBe('session/end-seed');
-    expect(child.deriveMessages().map((m) => (m as { content?: string }).content)).toEqual([
-      '锚',
-      '[SUMMARY] 摘要',
-    ]);
+    expect(child.deriveMessages().map((m) => (m as { content?: string }).content)).toEqual(['锚', '[SUMMARY] 摘要']);
   });
 });
 

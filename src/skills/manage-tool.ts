@@ -4,7 +4,9 @@
  *
  * 与 write 工具的关系 = 同一 fence 内的校验加速道：写面恒 project 层
  * （`<workspace>/.agents/skills/<名>/SKILL.md`，⊆ write 可写面——fence 铁律
- * 「用户级目录不在模型可写根」不变），只加三件 write 不给的：
+ * 「用户级目录不在模型可写根」不变；B5 第十一轮遗漏大扫 20260904-b 修死后
+ * 铁律由注入的 assertWritable 断言结构性执行——修前「⊆ 可写面」只是头注
+ * 宣称，read-only 档直写照穿），只加三件 write 不给的：
  * 结构校验（模型免猜 frontmatter 格式）、写后即时刷新（免人工 /reload）、
  * provenance 结构位（记忆晋升桥 §9.1 第 2 项的写入面）。
  *
@@ -28,6 +30,16 @@ export interface SkillManageToolOptions {
   readonly skills: SkillsService;
   /** project 层技能目录（`<workspace>/.agents/skills`——写面唯一去处） */
   readonly projectSkillsDir: string;
+  /**
+   * 写面 fence 同律断言（B5——第十一轮遗漏大扫 20260904-b，骨架篇 §7.5 宿主
+   * 直写件同律）：写前对目标绝对路径做可写根咨询——write/edit 工具走 tools/fs
+   * 管道天然被 fence 拦，本件是宿主直写便捷件不经该管道，铁律由本断言随身
+   * 携带（根外抛 `FS_OUTSIDE_WRITABLE_ROOTS` 同码）。组合根以 safety
+   * `createRootsProvider({workspace, mode})` 推导源构造注入——与 fs 工具族
+   * writableRoots 注入同一 provider（两防线同源不漂移；mode 取值器闭包——
+   * 会话档位翻转即时生效，read-only 档空根即拒）。
+   */
+  readonly assertWritable: (absPath: string) => void;
   /** 写成功后回调（组合根接 skills.refresh + 全条目重物化；本件不持装配知识） */
   readonly onChange: () => void;
 }
@@ -83,7 +95,7 @@ function textResult(content: string, isError = false): AgentToolResult {
  * 组装 skill_manage 工具（组合根 ⑦ 段全局注册——与 skills 服务同源 Ring 1 基建）。
  */
 export function createSkillManageTool(opts: SkillManageToolOptions): ToolDefinition {
-  const { skills, projectSkillsDir, onChange } = opts;
+  const { skills, projectSkillsDir, assertWritable, onChange } = opts;
 
   return {
     name: 'skill_manage',
@@ -190,6 +202,9 @@ export function createSkillManageTool(opts: SkillManageToolOptions): ToolDefinit
           );
         }
         const frontmatter = renderFrontmatter(req.name, req.description, req.provenance);
+        // 写面 fence 同律（B5）：断言先于 mkdir（filePath ⊆ skillDir——文件在根内
+        // 即目录在根内，单点断言双覆盖）；read-only 档空根在此即拒，盘上零痕迹
+        assertWritable(filePath);
         mkdirSync(skillDir, { recursive: true });
         writeFileSync(filePath, `${frontmatter}${req.content}\n`, 'utf-8');
         onChange();
@@ -246,6 +261,9 @@ export function createSkillManageTool(opts: SkillManageToolOptions): ToolDefinit
       if (next === text) {
         return textResult('替换后内容与原文相同（find 与 replace 一致？）——未写入。', true);
       }
+      // 写面 fence 同律（B5）：直写便捷件不经 tools/fs 管道，可写根铁律随身——
+      // read-only 档空根即拒（原文件不动）
+      assertWritable(skill.filePath);
       writeFileSync(skill.filePath, next, 'utf-8');
       onChange();
       return textResult(`技能 ${req.name} 已更新并生效（${skill.filePath}）。`);

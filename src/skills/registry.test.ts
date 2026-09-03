@@ -321,6 +321,33 @@ describe('createSkillsService（合并语义）', () => {
     service.refresh();
     expect(service.get('from-p1')).toBeUndefined();
   });
+
+  it('快照数帽 100：超帽裁尾（provider 注册序优先）+ warning 诊断披露被裁计数（B11 第十一轮遗漏大扫 20260904-b——修复前必红：快照无界）', () => {
+    const service = createSkillsService();
+    // 105 项：前 100 来自 p1（注册序靠前 = 优先），后 5 项来自 p2 应被裁
+    const mk = (name: string): Skill => ({
+      name,
+      description: 'd',
+      content: 'x',
+      filePath: `/ws/skills/${name}/SKILL.md`,
+      baseDir: `/ws/skills/${name}`,
+      source: 'user' as const,
+      disableModelInvocation: false,
+    });
+    const p1 = Array.from({ length: 100 }, (_, i) => mk(`p1-${i}`));
+    const p2 = Array.from({ length: 5 }, (_, i) => mk(`p2-${i}`));
+    service.registerProvider(stubProvider('p1', p1));
+    service.registerProvider(stubProvider('p2', p2));
+    service.refresh();
+    // 数帽（契约篇 §4.3 硬规则 3②，对照工具注册表 1000 总量帽同族）
+    expect(service.list()).toHaveLength(100);
+    expect(service.get('p1-99')).toBeDefined();
+    expect(service.get('p2-0')).toBeUndefined(); // 注册序靠后者裁尾
+    // 反馈不缺位（硬规则 2）：warning 诊断披露被裁计数
+    const overCap = service.diagnostics().find((d) => d.code === 'skills-over-cap');
+    expect(overCap?.message).toContain('5');
+    expect(overCap?.message).toContain('105');
+  });
 });
 
 describe('renderAvailableSkills（渐进披露清单 §4.3）', () => {
@@ -362,6 +389,19 @@ describe('renderAvailableSkills（渐进披露清单 §4.3）', () => {
   it('无可见技能 → 空串', () => {
     expect(renderAvailableSkills([])).toBe('');
     expect(renderAvailableSkills([mkSkill('only-hidden', 'h', true)])).toBe('');
+  });
+
+  it('清单块字节帽 64KiB：超限截断并以块内注释就地披露（B11 第十一轮遗漏大扫 20260904-b——修复前必红：渲染无界）', () => {
+    // 150 技能 × 900 字 description ≈ 140KiB，超 64KiB 预算
+    const many: Skill[] = Array.from({ length: 150 }, (_, i) => mkSkill(`skill-${i}`, 'd'.repeat(900)));
+    const rendered = renderAvailableSkills(many);
+    // 块体有界（渲染层兜底——数帽与 description 截断均拦不住的病态体积由本帽收口）
+    expect(rendered.length).toBeLessThan(64 * 1024 + 1024);
+    // 块内注释就地披露（硬规则 2：截断可见，非静默）：shown N of 150
+    expect(rendered).toContain('of 150 skills');
+    expect(rendered).toContain('</available_skills>');
+    // 截断是尾裁不是头裁：首个技能仍在清单（按名排序序）
+    expect(rendered).toContain('<name>skill-0</name>');
   });
 });
 

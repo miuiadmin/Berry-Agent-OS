@@ -138,31 +138,41 @@ export function createApprovalService(ctx: Context, opts: ApprovalServiceOptions
         // never：确定性拒绝，不派发 answerer（无人值守姿态没有「问谁」）
         outcome = 'rejected';
       } else {
-        // ask：waterfall 派发——answerer 短路返回四值；全链无人应答 = undefined
-        const answer = await ctx.waterfall<'approve' | 'reject' | 'cancel' | 'always' | undefined>(
-          APPROVAL_ANSWER_EVENT,
-          enriched,
-          () => undefined,
-        );
-        if (answer === 'always') {
-          // 「始终允许」（骨架篇 §8.4 增补 2）：批准本次 + 授权写跨会话条目。
-          // 载荷无草案 = answerer 面本不该呈现该选项，防御收口视同 approve
-          // （零草案零副作用——§8.3 钉死）；写入回调未装配同口径。
-          if (enriched.suggestedEntry !== undefined && opts.persistAllowlist !== undefined) {
-            opts.persistAllowlist(enriched.suggestedEntry);
-            alwaysWritten = true;
+        try {
+          // ask：waterfall 派发——answerer 短路返回四值；全链无人应答 = undefined
+          const answer = await ctx.waterfall<'approve' | 'reject' | 'cancel' | 'always' | undefined>(
+            APPROVAL_ANSWER_EVENT,
+            enriched,
+            () => undefined,
+          );
+          if (answer === 'always') {
+            // 「始终允许」（骨架篇 §8.4 增补 2）：批准本次 + 授权写跨会话条目。
+            // 载荷无草案 = answerer 面本不该呈现该选项，防御收口视同 approve
+            // （零草案零副作用——§8.3 钉死）；写入回调未装配同口径。
+            if (enriched.suggestedEntry !== undefined && opts.persistAllowlist !== undefined) {
+              opts.persistAllowlist(enriched.suggestedEntry);
+              alwaysWritten = true;
+            }
+            outcome = 'allowed-once';
+          } else {
+            outcome =
+              answer === 'approve'
+                ? 'allowed-once'
+                : answer === 'reject'
+                  ? 'rejected'
+                  : answer === 'cancel'
+                    ? 'cancelled'
+                    : // 无人应答 fail-closed：unavailable 不是「稍后再试」，是本次不放行
+                      'unavailable';
           }
-          outcome = 'allowed-once';
-        } else {
-          outcome =
-            answer === 'approve'
-              ? 'allowed-once'
-              : answer === 'reject'
-                ? 'rejected'
-                : answer === 'cancel'
-                  ? 'cancelled'
-                  : // 无人应答 fail-closed：unavailable 不是「稍后再试」，是本次不放行
-                    'unavailable';
+        } catch (cause) {
+          // answerer 自身缺陷的错误路收口（B10——第十一轮遗漏大扫 20260904-b，
+          // 骨架篇 §8.4 增补 1「永不悬挂」全景句）：监听器抛错时先落 decided
+          // 闭合审批对（unavailable = 确定收场，不留 asked 无 decided 的悬空
+          // 审计记录）再原样上抛——功能面 fail-closed 由管道守门段承担
+          // （TOOL_GATE_FAILED block），本 catch 只护审计对完整
+          sink.decided({ approvalId, decision: 'unavailable' });
+          throw cause;
         }
       }
 

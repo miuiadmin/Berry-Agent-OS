@@ -23,6 +23,9 @@ function realPath(p: string): string {
   }
 }
 
+/** 技能快照数帽（契约篇 §4.3 硬规则 3②；B11 第十一轮遗漏大扫 20260904-b） */
+const SKILLS_SNAPSHOT_LIMIT = 100;
+
 /**
  * 注册时点首调形状断言（B12，2026-08-27 第三十三批 P2-1）：对 provider.list()
  * 做一次性形状校验——返回值两键在场（skills/diagnostics 均为数组）+ 元素粗验
@@ -90,7 +93,17 @@ function escapeXml(value: string): string {
  * 渲染 `<available_skills>` 渐进披露清单（§4.3；契约篇引用的 pi/agentskills
  * 集成格式原样）。隐藏技能排除；按名排序保证确定性；无可见技能 → ''。
  * 提示文案是模型面 prompt 文本，随生态惯例用英文。
+ *
+ * 渲染层字节帽（B11——第十一轮遗漏大扫 20260904-b，契约篇 §4.3 硬规则 3③）：
+ * 清单块以 64KiB 为预算（输出护栏同纪律）——数帽与 description 装载层截断
+ * 之外的最后兜底（name 不截断 + 转义膨胀等病态体积由本帽收口）。达限截断
+ * 并以块内 XML 注释就地披露（硬规则 2：截断可见——模型与操作者读清单即见，
+ * 非静默）。
  */
+
+/** 渐进披露清单块字节预算（64KiB——输出护栏同纪律；B11 渲染层兜底） */
+const SKILLS_RENDER_MAX_BYTES = 64 * 1024;
+
 export function renderAvailableSkills(skills: readonly Skill[]): string {
   const visible = skills.filter((skill) => !skill.disableModelInvocation);
   if (visible.length === 0) return '';
@@ -103,12 +116,27 @@ export function renderAvailableSkills(skills: readonly Skill[]): string {
     '',
     '<available_skills>',
   ];
+  // 字节帽裁剪（B11）：逐条累加，预算耗尽即停——尾裁不头裁（排序序 = 确定性）
+  let budget = SKILLS_RENDER_MAX_BYTES;
+  let shown = 0;
   for (const skill of sorted) {
-    lines.push('  <skill>');
-    lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-    lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-    lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
-    lines.push('  </skill>');
+    const entry =
+      `  <skill>\n` +
+      `    <name>${escapeXml(skill.name)}</name>\n` +
+      `    <description>${escapeXml(skill.description)}</description>\n` +
+      `    <location>${escapeXml(skill.filePath)}</location>\n` +
+      `  </skill>`;
+    if (entry.length + '</available_skills>'.length > budget) break;
+    lines.push(entry);
+    budget -= entry.length + 1; // +1 = join 换行符
+    shown++;
+  }
+  if (shown < sorted.length) {
+    // 块内注释就地披露（硬规则 2 作者侧/模型侧双可见）：shown N of M + 预算
+    lines.push(
+      `  <!-- available_skills truncated: showing ${shown} of ${sorted.length} skills ` +
+        `(${SKILLS_RENDER_MAX_BYTES} byte budget reached; skills beyond this point are not listed -->`,
+    );
   }
   lines.push('</available_skills>');
   return lines.join('\n');
@@ -205,6 +233,35 @@ export function createSkillsService(opts?: {
     return { skills, diagnostics: [...warnings, ...collisions] };
   };
 
+  /**
+   * 快照数帽（B11——第十一轮遗漏大扫 20260904-b，契约篇 §4.3 硬规则 3②）：
+   * 技能快照以 100 为帽（对照工具注册表 REGISTRY_TOTAL_LIMIT=1000 同族——
+   * 「技能数量近乎无上限」的装载面承诺由 read 路径保持，渐进披露清单面有界）。
+   * provider 注册序即优先序（§4.4 first-wins 同律），超帽裁尾 + warning 诊断
+   * 披露被裁计数（硬规则 2 作者侧反馈——被裁技能作者以为已披露、模型看不见）。
+   */
+  const capSnapshot = (
+    merged: ReturnType<typeof merge>,
+  ): { skills: readonly Skill[]; diagnostics: readonly SkillDiagnostic[] } => {
+    if (merged.skills.length <= SKILLS_SNAPSHOT_LIMIT) return merged;
+    const dropped = merged.skills.slice(SKILLS_SNAPSHOT_LIMIT);
+    const firstDropped = dropped
+      .slice(0, 5)
+      .map((skill) => skill.name)
+      .join('、');
+    const diagnostic: SkillDiagnostic = {
+      type: 'warning',
+      code: 'skills-over-cap',
+      message:
+        `渐进披露清单超帽：装载 ${merged.skills.length} 项，仅前 ${SKILLS_SNAPSHOT_LIMIT} 项可见` +
+        `（provider 注册序优先；被裁 ${dropped.length} 项，如 ${firstDropped}${dropped.length > 5 ? ' 等' : ''}）`,
+    };
+    return {
+      skills: merged.skills.slice(0, SKILLS_SNAPSHOT_LIMIT),
+      diagnostics: [...merged.diagnostics, diagnostic],
+    };
+  };
+
   const service: SkillsService = {
     registerProvider(provider) {
       // D1 app 行拒载（契约篇 §5.1 注册面路由裁死，2026-08-27；第三十六批 apps
@@ -238,7 +295,7 @@ export function createSkillsService(opts?: {
     },
 
     refresh() {
-      snapshot = merge();
+      snapshot = capSnapshot(merge());
       return snapshot;
     },
 

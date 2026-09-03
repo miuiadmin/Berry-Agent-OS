@@ -114,6 +114,22 @@ describe('parseSkillMd（宽容度语义）', () => {
     expect(diagnostics.map((d) => d.message)).toEqual([expect.stringContaining('超长')]);
   });
 
+  it('description 超限装载时截断到 1024——渐进披露单行成本有界（B11 第十一轮遗漏大扫 20260904-b——修复前必红：技能携 1025 字全文 description 装载）', () => {
+    const long = 'x'.repeat(5000);
+    const { skill, diagnostics } = parseSkillMd(
+      `---\nname: pdf-tools\ndescription: ${long}\n---\n\n正文\n`,
+      '/ws/skills/pdf-tools/SKILL.md',
+      'user',
+    );
+    // 装载层截断（契约篇 §4.3 硬规则 3①）：description 是清单行成本主体，
+    // 超限截断再装载；全文仍可经 read 读原文件（渐进披露不变式）
+    expect(skill?.description.length).toBe(1024);
+    // 反馈不缺位（硬规则 2 禁静默截断）：invalid-metadata 警告注明已截断
+    expect(diagnostics.map((d) => d.message)).toEqual([expect.stringContaining('已截断')]);
+    // 正文与身份不受截断影响
+    expect(skill?.content).toBe('正文');
+  });
+
   it('disable-model-invocation：true 解析为隐藏；非 true 值（字符串）忽略', () => {
     const hidden = parseSkillMd(
       '---\nname: pdf-tools\ndescription: d\ndisable-model-invocation: true\n---\n\nx\n',

@@ -46,6 +46,21 @@ describe('createApprovalService — ask 策略（默认）', () => {
     expect(decided).toEqual([{ approvalId: asked[0]!.approvalId, decision: 'unavailable' }]);
   });
 
+  it('answerer 监听器抛错 → decided(unavailable) 闭合审批对后原样上抛（B10 第十一轮遗漏大扫 20260904-b——修复前必红：asked=1 decided=0 悬空）', async () => {
+    const ctx = createContext({ name: 'test' });
+    const { sink, asked, decided } = pairSink();
+    const approval = createApprovalService(ctx, { sink });
+    // 通道件自身缺陷形态：answerer 监听器抛错（waterfall 无错误路收口时直接穿透 ask）
+    const dispose = ctx.on(APPROVAL_ANSWER_EVENT, () => {
+      throw new Error('answerer 内部错误');
+    });
+    await expect(approval.ask({ summary: '测试：会抛错的通道' })).rejects.toThrow(/answerer 内部错误/);
+    dispose();
+    // 审批对任何路径闭合（骨架篇 §8.4 增补 1「永不悬挂」全景句）：asked 无 decided = 悬空审计记录
+    expect(asked).toHaveLength(1);
+    expect(decided).toEqual([{ approvalId: asked[0]!.approvalId, decision: 'unavailable' }]);
+  });
+
   it.each([
     ['approve', 'allowed-once', 'approve'],
     ['reject', 'rejected', 'reject'],

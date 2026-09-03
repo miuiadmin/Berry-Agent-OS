@@ -8,6 +8,11 @@
  * 宽容度语义（随 pi）：name/description 校验不过发 warning 诊断但技能
  * 仍加载；仅 description 缺失/为空才整体拒绝——清单里没有描述的技能
  * 对模型无意义。纯函数模块，不触文件系统（读盘在 discovery.ts）。
+ *
+ * 装载层截断（B11——第十一轮遗漏大扫 20260904-b，契约篇 §4.3 硬规则 3）：
+ * description 超限截断到 1024 再装载（清单单行成本有界）；name 超长**不
+ * 截断**——name 是身份键（get 查找 / 同名冲突判定），截断会伪造碰撞，
+ * 维持仅警告，体积由渲染层字节帽兜底。
  */
 
 import { basename, dirname } from 'node:path';
@@ -99,7 +104,12 @@ export function validateSkillDescription(description: unknown): string[] {
   if (typeof description !== 'string' || description.trim() === '') {
     errors.push('description 必填（非空字符串）');
   } else if (description.length > MAX_DESCRIPTION_LENGTH) {
-    errors.push(`description 超长（${description.length} > ${MAX_DESCRIPTION_LENGTH}）`);
+    // 「已截断」披露（B11——第十一轮遗漏大扫 20260904-b，契约篇 §4.3 硬规则 3①）：
+    // 超限 description 在装载层截断到 1024（见 parseSkillMd）——警告必须注明截断
+    // 事实，禁止静默截断（硬规则 2 作者侧反馈）
+    errors.push(
+      `description 超长（${description.length} > ${MAX_DESCRIPTION_LENGTH}）——已截断到 ${MAX_DESCRIPTION_LENGTH} 装载`,
+    );
   }
   return errors;
 }
@@ -139,6 +149,15 @@ export function parseSkillMd(
   for (const error of validateSkillDescription(description)) {
     diagnostics.push({ type: 'warning', code: 'invalid-metadata', message: error, path: filePath });
   }
+  // 装载层截断（B11——第十一轮遗漏大扫 20260904-b，契约篇 §4.3 硬规则 3①）：
+  // description 是渐进披露清单的单行成本主体，超限截断到 1024 再装载——清单
+  // 「一行成本」前提由截断保证成立（修前：MB 级 description 随技能全文装载，
+  // 每次模型请求系统提示词恒增、预算被无声吃穿）。全文不丢：read 路径读的是
+  // SKILL.md 原文件（skill.filePath），渐进披露不变式不受影响
+  const effectiveDescription =
+    typeof description === 'string' && description.length > MAX_DESCRIPTION_LENGTH
+      ? description.slice(0, MAX_DESCRIPTION_LENGTH)
+      : description;
 
   // name：frontmatter 缺省回落父目录名（回落值天然满足同名要求）
   const frontmatterName = typeof split.frontmatter.name === 'string' ? split.frontmatter.name : undefined;
@@ -158,7 +177,7 @@ export function parseSkillMd(
   return {
     skill: {
       name,
-      description,
+      description: effectiveDescription as string,
       content: split.body,
       filePath,
       baseDir,
