@@ -5,7 +5,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/berry-agent-os"><img alt="npm" src="https://img.shields.io/badge/version-1.0.0--alpha-blue?style=flat-square"></a>
-  <img alt="node" src="https://img.shields.io/badge/node-%3E%3D22.19-green?style=flat-square">
+  <img alt="node" src="https://img.shields.io/badge/node-%3E%3D24.0-green?style=flat-square">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green?style=flat-square">
   <img alt="telemetry" src="https://img.shields.io/badge/telemetry-0-brightgreen?style=flat-square">
@@ -100,7 +100,7 @@ Bien, basta de romance. **Ahora el acero y el hierro.**
 
 ## Inicio rápido
 
-Requiere Node.js ≥ 22.19. Tres formas de instalar (guía completa en [docs/使用指南](docs/使用指南.md) §1):
+Requiere Node.js ≥ 24. Tres formas de instalar (guía completa en [docs/使用指南](docs/使用指南.md) §1):
 
 ```bash
 # Opción 1: script de instalación (dos pasos — descargar y luego ejecutar, así una conexión interrumpida nunca ejecuta un script parcial; estado paso a paso; URL del repo se completará al publicar)

@@ -5,7 +5,7 @@
 # 脚本，落盘后再跑无此险）：
 #   curl -fsSL -o install.sh https://raw.githubusercontent.com/miuiadmin/Berry-Agent-OS/main/scripts/install.sh
 #   sh install.sh
-# 职责三件：Node ≥22.19 检查（只查不装——缺失指引发官方指引）→ npm 全局装
+# 职责三件：Node ≥24 检查（只查不装——缺失指引发官方指引）→ npm 全局装
 # berry-agent-os → berry --version 安装验证。失败路径全部带原因与出路口。
 # 显示效果：分步状态行（→ 步骤 / ✓ 成功 / ✗ 失败）+ 尾部欢迎横幅与下一步指引。
 
@@ -34,19 +34,19 @@ fail() {
 
 printf '%s\n' "${BOLD}Berry 安装器${RESET} ${DIM}——跑 AI 应用的操作系统${RESET}"
 
-# ---------- ① Node 运行时检查（≥22.19；缺失或过旧 → 指引官方安装路，本脚本不代装） ----------
-step '检查 Node.js 运行时（要求 ≥ 22.19）'
+# ---------- ① Node 运行时检查（≥24；缺失或过旧 → 指引官方安装路，本脚本不代装） ----------
+step '检查 Node.js 运行时（要求 ≥ 24）'
 if ! command -v node >/dev/null 2>&1; then
-  fail "未找到 Node.js。请先安装 Node.js ≥ 22.19：
+  fail "未找到 Node.js。请先安装 Node.js ≥ 24：
   官方安装器：https://nodejs.org/（或系统包管理器：brew install node / apt 等）
 装好后再跑本脚本。"
 fi
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 NODE_MINOR=$(node -p 'process.versions.node.split(".")[1]')
 NODE_PATCH=$(node -p 'process.versions.node.split(".")[2]')
-if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 19 ]; }; then
-  fail "Node.js 版本过旧（当前 $NODE_MAJOR.$NODE_MINOR.$NODE_PATCH，要求 ≥ 22.19）。
-请升级：https://nodejs.org/ （或 nvm install 22 && nvm use 22）"
+if [ "$NODE_MAJOR" -lt 24 ]; then
+  fail "Node.js 版本过旧（当前 $NODE_MAJOR.$NODE_MINOR.$NODE_PATCH，要求 ≥ 24）。
+请升级：https://nodejs.org/ （或 nvm install 24 && nvm use 24）"
 fi
 ok "Node.js $(node --version)"
 

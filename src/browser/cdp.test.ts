@@ -952,11 +952,11 @@ describe('browser 引擎生命周期', () => {
     expect(engine.getStatus().state).toBe('running');
     await engine.dispose();
   });
-  // process.versions.node ≥ 22.19——不达标落 BROWSER_NODE_UNSUPPORTED，且闸在
+  // process.versions.node ≥ 24——不达标落 BROWSER_NODE_UNSUPPORTED，且闸在
   // spawn/连接之前：零野进程、零半建态、status 不谎报 starting（保持 idle，
   // 修复后升级 Node 再调即重试）。修复前红：无闸——spawn 照走，WebSocket
   // 全局缺席以裸 ReferenceError 形态晚爆，留下不可理解的半建现场。
-  it('#15 运行时版本闸：Node < 22.19 起链前拒——BROWSER_NODE_UNSUPPORTED + 零 spawn', async () => {
+  it('#15 运行时版本闸：Node < 24 起链前拒——BROWSER_NODE_UNSUPPORTED + 零 spawn', async () => {
     const dataDir = makeEngineDir();
     let spawns = 0;
     const { engine } = makeEngine({
@@ -1569,18 +1569,18 @@ describe('browser 工具面（假引擎全链——mock 只停服务器边界）
 });
 
 describe('browser 运行时 Node 版本闸（纯函数——遗漏大扫 20260901-b #15）', () => {
-  it('达标形态全过闸（边界值 22.19.0 恰过）', () => {
-    expect(nodeVersionProblem('22.19.0')).toBeUndefined();
-    expect(nodeVersionProblem('22.19.1')).toBeUndefined();
-    expect(nodeVersionProblem('23.0.0')).toBeUndefined();
+  it('达标形态全过闸（边界值 24.0.0 恰过）', () => {
+    expect(nodeVersionProblem('24.0.0')).toBeUndefined();
+    expect(nodeVersionProblem('24.1.0')).toBeUndefined();
+    expect(nodeVersionProblem('25.0.0')).toBeUndefined();
     expect(nodeVersionProblem('30.1.2')).toBeUndefined();
   });
   it('不达标：主/次/补丁三段任一低于线 → 拒绝理由（含当前版本与升级指引）', () => {
-    for (const v of ['20.11.0', '21.0.0', '22.0.0', '22.18.9']) {
+    for (const v of ['20.11.0', '21.0.0', '22.0.0', '22.19.1', '23.5.0']) {
       const problem = nodeVersionProblem(v);
       expect(problem, v).toBeDefined();
       expect(problem).toContain(v);
-      expect(problem).toContain('22.19');
+      expect(problem).toContain('24');
       expect(problem).toContain('升级 Node');
     }
   });

@@ -52,11 +52,11 @@ import { discoverEngine } from './discover.js';
 import type { BrowserAppConfig, DiscoveredEngine, EngineStatus, SessionBrowserState } from './types.js';
 
 /** 运行时最低 Node 版本（package.json engines 同源——WebSocket 全局自 Node 22 起在场） */
-const MIN_NODE_CORE = [22, 19, 0] as const;
+const MIN_NODE_CORE = [24, 0, 0] as const;
 
 /**
  * Node 运行时版本闸（纯函数——遗漏大扫 20260901-b #15）：bringUp 入口消费。
- * @param v process.versions.node 形态串（`22.19.1` / `20.11.0`；带尾缀按主三段判）
+ * @param v process.versions.node 形态串（`24.1.0` / `22.19.1`；带尾缀按主三段判）
  * @returns undefined = 过闸；否则 = 拒绝理由（AppError 文案直接用）
  */
 export function nodeVersionProblem(v: string): string | undefined {
@@ -65,7 +65,7 @@ export function nodeVersionProblem(v: string): string | undefined {
   const core = m === null ? [0, 0, 0] : [Number(m[1]), Number(m[2]), Number(m[3])];
   for (let i = 0; i < 3; i++) {
     if (core[i]! < MIN_NODE_CORE[i]!) {
-      return `Node ${v} 低于运行时要求（≥22.19）——browser 件的 WebSocket 全局自 Node 22 起在场。请升级 Node（如 nvm install 22）后重试`;
+      return `Node ${v} 低于运行时要求（≥24.0）——与 engines 下界对齐。请升级 Node（如 nvm install 24）后重试`;
     }
     if (core[i]! > MIN_NODE_CORE[i]!) break; // 高位已过线，低位不再看
   }

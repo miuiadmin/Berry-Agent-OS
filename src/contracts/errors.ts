@@ -139,7 +139,7 @@ export const BROWSER_ENGINE_NOT_FOUND = registerErrorCode('BROWSER_ENGINE_NOT_FO
 /** browser：引擎连接期一码收口（spawn 失败 / DevToolsActivePort 读取失败 / HTTP 握手失败 / WebSocket 建立失败——含双开 profile 锁与 Linux 缺系统库场景；契约篇 §6.10，MCP/LSP connect 一码同律） */
 export const BROWSER_CONNECT_FAILED = registerErrorCode('BROWSER_CONNECT_FAILED');
 
-/** browser：运行时 Node 版本不达标（< 22.19——WebSocket 全局缺席；engines 唯一运行时执法位，起链前拒不留半建态；契约篇 §6.10 生命周期收口⑥，遗漏大扫 20260901-b #15） */
+/** browser：运行时 Node 版本不达标（< 24.0——与 engines 下界对齐；engines 唯一运行时执法位，起链前拒不留半建态；契约篇 §6.10 生命周期收口⑥，遗漏大扫 20260901-b #15） */
 export const BROWSER_NODE_UNSUPPORTED = registerErrorCode('BROWSER_NODE_UNSUPPORTED');
 
 /** browser：行 config 双配冲突（cdpEndpoint 与 executablePath 同给——attach 既有引擎与指定引擎路径互斥；起链前 fail-loud，契约篇 §6.10，遗漏大扫 20260901-b #26） */
