@@ -1157,3 +1157,214 @@ describe('增强 7 终端外显（进度态两形态分源 + 标题随聚焦换�
     await flush();
   });
 });
+
+/* ---------------- /history 全屏回看器（增强 8，技术栈篇 §4.1） ----------------
+ * TuiAltScreen 副屏生命周期锁：进屏写（?1049h）/收屏写（?1049l）/渲染管线
+ * 单源（与主屏 renderHistoryInto 同构建器）/ask 强制收起/副屏键面补丁/注册
+ * 门槛（history 注入在场才注册）/未知命令三档（/help 在册才指引——本增强的
+ * 涟漪勘正）。捕获式终端 send() 走生产 onInput 链（输入路由锁同款）。 */
+
+/** 路由式记账注册表：真实收纳 register 的命令定义、dispatch 按 name 路由到
+ * handler——/history 的通道注册腿可被真实触发（makeCommands 的 register 是
+ * no-op，驱动不了回看器）；list/lookup 与收纳面一致（三档文案断言依据） */
+function makeRoutingRegistry() {
+  const defs: { name: string; description: string; handler: (args: string) => void }[] = [];
+  const registry = {
+    register: (def: { name: string; description: string; handler: (args: string) => void }) => {
+      defs.push(def);
+      return () => undefined;
+    },
+    list: () => defs.map((d) => ({ name: d.name, description: d.description, handler: d.handler })),
+    lookup: (name: string) => defs.find((d) => d.name === name),
+    dispatch: async (text: string): Promise<'ok' | 'unknown'> => {
+      const name = text.slice(1).split(' ')[0];
+      const def = defs.find((d) => d.name === name);
+      if (def === undefined) return 'unknown';
+      def.handler('');
+      return 'ok';
+    },
+    parse: (t: string) => (t.startsWith('/') ? { name: t.slice(1), args: '' } : null),
+    onChange: () => () => undefined,
+  };
+  return { registry: registry as unknown as CommandRegistry, defs };
+}
+
+describe('/history 全屏回看器（增强 8——副屏生命周期与渲染单源）', () => {
+  it('/history 进副屏：?1049h 写出 + 全量历史正文与条数提示行上屏', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const { registry } = makeRoutingRegistry();
+    const history = () => [userHistory('第一问'), assistantMessage('第一答正文'), userHistory('第二问')];
+    const tui = createTuiChannel({ host, commands: registry, terminal, history });
+    tui.start();
+    await flush();
+    await type(terminal, '/history');
+    terminal.send('\r');
+    await flush(200); // 命令派发 + 副屏首帧渲染
+    const all = terminal.frames.join('');
+    expect(all).toContain('\x1b[?1049h'); // 进副屏缓冲（修前零 TuiAltScreen 消费）
+    expect(all).toContain('第一答正文'); // 历史正文进副屏（渲染单源：assistant Markdown 腿）
+    expect(all).toContain('3 条'); // 提示行条数披露
+    // q 收起：退屏写 + 主屏复起（后续帧不再重复历史正文 = 副屏已收）
+    const mark = terminal.frames.length;
+    terminal.send('q');
+    await flush(200);
+    expect(terminal.frames.slice(mark).join('')).toContain('\x1b[?1049l');
+    tui.stop();
+  });
+
+  it('副屏不受主屏滚动帽：maxMessageLines 2 时 5 条历史回看全量可见', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const { registry } = makeRoutingRegistry();
+    const history = () => [
+      userHistory('行零'),
+      userHistory('行一'),
+      userHistory('行二'),
+      userHistory('行三'),
+      userHistory('行四'),
+    ];
+    const tui = createTuiChannel({ host, commands: registry, terminal, history, maxMessageLines: 2 });
+    tui.start();
+    await flush();
+    await type(terminal, '/history');
+    terminal.send('\r');
+    await flush(200);
+    const all = terminal.frames.join('');
+    expect(all).toContain('行零'); // 最旧条在副屏可见（主屏帽只治主屏树内存——快照档全量）
+    expect(all).toContain('5 条');
+    tui.stop();
+  });
+
+  it('q 收起保树：停屏期入树事件返回即见（不走 repaint 清树重画投影）', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const { registry } = makeRoutingRegistry();
+    const history = () => [userHistory('投影内既有')];
+    const tui = createTuiChannel({ host, commands: registry, terminal, history });
+    tui.start();
+    await flush();
+    await type(terminal, '/history');
+    terminal.send('\r');
+    await flush(200);
+    // 停屏期事件进主屏组件树（requestRender 停屏短路、树照长）
+    tui.handle({ type: 'message_end', message: assistantMessage('停屏期到达') });
+    const mark = terminal.frames.length;
+    terminal.send('q');
+    await flush(200);
+    const after = terminal.frames.slice(mark).join('');
+    expect(after).toContain('\x1b[?1049l'); // 副屏收场
+    expect(after).toContain('停屏期到达'); // 修前红位：repaint 收场会清树重画静态投影、丢瞬时行
+    tui.stop();
+  });
+
+  it('Esc 收起同 q（裸 Esc 形态）', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const { registry } = makeRoutingRegistry();
+    const tui = createTuiChannel({ host, commands: registry, terminal, history: () => [] });
+    tui.start();
+    await flush();
+    await type(terminal, '/history');
+    terminal.send('\r');
+    await flush(200);
+    const mark = terminal.frames.length;
+    terminal.send('\x1b'); // 裸 Esc（CSI 兼容形态由 matchesKey 兜住）
+    await flush(200);
+    expect(terminal.frames.slice(mark).join('')).toContain('\x1b[?1049l');
+    tui.stop();
+  });
+
+  it('副屏键面补丁：Ctrl+C 打断不关副屏、Ctrl+D 先收副屏再 requestQuit', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const { registry } = makeRoutingRegistry();
+    const tui = createTuiChannel({ host, commands: registry, terminal, history: () => [] });
+    tui.start();
+    await flush();
+    await type(terminal, '/history');
+    terminal.send('\r');
+    await flush(200);
+    // Ctrl+C：打断在飞 run，回看器保持（注意力不夺走）
+    const markC = terminal.frames.length;
+    terminal.send('\x03');
+    await flush(200);
+    expect(log).toEqual(['interrupt']);
+    expect(terminal.frames.slice(markC).join('')).not.toContain('\x1b[?1049l');
+    // Ctrl+D：先收副屏（1049l 在场）再走宿主退出路
+    terminal.send('\x04');
+    await flush(200);
+    expect(log).toEqual(['interrupt', 'requestQuit']);
+    expect(terminal.frames.slice(markC).join('')).toContain('\x1b[?1049l');
+    tui.stop();
+  });
+
+  it('ask 强制收起：confirm 入口先收副屏再入队（提问行复起后可见）', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const { registry } = makeRoutingRegistry();
+    const tui = createTuiChannel({ host, commands: registry, terminal, history: () => [] });
+    tui.start();
+    await flush();
+    await type(terminal, '/history');
+    terminal.send('\r');
+    await flush(200);
+    const mark = terminal.frames.length;
+    // confirm 在 UiBackend 是可选面——通道实现恒提供（非空断言：本用例标的即它）
+    const answer = tui.ui().confirm!('是否继续');
+    await flush(200);
+    const after = terminal.frames.slice(mark).join('');
+    expect(after).toContain('\x1b[?1049l'); // ask 到达即收副屏（注意力优先级 ask > 回看）
+    expect(after).toContain('是否继续'); // 保树复起：提问行随后入屏
+    // 应答收场（防悬空 promise）
+    await type(terminal, 'y');
+    terminal.send('\r');
+    await flush(200);
+    await expect(answer).resolves.toBe(true);
+    tui.stop();
+  });
+
+  it('换防 stop 先收副屏：channel.stop() 时 1049l 在场', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const { registry } = makeRoutingRegistry();
+    const tui = createTuiChannel({ host, commands: registry, terminal, history: () => [] });
+    tui.start();
+    await flush();
+    await type(terminal, '/history');
+    terminal.send('\r');
+    await flush(200);
+    const mark = terminal.frames.length;
+    tui.stop();
+    await flush(200);
+    expect(terminal.frames.slice(mark).join('')).toContain('\x1b[?1049l'); // 停屏编舞先收副屏
+  });
+
+  it('注册门槛：history 注入缺席 = /history 不注册（不虚报）', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const { registry, defs } = makeRoutingRegistry();
+    const tui = createTuiChannel({ host, commands: registry, terminal }); // 无 history
+    tui.start();
+    await flush();
+    expect(defs.map((d) => d.name)).not.toContain('history'); // TUI-8 同律：能力在场才注册
+    tui.stop();
+  });
+
+  it('未知命令三档：非空表且无 /help = 诚实列未知（不虚指清单）', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const { registry } = makeRoutingRegistry();
+    // history 在场 → /history 注册 → 表非空；lookup('help') = undefined（第三档）
+    const tui = createTuiChannel({ host, commands: registry, terminal, history: () => [] });
+    tui.start();
+    await flush();
+    await type(terminal, '/nope');
+    terminal.send('\r');
+    await flush(200);
+    const all = terminal.frames.join('');
+    expect(all).toContain('✖ 未知命令：/nope'); // 诚实列未知
+    expect(all).not.toContain('/help 查看清单'); // 不虚指不存在的命令（增强 8 涟漪勘正）
+    tui.stop();
+  });
+});

@@ -19,19 +19,27 @@ import {
   CombinedAutocompleteProvider,
   Container,
   Editor,
+  KeybindingsManager,
   Loader,
   Markdown,
+  ScrollView,
+  TUI_KEYBINDINGS,
   Text,
+  TuiAltScreen,
   TuiMainScreen,
+  VStack,
   isKeyRelease,
   matchesKey,
   parseKey,
+  setKeybindings,
   type AutocompleteProvider,
+  type Component,
   type EditorTheme,
   type MarkdownTheme,
   type SlashCommand,
   type Terminal,
   type TUI,
+  type TuiMainScreenRenderState,
 } from '@earendil-works/pi-tui';
 import { ProcessTerminal } from '@earendil-works/pi-tui';
 import type { AgentEvent } from '../agent/events.js';
@@ -244,6 +252,11 @@ const TODO_PANEL_MAX = 6;
 /** 已武装复原钩子的解除器（模块级单例——一进程一真终端；重复武装先解除旧的） */
 let disarmTerminalRestore: (() => void) | null = null;
 
+/** 副屏在场时的退出复原腿（增强 8）：开回看器时武装、收起时卸载。硬退路径
+ * 若停留在副屏缓冲，既有复位序列（鼠标/键序/raw）写在副屏里等于没写——本腿
+ * 先退副屏（1049l + 鼠标复位 + 自动换行复原）再让既有序列落到主屏缓冲。 */
+let viewerExitRestore: (() => void) | null = null;
+
 /**
  * 武装 process exit 终端态复原钩子（仅真 ProcessTerminal 调用——测试注入终端零污染）。
  *
@@ -263,6 +276,7 @@ function armTerminalRestore(baselineTitle: string | undefined): void {
   disarmTerminalRestore?.();
   const restore = (): void => {
     try {
+      viewerExitRestore?.(); // 增强 8：副屏退屏先行（在场才写——缺席零污染）
       process.stdout.write('\x1b]9;4;0\x07'); // OSC 9;4 进度态清零（镜像 stop() 首写）
       if (baselineTitle !== undefined) {
         process.stdout.write(`\x1b]0;${baselineTitle}\x07`); // 增强 7：title 复原到基线（镜像 stop() 末写）
@@ -288,7 +302,11 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const terminal = opts.terminal ?? new ProcessTerminal();
   /** 消息流滚动帽（缺省 2000——超帽丢最旧，见 TuiChannelOptions.maxMessageLines） */
   const maxMessageLines = opts.maxMessageLines ?? 2000;
-  const tui: TUI = new TuiMainScreen(terminal);
+  // 主屏双名（增强 8）：tui = 既有交互面（通道生命周期不变）；mainScreen =
+  // TuiMainScreen 静态面（captureRenderState/restoreRenderState——/history 副屏
+  // 开合时主屏差分基线的存取，批 C 换防同款「同实例两视图」形态）
+  const mainScreen = new TuiMainScreen(terminal);
+  const tui: TUI = mainScreen;
   /** 起屏旗标（批 C 桌面换防）：首起拉历史投影，停屏后复起只全量重画不重拉 */
   let screenStarted = false;
 
@@ -525,14 +543,19 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         .dispatch(trimmed)
         .then((result) => {
           if (result === 'unknown') {
-            // 分档文案（TUI-8）：注册表空 = 本形态无命令面（attach 纯客户端
-            // v1——/ 前缀输入按通道统一派发语义本地拦截**不投递**，诚实告知
-            // 而非误导性 /help 指引）；非空表保留 /help 指引
+            // 分档文案（TUI-8 + 增强 8 涟漪勘正）三档：注册表空 = 本形态无命令面
+            // （attach 纯客户端 v1——/ 前缀输入按通道统一派发语义本地拦截**不投递**，
+            // 诚实告知而非误导性 /help 指引）；/help 在册 = 给 /help 指引；非空但无
+            // /help（attach 注入 /history 等通道命令而 help 不在册）= 诚实列未知、
+            // 不虚指不存在的命令
             const head = trimmed.split(' ')[0];
+            const commands = opts.commands.list();
             appendLines([
-              opts.commands.list().length === 0
+              commands.length === 0
                 ? `✖ 本形态无斜杠命令面：${head} 未投递（发送普通消息请不以 / 开头）`
-                : `✖ 未知命令：${head}（/help 查看清单）`,
+                : opts.commands.lookup('help') !== undefined
+                  ? `✖ 未知命令：${head}（/help 查看清单）`
+                  : `✖ 未知命令：${head}`,
             ]);
           }
         })
@@ -570,6 +593,167 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     }
     return undefined;
   });
+
+  /* ---- /history 全屏回看器（增强 8，技术栈篇 §4.1——pi-tui TuiAltScreen 首消费） ---- */
+  /**
+   * 历史投影 → 组件序列（渲染管线单源）：renderHistoryInto（主屏起屏/repaint）
+   * 与 /history 回看器副屏共用同一构建逻辑——零第二渲染器（冷读勘正 #3：
+   * assistant 终值走 Markdown 组件 + 工具/错误行尾随，与主屏行集恒一致）。
+   * 返回消息条数供回看器提示行披露。
+   */
+  const buildHistoryComponents = (sessionId: string | undefined): { components: Component[]; count: number } => {
+    const history = opts.history ? opts.history(sessionId) : [];
+    const components: Component[] = [];
+    for (const message of history) {
+      if (isStandardMessage(message) && message.role === 'assistant' && opts.rendererFor?.('assistant') === undefined) {
+        const body = assistantText(message);
+        if (body.trim() !== '') components.push(new Markdown(body, 1, 0, MD_THEME));
+        for (const line of [...assistantToolLines(message), ...assistantErrorLine(message)]) {
+          components.push(new Text(line, 1));
+        }
+      } else {
+        for (const line of renderAgentMessage(message, opts.rendererFor, opts.onRendererError)) {
+          components.push(new Text(line, 1));
+        }
+      }
+    }
+    return { components, count: history.length };
+  };
+
+  /** 副屏在场态（null = 主屏常驻态）；同刻至多一副屏（/history 重入幂等无操作） */
+  let viewer: { alt: TuiAltScreen; detachInput: () => void } | null = null;
+  /** 主屏差分基线快照（开副屏前 capture、收副屏后 restore——维持渲染状态连续） */
+  let mainScreenState: TuiMainScreenRenderState | null = null;
+
+  /**
+   * 收起回看器（幂等；四路共用收口：q/Esc / ask 强制收起 / Ctrl+D 退出 / 换防 stop）。
+   * 编舞 = 副屏 stop（preserveScreen 不清屏，回看内容留在终端 scrollback）→ 主屏
+   * restore 差分基线 → start → requestRender(true) 强制全帧。不走 repaint（清树
+   * 重画投影）——那会抹掉停屏期入树的瞬时行（提问/通知行），冷读勘正 #4。
+   */
+  const closeViewer = (): void => {
+    if (viewer === null) return;
+    const { alt, detachInput } = viewer;
+    viewer = null;
+    viewerExitRestore = null; // 退出复原钩子副屏腿卸载（副屏已优雅收场）
+    detachInput();
+    alt.stop({ preserveScreen: true });
+    // 停屏期事件已进主屏组件树（requestRender 在停屏态短路、树照长）——复起
+    // 全帧重画即补显，复起路（channel.start 的 screenStarted 分支）同款
+    mainScreen.restoreRenderState(mainScreenState!);
+    mainScreenState = null;
+    tui.setFocus(editor);
+    tui.start();
+    tui.requestRender(true);
+  };
+
+  /** 开回看器：当前聚焦会话全量 durable 正文（快照档 v1： viewing 期新事件不进回看、返回后可见） */
+  const openViewer = (): void => {
+    if (viewer !== null || !screenStarted) return;
+    const key = trackedSessionId ?? opts.focusIdFor?.();
+    const { components, count } = buildHistoryComponents(key);
+    const body = new Container();
+    for (const component of components) body.addChild(component);
+    const scroll = new ScrollView(body, {
+      follow: 'end', // 尾随锚定（与 pi 交互模式同款）
+      primary: true, // 副屏内建搜索/选区挂 primary 视口
+      overscroll: 'chain',
+      scrollbar: 'auto', // 缺省 hidden 不显——冷读勘正 #2
+    });
+    const short = key !== undefined ? key.slice(0, 8) : '—';
+    const hint = new Text(
+      ` ${short} · ${count} 条 — q/Esc 返回 · Ctrl+Shift+F 搜索 · ↑↓/PgUp/PgDn/滚轮 滚动 · 拖选即复制`,
+      0,
+    );
+    const alt = new TuiAltScreen(terminal, false);
+    alt.addChild(body);
+    alt.addChild(hint);
+    alt.setLayoutRoot(
+      // 正文占满弹性区、提示行固定尾行（pi fullscreenLayoutRoot 同款两段栈）
+      new VStack([
+        { component: scroll, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+        { component: hint, basis: 'auto', grow: 0, shrink: 1, minSize: 1 },
+      ]),
+    );
+    // 收起监听器：q/Esc。自持让位判据 = 副屏存在聚焦组件（搜索框在场）时不消费
+    // ——监听器添加序只保 Esc（内建 searchClose 先消费即止链），裸 q 无内建消费
+    // 会落穿到本监听器，无判据则搜索框打不出字母 q（冷读勘正 #1）。kitty release
+    // 早滤同 E-1（release 与 press 解析同形，不滤则一次按键双触发开关）。
+    const detachClose = alt.addInputListener((data) => {
+      if (isKeyRelease(data)) return undefined;
+      if (alt.getFocusedComponent() !== null) return undefined;
+      if (data === 'q' || matchesKey(data, 'escape')) {
+        closeViewer();
+        return { consume: true };
+      }
+      return undefined;
+    });
+    // 副屏键面补丁（冷读勘正 #7）：主屏 quitKeys 拦截面挂在主 TUI 实例上、副屏期
+    // 是死键——副屏侧自建同款：Ctrl+C 打断在飞 run（回看器不关，注意力仍在）/
+    // Ctrl+D 退出（先收副屏再走宿主退出路，编舞与换防 stop 同向）
+    const detachQuit = alt.addInputListener((data) => {
+      if (isKeyRelease(data)) return undefined;
+      const keyId = parseKey(data);
+      if (keyId === 'ctrl+c') {
+        opts.host.interrupt();
+        return { consume: true };
+      }
+      if (keyId === 'ctrl+d') {
+        closeViewer();
+        opts.host.requestQuit();
+        return { consume: true };
+      }
+      return undefined;
+    });
+    // 切换编舞（冷读勘正 #5）：恒走 tui 层 stop——channel 外显（增强 7 title/进度
+    // 态）与 TUI-1 复原钩子不动（回看窗内钩子恒武装，后台 run 忙态照常外显）
+    mainScreenState = mainScreen.captureRenderState();
+    tui.stop({ preserveScreen: true });
+    viewer = {
+      alt,
+      detachInput: () => {
+        detachClose();
+        detachQuit();
+      },
+    };
+    // 退出复原钩子副屏腿（冷读勘正 #6）：硬退路径（fatal/SIGINT）不经优雅收场——
+    // 先退副屏缓冲（1049l + 鼠标复位 + 自动换行复原，镜像 tui-alt-screen.js 停屏
+    // 写序列）再走既有复位序列
+    viewerExitRestore = () => {
+      try {
+        process.stdout.write('\x1b[?1049l');
+        process.stdout.write('\x1b[?1006l\x1b[?1004l\x1b[?1003l\x1b[?1002l\x1b[?1000l');
+        process.stdout.write('\x1b[?7h');
+      } catch {
+        // 复位尽力而为（armTerminalRestore 同款纪律——退出路径不允许二次异常）
+      }
+    };
+    alt.start();
+  };
+
+  // 副屏方向键补绑（冷读勘正 #2）：tui.altScreen.lineUp/lineDown 在 pi-tui 缺省
+  // 空键（defaultKeys: []）——↑↓ 单行滚动 berry 侧补绑。PgUp/PgDn 页滚缺省在册；
+  // 半页不另绑键（页滚已覆盖，且 ctrl+u/ctrl+d 与副屏键面补丁的 Ctrl 键冲突）。
+  // 键位表是 pi-tui 模块级单例，重复 set 同值幂等（desktop 双通道形态安全）。
+  setKeybindings(
+    new KeybindingsManager(TUI_KEYBINDINGS, {
+      'tui.altScreen.lineUp': 'up',
+      'tui.altScreen.lineDown': 'down',
+    }),
+  );
+
+  // 命令注册（TUI-8 同律）：history() 注入在场才注册——attach 纯客户端形态持远程
+  // 投影闭包同享；注入缺席 = 不注册不虚报
+  if (opts.history !== undefined) {
+    opts.commands.register({
+      name: 'history',
+      description: '全屏回看当前会话（q/Esc 返回 · Ctrl+Shift+F 搜索）',
+      handler: () => {
+        openViewer();
+      },
+    });
+  }
+
   /* ---- todo 面板（增强 4，技术栈篇 §4.1）---- */
   /** 四态记号（☐ 待办 / ◐ 进行中 / ☑ 已完成 / ⊙ 缓办） */
   const TODO_MARKERS: Record<TodoItemFace['status'], string> = {
@@ -869,6 +1053,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       statusLoader.setMessage(status ? ` ${status}` : '');
     },
     async confirm(message, opts?: UiAskOptions) {
+      // 增强 8：ask 强制收起回看器（注意力优先级 ask > 回看）——先收再入队；
+      // 收起保树（requestRender 全帧）故提问行照常入屏
+      closeViewer();
       // priority 随链取数（S5 后台 run 的确认降级排队——契约篇 §5.4）；取消收场
       // 或 signal abort 的 undefined 按 false（fail-closed：不批准 = 安全缺省）
       const answer = await prompts.ask(`${message} [y/n]`, {
@@ -880,6 +1067,8 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       return parsed; // 未识别按 false（fail-closed，与技术栈篇 §4.3 精神一致）
     },
     async input(message, ioOpts?: InputOptions) {
+      // 增强 8：ask 强制收起回看器（confirm 同律）
+      closeViewer();
       // priority 同 confirm；取消收场或 signal abort 的 undefined 归一为 ''
       //（UiService.input 的「无输入」既有语义——消费方零新分支）
       const answer = await prompts.ask(ioOpts?.placeholder ? `${message}（${ioOpts.placeholder}）` : message, {
@@ -930,17 +1119,16 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
    * assistant 渲染器的应用回落行形态，优先级纪律不变）；其余角色照旧行形态。
    */
   const renderHistoryInto = (sessionId: string | undefined): void => {
-    const history = opts.history ? opts.history(sessionId) : [];
-    for (const message of history) {
-      if (isStandardMessage(message) && message.role === 'assistant' && opts.rendererFor?.('assistant') === undefined) {
-        const body = assistantText(message);
-        if (body.trim() !== '') appendMarkdown(body);
-        const tail = [...assistantToolLines(message), ...assistantErrorLine(message)];
-        if (tail.length > 0) appendLines(tail);
-      } else {
-        appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
-      }
-    }
+    // 渲染管线单源（增强 8）：主屏起屏/repaint 与 /history 回看器共用
+    // buildHistoryComponents——两屏行集恒一致（零第二渲染器）
+    const { components } = buildHistoryComponents(sessionId);
+    for (const component of components) messages.addChild(component);
+    // 滚动帽执法（超帽丢最旧——appendLines/appendMarkdown 逐次剪枝的等价收口；
+    // 帽只治主屏树内存，回看器副屏走全量快照不受此帽）
+    const overflow = messages.children.length - maxMessageLines;
+    if (overflow > 0) messages.children.splice(0, overflow);
+    messages.invalidate();
+    tui.requestRender();
   };
   const repaint = (sessionId: string | undefined): void => {
     // 增强 4：追踪会话键（todoFor 查询参数——显式键路更新）
@@ -1022,6 +1210,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       tui.start();
     },
     stop(options) {
+      // 增强 8：换防/停屏先收副屏（幂等——未开即无操作）；编舞 = 副屏 stop →
+      // 主屏 restore/start 随即被下方 tui.stop 再停——事件树全程连续不丢行
+      closeViewer();
       tui.stop(options);
       // 增强 3：停轮（interval 清理——停屏期转轮空转纯噪声）
       statusLoader.stop();
