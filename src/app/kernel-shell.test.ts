@@ -2,8 +2,9 @@
  * app — 内核最小 shell 测试（第八十五批批 C，骨架篇 boot 序兜底交互面）。
  *
  * 测法 = PassThrough 流对（mock 停在 stdio 边界）：五动词对话面 / 双确认 /
- * startApp 挂起行读（pause→await→resume）/ 宿主退出信号结算挂起的 question /
- * 零仓依赖静态声明（兜底面不 import 被兜底的东西——文本面执法）。
+ * 交接次序执法（交出方三件套先行——startApp/retryDesktop 在飞期间 input 零
+ * data 监听）/ 静默退位（接管成功不写污染文案）/ 宿主退出信号结算挂起的
+ * question / 零仓依赖静态声明（兜底面不 import 被兜底的东西——文本面执法）。
  */
 import { readFileSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
@@ -98,35 +99,24 @@ describe('kernel-shell：动词面', () => {
     expect(streams.readAll()).toContain('无应用');
   });
 
-  it('/start <id>：进入并挂起行读（pause→await→resume）；拒因转述；缺参用法', async () => {
+  it('/start <id>：交出方三件套先行（startApp 在飞期间 input 零 data 监听）；拒因转述；缺参用法（遗漏大扫 20260903 conc D1-2 修死）', async () => {
     const streams = makeStreams();
-    const paused: boolean[] = [];
     const started: string[] = []; // override 自记账（缺省记账被覆写）
-    // 包装 input 捕获 pause/resume 时序（startApp 在飞期间必须挂起行读）
-    const origPause = streams.input.pause.bind(streams.input);
-    const origResume = streams.input.resume.bind(streams.input);
-    streams.input.pause = () => {
-      paused.push(true);
-      return origPause();
-    };
-    streams.input.resume = () => {
-      paused.push(false);
-      return origResume();
-    };
+    const listenersInFlight: number[] = []; // startApp 在飞期采样 input 的 data 监听数
     const deps = makeDeps(streams, {
       startApp: async (appId) => {
-        started.push(appId); // override 不走缺省记账——自记
-        // 进入在飞期间行读已挂起（序执法：最后动作 = 我们的 rl.pause——
-        // readline 自身也会 pause/resume 流，故只看末位）
-        expect(paused[paused.length - 1]).toBe(true);
+        started.push(appId);
+        // 序执法采样：进入在飞期间行读面必须已交出（rl.close 拆 data 监听 +
+        // 停流全三件；修前只 pause——监听仍在，接收方 resume 即双消费，视图
+        // 期按键泄漏进 REPL 编辑线）
+        listenersInFlight.push(streams.input.listenerCount('data'));
         return appId === 'chat' ? { ok: true } : { ok: false, error: '组件缺场' };
       },
     });
     const done = runKernelShell(deps);
     await streams.sendLine('/start chat');
-    // startApp promise 结算后 resume（挂起-放行成对：末位翻回 false）
+    // startApp 结算后重武装行读面（新建接口非 resume 旧面——REPL 续读下一行）
     await new Promise((resolve) => setImmediate(resolve));
-    expect(paused[paused.length - 1]).toBe(false);
     await streams.sendLine('/start ghost');
     await new Promise((resolve) => setImmediate(resolve));
     await streams.sendLine('/start');
@@ -135,6 +125,8 @@ describe('kernel-shell：动词面', () => {
     await expect(done).resolves.toBe('exit');
     const out = streams.readAll();
     expect(started).toEqual(['chat', 'ghost']);
+    // 两次真进入的飞行窗口内监听数恰零（修前 pause 留监听 ≥1——红；拒因/缺参不进窗口）
+    expect(listenersInFlight).toEqual([0, 0]);
     expect(out).toContain('进入失败：组件缺场');
     expect(out).toContain('用法：/start <应用id>');
   });
@@ -175,15 +167,27 @@ describe('kernel-shell：动词面', () => {
     expect(deps.exitCalls.length).toBe(0); // 不再回落 requestExit（编舞自管收口）
   });
 
-  it('/desktop 成功接管：返回 desktop-takeover（宿主转等桌面退出路）', async () => {
+  it('/desktop 成功接管：交出方先行（retryDesktop 在飞期间零 data 监听）+ 静默退位——无「桌面已接管」污染文案（遗漏大扫 20260903 conc D1-1/desktop D4-1 修死）', async () => {
     const streams = makeStreams();
-    const deps = makeDeps(streams, { retryDesktop: async () => ({ ok: true }) });
+    const listenersInFlight: number[] = []; // retryDesktop 在飞期采样
+    const deps = makeDeps(streams, {
+      retryDesktop: async () => {
+        // 序执法采样：桌面引擎起屏**之前**行读面必须已交出（修前 close 后置在
+        // finally——停流 + TTY raw 复原砸在已起屏引擎的输入面上，桌面 100%
+        // 失聪死锁）
+        listenersInFlight.push(streams.input.listenerCount('data'));
+        return { ok: true };
+      },
+    });
     const done = runKernelShell(deps);
     await streams.sendLine('/desktop');
     await expect(done).resolves.toBe('desktop-takeover');
     const out = streams.readAll();
     expect(out).toContain('重试桌面起屏');
-    expect(out).toContain('桌面已接管');
+    // 静默退位：引擎此时已占 alt-screen，交接成功文案写在备屏首帧之后即视觉
+    // 污染且差分永不修复——桌面首帧即回执，shell 一字不写
+    expect(out).not.toContain('桌面已接管');
+    expect(listenersInFlight).toEqual([0]); // 修前无任何交出（监听 ≥1——红）
     expect(deps.exitCalls.length).toBe(0); // 接管不是退出
   });
 

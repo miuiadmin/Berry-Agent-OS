@@ -64,6 +64,11 @@ const PROMPT = 'kernel> ';
  * 行式 REPL 主循环（阻塞至 /exit / /shutdown 双确认 / /desktop 成功接管）。
  * Ctrl+D（EOF）= /exit；未知命令给提示不退出；/shutdown 双确认（连打两次，
  * 中途他词解除武装）。
+ *
+ * 交接次序执法（契约篇 §6.11 内核 shell 交接同律，2026-09-03 第九十一批）：
+ * /start 与 /desktop 都是向接收方交出 TTY——交出方三件套（接口 close 即全三件）
+ * 先行于接收方起屏；接收方交还后**重建**行读面（pause/resume 语义已实证不可
+ * 依赖——pause 只停流不拆 data 监听，接收方 resume 即双消费）。
  */
 export async function runKernelShell(deps: KernelShellDeps): Promise<KernelShellOutcome> {
   const input = deps.input ?? process.stdin;
@@ -72,36 +77,88 @@ export async function runKernelShell(deps: KernelShellDeps): Promise<KernelShell
     output.write(`${line}\n`);
   };
   if (deps.banner !== undefined) write(deps.banner);
-  const rl = readline.createInterface({ input, output, prompt: PROMPT });
-  // EOF 竞速腿（Ctrl+D = close 事件）：close 时挂起的 question 依 Node 版本可能
-  // 悬而不决——显式 close promise 参赛，EOF 确定性视同 /exit
-  let closedSignalled = false;
-  const closed = new Promise<null>((resolve) => {
-    rl.on('close', () => {
-      closedSignalled = true;
-      resolve(null);
-    });
-  });
-  // 宿主退出信号腿：front.quit 结算时关行读器（close 腿先胜 → quitSignalled 裁决）
+  /** 行读面状态：接口本体 + 其 close 结算 promise（close 事件 → resolve null） */
+  interface RlState {
+    readonly rl: readline.Interface;
+    readonly closed: Promise<null>;
+  }
+  /** EOF/宿主退出已发信号（当前问询面的非交接性 close）——置位即终局收口 */
+  let eofSignalled = false;
+  /** 宿主退出信号（front.quit）——置位即终局收口（关接口由 hostQuit 钩子自理） */
   let quitSignalled = false;
+  let rlState: RlState | null;
+  /**
+   * 建行读面：新接口 + close 监听。身份比对判活——交接性 close（surrenderInput
+   * 主动关停）发生时 rlState 已换代/置空，旧接口的 close 不再误触终局旗。
+   */
+  const createRlState = (): RlState => {
+    const rl = readline.createInterface({ input, output, prompt: PROMPT });
+    let state!: RlState;
+    const closed = new Promise<null>((resolve) => {
+      rl.on('close', () => {
+        // 仍是当前问询面的 close = EOF 或宿主退出关停（终局）；交接关停的旧
+        // 接口不算（已换代）——重建路径不误触退出
+        if (rlState === state) eofSignalled = true;
+        resolve(null);
+      });
+    });
+    state = { rl, closed };
+    return state;
+  };
+  rlState = createRlState();
+  // 宿主退出信号腿：front.quit 结算时关当前行读面（交接在飞期间无面——null 安全）
   if (deps.hostQuit !== undefined) {
     void deps.hostQuit.then(() => {
       quitSignalled = true;
-      rl.close();
+      rlState?.rl.close();
     });
   }
+  /**
+   * 交出方三件套（契约篇 §6.11）：关停当前行读面——readline 接口 close 即
+   * removeListener + 停流 + TTY raw 复原全三件。必须**先行于接收方起屏**：
+   * 修前 /desktop 路径 close 后置在 finally——停流 + raw 复原砸在已起屏引擎
+   * 的输入面上，桌面 100% 失聪死锁（conc D1-1）；修前 /start 路径只 pause
+   * 不拆监听——接收方 resume 即双消费，视图期按键泄漏进 REPL 编辑线（conc
+   * D1-2）。先换代再关：close 监听的身份比对即知是交接关停，不触终局旗。
+   */
+  const surrenderInput = (): void => {
+    const state = rlState;
+    rlState = null;
+    state?.rl.close();
+  };
+  /**
+   * 接收方交还后重武装行读面（应用视图结束/桌面起屏失败——用户续用 REPL）：
+   * 新建接口非 resume 旧面；终局信号在飞期间不重建（循环顶收口）。
+   */
+  const rearmInput = (): void => {
+    if (eofSignalled || quitSignalled) return;
+    rlState = createRlState();
+  };
   /** /shutdown 武装旗标（双确认第一击置位，他词/空行解除） */
   let shutdownArmed = false;
   try {
     for (;;) {
-      // close 已落（如 /start 在飞期间宿主退出信号关行读器）：不再发下一问——
-      // 对已关接口 question 会炸 ERR_USE_AFTER_CLOSE，直接走退出裁决
-      if (closedSignalled || quitSignalled) {
+      // 终局信号（EOF/宿主退出）：不再发问——对已关接口 question 会炸
+      // ERR_USE_AFTER_CLOSE，直接走退出裁决
+      if (eofSignalled || quitSignalled) {
+        deps.requestExit();
+        return 'exit';
+      }
+      if (rlState === null) {
+        // 防御位：交接收尾被终局信号跳过重建（正常时序循环顶旗已拦）——
+        // 无面可问即退，不对空面发问
         deps.requestExit();
         return 'exit';
       }
       // question(PROMPT) 自带提示输出（写入 prompt 后等待一行；close 先胜 = null）
-      const line = await Promise.race([rl.question(PROMPT), closed]);
+      let line: string | null;
+      try {
+        line = await Promise.race([rlState.rl.question(PROMPT), rlState.closed]);
+      } catch {
+        // 宿主退出关行读器与本问询的竞速窗：已关接口上 question 同步炸
+        // ERR_USE_AFTER_CLOSE——close 腿随后即至，按 close 结算（视同 null）
+        line = null;
+      }
       // close 两因：宿主退出信号（quitSignalled）或 Ctrl+D EOF——都视同 /exit
       if (line === null || quitSignalled) {
         deps.requestExit();
@@ -141,37 +198,45 @@ export async function runKernelShell(deps: KernelShellDeps): Promise<KernelShell
           write('用法：/start <应用id>（清单见 /apps）');
           continue;
         }
-        // 挂起行读防抢 stdin（应用视图接管终端）；视图结束后续读
-        rl.pause();
+        // 交出方三件套先行（契约篇 §6.11）：先拆行读面再让应用视图接管终端——
+        // 修前只 pause（停流不拆监听），接收方 resume 即双消费、视图期按键
+        // 泄漏进 REPL 编辑线（conc D1-2）
+        surrenderInput();
         try {
           const result = await deps.startApp(appId);
           if (!result.ok) write(`进入失败：${result.error}`);
         } catch (err) {
           write(`进入异常：${err instanceof Error ? err.message : String(err)}`);
         } finally {
-          // 行读器已被关（宿主退出信号在视图在飞期间先到）时不 resume——
-          // 已关接口上 resume 会炸 ERR_USE_AFTER_CLOSE，收口交给循环顶裁决
-          if (!closedSignalled) rl.resume();
+          // 视图结束交还——重建行读面（新建接口非 resume 旧面）；宿主退出信号
+          // 在视图在飞期间先到则不重建，收口交给循环顶裁决
+          rearmInput();
         }
         continue;
       }
       if (text === '/desktop') {
         write('重试桌面起屏…');
+        // 交出方三件套先行（契约篇 §6.11）：关停行读面**先于**桌面引擎起屏——
+        // 修前 close 后置在 finally，停流 + TTY raw 复原砸在已起屏引擎的输入
+        // 面上，桌面 100% 失聪死锁（conc D1-1）
+        surrenderInput();
         try {
           const result = await deps.retryDesktop();
           if (result.ok) {
-            write('桌面已接管——kernel shell 退位。');
+            // 静默退位（desktop D4-1）：桌面首帧即交接成功回执——此时引擎已占
+            // alt-screen，再写「桌面已接管」是视觉污染且差分永不修复
             return 'desktop-takeover';
           }
           write(`桌面起屏失败（继续计数）：${'error' in result ? result.error : '未知原因'}`);
         } catch (err) {
           write(`桌面重试异常：${err instanceof Error ? err.message : String(err)}`);
         }
+        rearmInput();
         continue;
       }
       write(`未知命令：${text.split(' ')[0]}（认 /apps /start <id> /shutdown /exit /desktop）`);
     }
   } finally {
-    rl.close();
+    rlState?.rl.close();
   }
 }
