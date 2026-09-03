@@ -11,6 +11,7 @@ import { createContext } from '../context/context.js';
 import { createLogger } from '../context/logger.js';
 import type { ContextScope } from '../context/types.js';
 import {
+  JOB_CONCURRENCY_LIMIT,
   SUBAGENT_CAPABILITY_UNSUPPORTED,
   SUBAGENT_PROVIDER_DUPLICATE,
   SUBAGENT_PROVIDER_NOT_FOUND,
@@ -256,6 +257,27 @@ describe('ctx.subagents — background Job 接线（§6.2 一次性两形态）'
     expect(fgStub.disposeCalls()).toBe(1);
     fgStub.settleWith({ output: 'ok', stopReason: 'completed' });
     await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' });
+  });
+
+  it('background 接线失败（owner 帽满）→ 已启动执行体必须 dispose 后原样 rethrow（全面复盘 20260903 #8）', async () => {
+    // 帽满前置：同 owner 塞满 16 个在跑 Job（create 即 running，永不 settle）
+    const { service, jobs, stub } = setup();
+    for (let i = 0; i < 16; i++) {
+      jobs.create({ kind: 'subagent', ownerSessionId: 'sess-full', label: `filler-${i}` });
+    }
+    // 第 17 个 background 启动：provider.start 已 fork 子执行体、jobs.create 随即
+    // 抛 JOB_CONCURRENCY_LIMIT——修前执行体泄漏（无 dispose、结算未接线、token 花
+    // 费无账）；修后错误照抛、dispose 恰一次
+    await expectCode(JOB_CONCURRENCY_LIMIT, () =>
+      service.start({
+        provider: 'stub',
+        prompt: '第十七个',
+        label: '帽满',
+        ownerSessionId: 'sess-full',
+        background: true,
+      }),
+    );
+    expect(stub.disposeCalls()).toBe(1); // 修前 0——泄漏即红
   });
 });
 

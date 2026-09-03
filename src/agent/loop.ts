@@ -503,6 +503,28 @@ async function failTruncatedToolCalls(toolCalls: AgentToolCall[], emit: AgentEve
   return { messages: finalized.map(toolResultMessageOf), terminate: false };
 }
 
+/**
+ * 批中段中止余量收尾（§2.4 补裁，全面复盘 20260903 #6）：批执行中段收到 abort 后，
+ * 余下未执行调用逐个补「已中止，工具未执行」的 isError 终值——与截断防御同格的
+ * 记账补对（不执行但配对）。只发 start/end 事件对与终值本身，**不发结果消息**：
+ * 串行路逐条内联发、并行路并入 entries 由源序回放统一发（各路径自持，防双发）。
+ */
+async function finalizeAbortedRemaining(remaining: AgentToolCall[], emit: AgentEventSink): Promise<FinalizedCall[]> {
+  const finalized: FinalizedCall[] = [];
+  for (const toolCall of remaining) {
+    await emit({
+      type: 'tool_execution_start',
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      args: toolCall.arguments,
+    });
+    const call: FinalizedCall = { toolCall, result: errorToolResult('已中止，工具未执行'), isError: true };
+    finalized.push(call);
+    await emitToolExecutionEnd(call, emit);
+  }
+  return finalized;
+}
+
 /** 工具批执行入口：任一工具 executionMode=sequential 即整批串行（pi 蓝本细节） */
 async function executeToolBatch(
   context: AgentContext,
@@ -530,7 +552,8 @@ async function executeSequentially(
   emit: AgentEventSink,
 ): Promise<ToolBatch> {
   const finalized: FinalizedCall[] = [];
-  for (const toolCall of toolCalls) {
+  for (let i = 0; i < toolCalls.length; i++) {
+    const toolCall = toolCalls[i]!;
     await emit({
       type: 'tool_execution_start',
       toolCallId: toolCall.id,
@@ -545,7 +568,13 @@ async function executeSequentially(
     finalized.push(call);
     await emitToolResultMessage(toolResultMessageOf(call), emit);
     if (signal?.aborted) {
-      break; // 已中止：余下调用不再准备（StreamFn 下一轮即 aborted 终态）
+      // 已中止：余下调用不再准备，但必须补对（§2.4 中止余量收尾）——悬空 tool_use
+      // 经 convertToLlm 透传直达 provider 是不可重试的 400，打断反钉死会话
+      for (const leftover of await finalizeAbortedRemaining(toolCalls.slice(i + 1), emit)) {
+        finalized.push(leftover);
+        await emitToolResultMessage(toolResultMessageOf(leftover), emit);
+      }
+      break;
     }
   }
   return { messages: finalized.map(toolResultMessageOf), terminate: shouldTerminate(finalized) };
@@ -561,7 +590,8 @@ async function executeConcurrently(
   emit: AgentEventSink,
 ): Promise<ToolBatch> {
   const entries: Array<FinalizedCall | (() => Promise<FinalizedCall>)> = [];
-  for (const toolCall of toolCalls) {
+  for (let i = 0; i < toolCalls.length; i++) {
+    const toolCall = toolCalls[i]!;
     await emit({
       type: 'tool_execution_start',
       toolCallId: toolCall.id,
@@ -577,6 +607,10 @@ async function executeConcurrently(
           () => runAndFinalizeToolCall(context, assistantMessage, preparation, config, signal, emit),
     );
     if (signal?.aborted) {
+      // 已中止（打断窗 = prep 循环期）：余下调用不再准备，但必须补对（§2.4 中止
+      // 余量收尾）——已终值形态并入 entries，Promise.all 即取即得、结果消息仍走
+      // 下方源序回放（不发双份）
+      entries.push(...(await finalizeAbortedRemaining(toolCalls.slice(i + 1), emit)));
       break;
     }
   }

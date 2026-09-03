@@ -137,11 +137,21 @@ export function createSubagentsService(
        * 服务面 = Job executor：子结算（或异常兜底）落 Job 终态；
        * Job cancel → abort signal 接 execution.dispose（cancel 即子收工）。
        * 结算序（§6.4 落码注记）：settle → onSettle → dispose——通知先于子所有权释放。 */
-      const { handle, signal, settle } = opts.jobs.create({
-        kind: 'subagent',
-        ...(request.ownerSessionId !== undefined ? { ownerSessionId: request.ownerSessionId } : {}),
-        ...(request.label !== undefined ? { label: request.label } : {}),
-      });
+      let created;
+      try {
+        created = opts.jobs.create({
+          kind: 'subagent',
+          ...(request.ownerSessionId !== undefined ? { ownerSessionId: request.ownerSessionId } : {}),
+          ...(request.label !== undefined ? { label: request.label } : {}),
+        });
+      } catch (err) {
+        // 接线失败回滚（§6.2 补裁，全面复盘 20260903 #8）：provider.start 已 fork 子
+        // 执行体、create 抛错（owner 帽满/作用域已 dispose）——泄漏的执行体无结算
+        // 接线、token 花费无账；dispose 是 start 的逆操作，回滚后原样 rethrow
+        execution.dispose();
+        throw err;
+      }
+      const { handle, signal, settle } = created;
       if (signal.aborted)
         execution.dispose(); // 极端窗口：create 前已有人 cancel（Job 建即 stopping）
       else signal.addEventListener('abort', () => execution.dispose(), { once: true });

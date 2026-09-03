@@ -562,6 +562,65 @@ describe('工具批执行策略', () => {
   });
 });
 
+/* ---------------- 批中段中止余量收尾（全面复盘 20260903 #6） ---------------- */
+
+describe('批中段中止余量收尾（全面复盘 20260903 #6）', () => {
+  it('串行批：a 执行中打断——余下 b 必须补 tool_result（已中止，工具未执行）', async () => {
+    // 第二轮脚本响应 = aborted 终值（打断后 convertToLlm 载荷必须已配对干净，模型层不再收到悬空 tool_use）
+    const { streamFn } = scriptedStream([assistantTwoToolCalls('a', 'b'), assistantTerminal('aborted', '中止')]);
+    const controller = new AbortController();
+    const a = makeTool('a', {
+      // a 自己执行时打断：a 正常返回、b 还没轮到——修前 b 的 toolCall 悬空（裸 break）
+      execute: async () => {
+        controller.abort();
+        return { content: [{ type: 'text', text: 'a 完成' }] };
+      },
+    });
+    const b = makeTool('b');
+    const result = await startRun([userMsg('go')], makeContext([a, b]), baseConfig(streamFn), {
+      signal: controller.signal,
+    });
+    // messages 序：user → assistant(双 toolCall) → toolResult(a) → toolResult(b 余量收尾)
+    // 修前 messages[3] 是 aborted 终值 assistant（b 悬空直达下轮）——asToolResult 的 role 断言即红
+    const leftover = asToolResult(result.messages[3]);
+    expect(leftover.toolCallId).toBe('call-2');
+    expect(leftover.isError).toBe(true);
+    expect(JSON.stringify(leftover.content)).toContain('已中止，工具未执行');
+    // b 从未执行（余量收尾是记账补对，不是执行）
+    expect(result.messages[2] && result.messages[2].role).toBe('toolResult');
+  });
+
+  it('并行批：prep 循环中打断——余下 b 必须补 tool_result（已中止，工具未执行）', async () => {
+    const { streamFn } = scriptedStream([assistantTwoToolCalls('a', 'b'), assistantTerminal('aborted', '中止')]);
+    const controller = new AbortController();
+    const log: string[] = [];
+    // 门闩：beforeToolCall 挂起，直到我们放行——打断必须落在 prep 循环窗内（执行段
+    // 打断不进 break：preps 在 Promise.all 前已全部完成，无余量可言）
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const a = makeTool('a');
+    const b = makeTool('b');
+    const config = baseConfig(streamFn, {
+      toolExecution: 'parallel',
+      beforeToolCall: async () => {
+        log.push('before');
+        await gate; // 挂起首个 prep——打断窗可控
+      },
+    });
+    const running = startRun([userMsg('go')], makeContext([a, b]), config, { signal: controller.signal });
+    await until(() => log.includes('before')); // 首个 prep 已进 beforeToolCall
+    controller.abort(); // 此刻 a 的 prep 返回 immediate-aborted、b 还在待 prep——修前 b 悬空
+    release!();
+    const result = await running;
+    const leftover = asToolResult(result.messages[3]);
+    expect(leftover.toolCallId).toBe('call-2');
+    expect(leftover.isError).toBe(true);
+    expect(JSON.stringify(leftover.content)).toContain('已中止，工具未执行');
+  });
+});
+
 /* ---------------- prepareNextTurn / shouldStopAfterTurn / 边界回调 ---------------- */
 
 describe('turn 边界回调', () => {
