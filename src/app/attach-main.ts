@@ -293,7 +293,12 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
 
   /* ---- 审批卡（应答器政策单点——createApprovalAnswerer；decided 镜像 → per-ask signal 收场） ---- */
   const answerer = createApprovalAnswerer({
-    confirm: (message, opts) => tui.ui().confirm?.(message, opts) ?? Promise.resolve(undefined),
+    // TUI backend 恒实现 confirm（tui.ts UiBackend 实装——可选性是通道能力面
+    // 契约，TUI 通道必有此件）。原 `?. ?? Promise.resolve(undefined)` 兜底腿
+    // 两不可达 + 方向性危险（TUI 第十一轮盲区 4 刀四）：真触发时 undefined →
+    // 应答器内 ?? false → reject——用户没见过的审批被静默代拒（正确语义 = 留
+    // daemon 侧待决，与 quitting 收场同款）；直呼钉死不变式，兜底分支不存在
+    confirm: (message, opts) => tui.ui().confirm!(message, opts),
     notify: notifyUi,
     decide: (approvalId, decision) => decideApproval(port, token, approvalId, decision),
     isQuitting: () => quitting,
