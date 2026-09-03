@@ -14,7 +14,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { canonicalize, serializeWrites } from '../tools/fs.js';
 import { AppError } from '../contracts/errors.js';
 import { restoreWorkspace } from './restore.js';
-import { hashContent, newManifestId, writeBlob, type CheckpointManifest } from './store.js';
+import { executePrune } from './snapshot.js';
+import { hashContent, newManifestId, writeBlob, writeManifest, type CheckpointManifest } from './store.js';
 
 /** 数据根（blob 仓共享，结束后整体清除） */
 let dataRoot: string;
@@ -47,6 +48,8 @@ describe('restoreWorkspace（写串行链义务——遗漏大扫 20260901-c #5�
         newBytes: v1.length,
         totalBytes: v1.length,
       };
+      // A1 起恢复锁内核验 manifest 在场性——夹具须把目标 manifest 落盘
+      await writeManifest(dataRoot, target);
       // 现场态：a.txt 已是 v2（将被回退覆写的受害者）
       writeFileSync(join(ws, 'a.txt'), 'v2-现场内容');
 
@@ -104,6 +107,7 @@ describe('restoreWorkspace（写串行链义务——遗漏大扫 20260901-c #5�
         newBytes: v1.length,
         totalBytes: v1.length,
       };
+      await writeManifest(dataRoot, target); // A1 在场性核验——夹具落盘
       // 现场态：a.txt = v2（若校验缺席，撕裂数据将覆写此文件——修前形态）
       writeFileSync(join(ws, 'a.txt'), 'v2-现场内容');
 
@@ -146,6 +150,7 @@ describe('restoreWorkspace（段内目标漂移重验——遗漏大扫 20260902
         newBytes: v1.length,
         totalBytes: v1.length,
       };
+      await writeManifest(dataRoot, target); // A1 在场性核验——夹具落盘
       writeFileSync(join(ws, 'a.txt'), 'v2-现场内容');
       // 区外受害目标必须**存在**（canonicalize 对指向不存在目标的符号链走祖先
       // 回退拼尾段——与原键同串检不出漂移；指向存在文件时 realpath 穿透解析
@@ -203,6 +208,7 @@ describe('restoreWorkspace（恢复段物理写序——遗漏大扫 20260902-c 
         newBytes: v1.length,
         totalBytes: v1.length,
       };
+      await writeManifest(dataRoot, target); // A1 在场性核验——夹具落盘
 
       // T0 定键（sub 不存在——canonicalize 祖先回退拼尾段）→ 占链 → 恢复入队
       const key = await canonicalize(join(ws, 'sub', 'deep', 'inner.txt'));
@@ -264,6 +270,7 @@ describe('restoreWorkspace（遗留检测枚举语义——遗漏大扫 20260902
         newBytes: v1.length + giBuf.length,
         totalBytes: v1.length + giBuf.length,
       };
+      await writeManifest(dataRoot, target); // A1 在场性核验——夹具落盘
 
       // 现场态：快照后的真实新建（new-after.txt）+ 捕获各剪枝面覆盖的在场路径
       writeFileSync(join(ws, 'new-after.txt'), '快照后新建');
@@ -277,6 +284,131 @@ describe('restoreWorkspace（遗留检测枚举语义——遗漏大扫 20260902
       // 由 checkpoint-stack.test 的接线级用例覆盖）
       const report = await restoreWorkspace(ws, dataRoot, target, ['secret.key']);
       expect(report.leftovers).toEqual(['new-after.txt']); // 修前红：五路全误报
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('restoreWorkspace（恢复读锁与在场性核验——第十一轮遗漏大扫 20260904-b A1）', () => {
+  it('恢复在飞时并发 executePrune 排队：目标 blob 全程不被扫删（修前：清孤插进恢复中段删 manifest+blob → readBlob ENOENT 半事务）', async () => {
+    // 修前形态：恢复是 blob 仓读写锁的唯一无锁消费者——恢复中段（逐路径
+    // readBlob 的 await 窗）并发清孤把目标 manifest 判弃后扫删其独占 blob，
+    // 恢复 ENOENT 整体抛错但**部分文件已覆写**（半事务：工作区两不沾且回执
+    // 谎称「快照保留」）。修后：恢复全程持共享读锁，清孤独占排队到恢复收场。
+    // 编舞：占住 a.txt 的写串行链把恢复挡在链上（读锁已持）——清孤在此期间
+    // 发起；修后其 withWrite 排队（写者优先只挡新读者，不抢在飞读者）。
+    const ws = mkdtempSync(join(tmpdir(), 'checkpoint-restore-rwlock-'));
+    try {
+      // 两文件两独占 blob（内容寻址仓跨用例共享——内容取本用例唯一串）
+      const vA = Buffer.from('v1-A-恢复读锁');
+      const vB = Buffer.from('v1-B-恢复读锁');
+      const ha = hashContent(vA);
+      const hb = hashContent(vB);
+      await writeBlob(dataRoot, ha, vA);
+      await writeBlob(dataRoot, hb, vB);
+      const target: CheckpointManifest = {
+        id: newManifestId(),
+        sessionId: 'sess-restore-rwlock-test',
+        time: 1755900000000,
+        triggerTool: 'write',
+        guard: false,
+        forkSeq: null,
+        triggerText: null,
+        files: [
+          { rel: 'a.txt', hash: ha, size: vA.length, mtimeMs: 1, mode: 0o644 },
+          { rel: 'b.txt', hash: hb, size: vB.length, mtimeMs: 1, mode: 0o644 },
+        ],
+        skipped: [],
+        newBytes: vA.length + vB.length,
+        totalBytes: vA.length + vB.length,
+      };
+      await writeManifest(dataRoot, target);
+      writeFileSync(join(ws, 'a.txt'), 'v2-A');
+      writeFileSync(join(ws, 'b.txt'), 'v2-B');
+
+      // 同键先占链（恢复的 serializeWrites 排队其后——读锁在此前已握）
+      const key = await canonicalize(join(ws, 'a.txt'));
+      let release!: () => void;
+      const holder = serializeWrites([key], () => new Promise<void>((r) => (release = r)));
+      const restoring = restoreWorkspace(ws, dataRoot, target, []);
+      await new Promise((resolve) => setTimeout(resolve, 20)); // 恢复持锁入链等待
+
+      // 并发清孤（兄弟会话 doCapture 尾部顺手裁剪形态）：弃本目标 → 锁内重读 → 扫孤
+      const pruning = executePrune(dataRoot, [target]).catch(() => undefined);
+
+      // 红锚分岔：修前（恢复无锁）清孤立即获准——blob 被实删（轮询早退）；
+      // 修后清孤排队——blob 恒在场（轮询 600ms 到期）。两形都确定性
+      const blobA = join(dataRoot, 'blobs', ha.slice(0, 2), ha);
+      for (let i = 0; i < 60 && existsSync(blobA); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      release(); // 放链——恢复收场（修后 blob 全程在场）→ 读锁释放 → 清孤才跑
+      await holder;
+      const report = await restoring; // 修前红：a.txt 的 blob 已删 → readBlob ENOENT 抛错
+      expect(report.restored).toBe(2);
+      expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('v1-A-恢复读锁');
+      expect(readFileSync(join(ws, 'b.txt'), 'utf8')).toBe('v1-B-恢复读锁');
+      await pruning;
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('锁内核验 manifest 在场性：目标已被裁剪 → 零字节写过 + 点名已被裁剪（修前：共享 blob 先覆写 → 独占 blob ENOENT 半事务）', async () => {
+    // 锁外选标窗（/rewind 清单读取 → 恢复起点）内目标可已被裁剪：manifest 已删、
+    // 独占 blob 已扫、共享 blob 仍在。修前恢复照跑——f0（blob 被幸存 manifest
+    // 共享、仍在盘）先覆写、f1（独占 blob 已删）ENOENT 中止：工作区两不沾。
+    // 修后：锁内 stat 目标 manifest 缺场即整体拒（零字节写过、点名已被裁剪）。
+    const ws = mkdtempSync(join(tmpdir(), 'checkpoint-restore-gone-'));
+    try {
+      const vA = Buffer.from('v1-A-已裁剪共享');
+      const vB = Buffer.from('v1-B-已裁剪独占');
+      const ha = hashContent(vA);
+      const hb = hashContent(vB);
+      await writeBlob(dataRoot, ha, vA);
+      await writeBlob(dataRoot, hb, vB);
+      // 幸存 manifest 只引用 ha；target 不落盘（已被裁剪）+ 独占 blob 已被扫
+      const survivor: CheckpointManifest = {
+        id: newManifestId(),
+        sessionId: 'sess-restore-gone-survivor',
+        time: 1755900000000,
+        triggerTool: 'write',
+        guard: false,
+        forkSeq: null,
+        triggerText: null,
+        files: [{ rel: 'f0.txt', hash: ha, size: vA.length, mtimeMs: 1, mode: 0o644 }],
+        skipped: [],
+        newBytes: vA.length,
+        totalBytes: vA.length,
+      };
+      await writeManifest(dataRoot, survivor);
+      rmSync(join(dataRoot, 'blobs', hb.slice(0, 2), hb), { force: true });
+      const target: CheckpointManifest = {
+        id: newManifestId(),
+        sessionId: 'sess-restore-gone-test',
+        time: 1755900000000,
+        triggerTool: 'write',
+        guard: false,
+        forkSeq: null,
+        triggerText: null,
+        files: [
+          { rel: 'f0.txt', hash: ha, size: vA.length, mtimeMs: 1, mode: 0o644 },
+          { rel: 'f1.txt', hash: hb, size: vB.length, mtimeMs: 1, mode: 0o644 },
+        ],
+        skipped: [],
+        newBytes: vA.length + vB.length,
+        totalBytes: vA.length + vB.length,
+      };
+      writeFileSync(join(ws, 'f0.txt'), '现场-f0');
+      writeFileSync(join(ws, 'f1.txt'), '现场-f1');
+
+      const err = await restoreWorkspace(ws, dataRoot, target, []).catch((e: unknown) => e);
+      expect((err as Error).message).toContain('已被裁剪'); // 修前红：raw ENOENT 文案
+      // 零字节写过（半事务免疫）——修前红：f0 已被覆写为快照内容后才在 f1 ENOENT
+      expect(readFileSync(join(ws, 'f0.txt'), 'utf8')).toBe('现场-f0');
+      expect(readFileSync(join(ws, 'f1.txt'), 'utf8')).toBe('现场-f1');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

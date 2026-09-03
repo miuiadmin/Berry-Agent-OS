@@ -237,6 +237,10 @@ export async function listAllManifests(dataRoot: string, logger?: Pick<AppLogger
  * （blob 与 manifest 全落、注册已注销）——任何「读清单 ∪ 读守门集」的快照组合都
  * 看不见它。现行执法 = per 数据根读写锁统一模型（初版注册表整体退役）：
  *   - 捕获持共享（captureSnapshot 全程——捕获间互相同行，并发是结构常态）；
+ *   - 恢复亦持共享（restoreWorkspace 全程，第十一轮遗漏大扫 20260904-b A1 补裁
+ *     ——第三消费面：/rewind 文件恢复是 blob 的第二读者，无锁时恢复中段并发清孤
+ *     可扫删目标独占 blob，readBlob 中途 ENOENT 成半事务〔部分文件已覆写〕；锁内
+ *     并核验目标 manifest 在场性——在场 ⇒ blob 生存〔白名单不变式〕，缺场即拒）；
  *   - 清孤独占且临界段覆盖三步一气：删弃项 manifest → 重读全局清单视图 → 扫删；
  *   - 互斥之下「清单盘面」成为唯一真相源且线性化——清孤起扫前一切在飞捕获已
  *     收场（其 manifest 已入锁内重读的白名单），重读结果不再陈旧。
@@ -305,7 +309,7 @@ function blobStoreLock(dataRoot: string): BlobStoreRwLock {
   return lock;
 }
 
-/** 捕获临界段入口（captureSnapshot 全程持共享——manifest 与 blob 落盘一气） */
+/** 捕获临界段入口（captureSnapshot 全程持共享——manifest 与 blob 落盘一气；恢复同持共享——restoreWorkspace 全程，第三消费面〔A1〕） */
 export function withBlobStoreRead<T>(dataRoot: string, fn: () => Promise<T>): Promise<T> {
   return blobStoreLock(dataRoot).withRead(fn);
 }

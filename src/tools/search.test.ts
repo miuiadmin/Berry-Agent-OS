@@ -176,3 +176,35 @@ describe('grep — 正则内容扫描', () => {
     }
   });
 });
+
+describe('find — 嵌套 .gitignore 锚定判据（第十一轮遗漏大扫 20260904-b B4）', () => {
+  it('纯 basename 模式深层同剪；含斜杠模式锚定本层不误剪深层（修前：basename 直拼前缀 → 深层漏配——同形副本）', async () => {
+    // git 锚定语义（契约篇 §4.4 判据——L-3 只修了 discovery.ts，本件漏修）：
+    // 纯 basename（build）须前缀化插 '**/' 保深层同配；含斜杠（docs/gen）锚定
+    // 本层不外溢。修前直拼前缀：sub/x/build/deep.ts 漏配仍进检索结果。
+    const ws = await mkdtemp(join(tmpdir(), 'berry-search-nested-'));
+    try {
+      await mkdir(join(ws, 'sub', 'build'), { recursive: true });
+      await mkdir(join(ws, 'sub', 'x', 'build'), { recursive: true });
+      await mkdir(join(ws, 'sub', 'docs', 'gen'), { recursive: true });
+      await mkdir(join(ws, 'sub', 'x', 'docs', 'gen'), { recursive: true });
+      await writeFile(join(ws, 'sub', '.gitignore'), 'build\ndocs/gen\n', 'utf8');
+      await writeFile(join(ws, 'sub', 'build', 'direct.ts'), 'x', 'utf8');
+      await writeFile(join(ws, 'sub', 'x', 'build', 'deep.ts'), 'x', 'utf8');
+      await writeFile(join(ws, 'sub', 'docs', 'gen', 'a.ts'), 'x', 'utf8');
+      await writeFile(join(ws, 'sub', 'x', 'docs', 'gen', 'b.ts'), 'x', 'utf8');
+      await writeFile(join(ws, 'sub', 'keep.ts'), 'x', 'utf8');
+      const search = createSearchTools({ workspace: () => ws });
+      const find = search.tools.find((t) => t.name === 'find')!;
+      const result = await find.execute({ pattern: 'sub/**/*.ts' }, { toolCallId: 'tc' });
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).not.toContain('sub/build/direct.ts'); // 本层（两形同剪）
+      expect(text).not.toContain('sub/x/build/deep.ts'); // 修前红：深层漏配
+      expect(text).not.toContain('sub/docs/gen/a.ts'); // 含斜杠锚定本层（两形同剪）
+      expect(text).toContain('sub/x/docs/gen/b.ts'); // 深层不剪（防过度拦截对照）
+      expect(text).toContain('sub/keep.ts');
+    } finally {
+      await rm(ws, { recursive: true, force: true });
+    }
+  });
+});

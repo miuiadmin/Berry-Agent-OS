@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureSnapshot, executePrune, prunePlan, type PruneOptions } from './snapshot.js';
+import { captureSnapshot, executePrune, listPrunedRelPaths, prunePlan, type PruneOptions } from './snapshot.js';
 import { canonicalize, serializeWrites } from '../tools/fs.js';
 import { DEFAULT_EXCLUDE } from './app.js';
 import {
@@ -512,6 +512,39 @@ describe('executePrune：清孤竞速收口（全面复盘 20260903 #1）', () =
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(store, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('gitignore 前缀化锚定判据（第十一轮遗漏大扫 20260904-b CB1）', () => {
+  it('嵌套 .gitignore 纯 basename 模式深层同剪 + 含斜杠模式锚定本层（修前：basename 被直拼前缀 → 深层漏配——同形第三副本）', async () => {
+    // git 锚定语义（契约篇 §4.4 判据——L-3 只修了 discovery.ts，本件漏修）：
+    // 纯 basename 模式（build）= 所在目录子树任意深度匹配——前缀化须插 '**/'
+    //（sub/**/build 同配 sub/build 与 sub/x/build）；含斜杠模式（docs/gen）=
+    // 锚定本层精确匹配（sub/docs/gen 只配本层，不配 sub/x/docs/gen）。
+    // 修前直拼前缀：sub/build 锚定形 → sub/x/build/deep.txt 漏配仍入快照面。
+    const ws = mkdtempSync(join(tmpdir(), 'checkpoint-gitignore-anchor-'));
+    try {
+      mkdirSync(join(ws, 'sub', 'build'), { recursive: true });
+      mkdirSync(join(ws, 'sub', 'x', 'build'), { recursive: true });
+      mkdirSync(join(ws, 'sub', 'docs', 'gen'), { recursive: true });
+      mkdirSync(join(ws, 'sub', 'x', 'docs', 'gen'), { recursive: true });
+      writeFileSync(join(ws, 'sub', '.gitignore'), 'build\ndocs/gen\n');
+      writeFileSync(join(ws, 'sub', 'build', 'direct.txt'), 'a');
+      writeFileSync(join(ws, 'sub', 'x', 'build', 'deep.txt'), 'a');
+      writeFileSync(join(ws, 'sub', 'docs', 'gen', 'a.txt'), 'a');
+      writeFileSync(join(ws, 'sub', 'x', 'docs', 'gen', 'b.txt'), 'a');
+      writeFileSync(join(ws, 'sub', 'keep.txt'), 'a');
+
+      const rels = await listPrunedRelPaths(ws, []);
+      expect(rels.has('sub/build/direct.txt')).toBe(false); // 本层（修前修后同剪）
+      expect(rels.has('sub/x/build/deep.txt')).toBe(false); // 修前红：深层漏配
+      expect(rels.has('sub/docs/gen/a.txt')).toBe(false); // 含斜杠锚定本层（两形同剪）
+      expect(rels.has('sub/x/docs/gen/b.txt')).toBe(true); // 深层不剪（防过度拦截对照）
+      expect(rels.has('sub/keep.txt')).toBe(true);
+      expect(rels.has('sub/.gitignore')).toBe(true);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
     }
   });
 });
