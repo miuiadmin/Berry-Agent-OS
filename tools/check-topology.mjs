@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：27 模块单向 DAG——各批随落码
- * 入册，席清单与入册史见内核篇 §4.1 模块表；27 席全有码）。
+ * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：28 模块单向 DAG——各批随落码
+ * 入册，席清单与入册史见内核篇 §4.1 模块表；28 席全有码）。
  *
  * 两条规则 + 一条公开面数字锚（2026-09-01 复盘 G-3 根治——「模块增行不滚计数」
  * 第五起漂移后，模块计数宣称面收进本器机器对照）：
@@ -103,6 +103,11 @@ const MODULE_EDGES = {
   // assertPublicHost/requireHttpUrl 复用同码第三消费面）。spawn/kill/桥核/
   // 登记簿全经组合根闭包注入（app/browser-spawn.ts）——结构上不见 exec/mcp/context
   browser: ['contracts', 'web', 'persist'],
+  // desktop = 自研桌面 TUI 渲染引擎（技术栈篇 §4.5，2026-09-03 第八十五批批B）：
+  // 纯机制零业务智能——cell 差分/Renderable 协商/输入解码（kitty+legacy 双轨）/
+  // CJK 双件/换防收口面。零跨模块 import（渲染树根与 IO 由组合根/壳层注入，
+  // 批 C 接线）——空边席（contracts 单边都不需要：事件类型全模块内自洽）
+  desktop: [],
   app: [
     'contracts',
     'context',
@@ -170,6 +175,9 @@ const BARE_IMPORTS = {
   yaml: ['app', 'skills'],
   ignore: ['skills', 'tools', 'checkpoint', 'webui'], // tools = 检索族 gitignore 遍历（2026-08-25 检索族纵切）；checkpoint = 工作区快照 DFS 遍历（2026-08-30 会话篇 §5.3——CR-10 语义同源不共享，第四消费者仍再议）；webui = @-mention 文件补全行走（2026-08-30 契约篇 §6.8 刀三）
   jiti: ['context'],
+  // get-east-asian-width = 列宽唯一真相源（技术栈篇 §4.5 十一律第 9 条——desktop
+  // CJK 双件；产码引用面 = width.ts 单文件）
+  'get-east-asian-width': ['desktop'],
 };
 /** 裸导入白名单·测试账：包名 → 仅测试文件可引用的模块（产码引用即违规——两账分离的对价面）
  * 测试夹具的设计性引用（loader fixture 装载面 / 狗粮件虚拟面键）住此，不再混进产码账
@@ -179,6 +187,9 @@ const TEST_BARE_IMPORTS = {
   typebox: ['app'],
   // loader.test fixture 源码引用虚拟模块名（装载面设计而非漂移）
   berryagent: ['context'],
+  // @xterm/headless = oracle 测试第二真相源（技术栈篇 §4.5 十一律第 10 条——
+  // oracle.test.ts 终端仿真器对照；仅测试引用，产码零依赖）
+  '@xterm/headless': ['desktop'],
 };
 const TEST_ONLY_BARE = new Set(['vitest']);
 

@@ -29,7 +29,7 @@ Ce n'est pas de la science-fiction. C'est l'objectif de conception de Berry : **
 
 Le noyau minimal de Berry fait exactement **installer, exécuter, protéger, stocker** ; tout le reste — conversation, agent de code, mémoire, objectifs longs, tâches planifiées, MCP, LSP, observabilité, interface web — se charge comme **application** sur l'arbre de composition. **Installable, déchargeable, remplaçable** — tandis que les cinq lignes de vie de votre Agent (identifiants, mémoire, historique de confiance, budgets, registres) ne s'accumulent qu'une seule fois. **Nouveau cerveau, même corps.**
 
-**27** modules (tous implémentés) · **27** crochets de cycle de vie · **26** types d'événements durables · **15** pièces officielles (14 Ring 2 + l'application par défaut berrycode, chacune déchargeable) · **2 700+** tests · **0** télémétrie.
+**28** modules (tous implémentés) · **27** crochets de cycle de vie · **26** types d'événements durables · **15** pièces officielles (14 Ring 2 + l'application par défaut berrycode, chacune déchargeable) · **2 700+** tests · **0** télémétrie.
 
 **Objectif plancher : la couche par défaut d'usine atteint le niveau d'usage quotidien de Codex / Claude Code.**
 
@@ -84,7 +84,7 @@ Bien, assez de romantisme. **Maintenant l'acier et le fer.**
             ┌─────────────────────────────────────────────┐
             │  Noyau fixe (Ring 0) : installer · exécuter │
             │  · protéger · stocker — DAG unidirectionnel │
-            │  de 27 modules, verrouillé par machine      │
+            │  de 28 modules, verrouillé par machine      │
             └──────────────────┬──────────────────────────┘
                                │ arbre de composition (couche par défaut + overlay.yaml)
         ┌─────────────┬──────────┬──────────────┬───────────┐
@@ -125,7 +125,7 @@ Le premier lancement crée le répertoire de données dans `~/.berry/`. Le modè
 
 ### Noyau
 
-- **DAG unidirectionnel de 27 modules** : tous implémentés, surveillés par `npm run lint:topology` — rien de central au-delà d'installer/exécuter/protéger/stocker, non déchargeable.
+- **DAG unidirectionnel de 28 modules** : tous implémentés, surveillés par `npm run lint:topology` — rien de central au-delà d'installer/exécuter/protéger/stocker, non déchargeable.
 - **Modèle à trois anneaux** : Ring 0 (noyau, fixe) → Ring 1 (lignes requises, remplaçables) → Ring 2 (ensemble officiel, chaque pièce déchargeable) → Ring 3 (écosystème tiers).
 
 ### Sessions et données

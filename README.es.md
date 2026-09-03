@@ -29,7 +29,7 @@ Esto no es ciencia ficción. Es el objetivo de diseño de Berry: **un sistema op
 
 El kernel mínimo de Berry hace exactamente **instalar, ejecutar, proteger, almacenar**; todo lo demás — conversación, agente de código, memoria, objetivos largos, tareas programadas, MCP, LSP, observabilidad, interfaz web — se carga como **aplicación** sobre el árbol de composición. **Instalable, desinstalable, reemplazable** — mientras las cinco líneas de vida de tu Agent (credenciales, memoria, historial de confianza, presupuestos, libros de cuenta) se acumulan una sola vez. **Cerebro nuevo, mismo cuerpo.**
 
-**27** módulos (todos con código) · **27** ganchos de ciclo de vida · **26** tipos de eventos durables · **15** piezas oficiales (14 de Ring 2 + la aplicación por defecto berrycode, todas desinstalables) · **2.700+** pruebas · **0** telemetría.
+**28** módulos (todos con código) · **27** ganchos de ciclo de vida · **26** tipos de eventos durables · **15** piezas oficiales (14 de Ring 2 + la aplicación por defecto berrycode, todas desinstalables) · **2.700+** pruebas · **0** telemetría.
 
 **Objetivo mínimo: la capa por defecto de fábrica alcanza el nivel de uso diario de Codex / Claude Code.**
 
@@ -84,7 +84,7 @@ Bien, basta de romance. **Ahora el acero y el hierro.**
             ┌─────────────────────────────────────────────┐
             │  Kernel fijo (Ring 0): instalar · ejecutar  │
             │  · proteger · almacenar — DAG unidireccional│
-            │  de 27 módulos, vigilado por máquina        │
+            │  de 28 módulos, vigilado por máquina        │
             └──────────────────┬──────────────────────────┘
                                │ árbol de composición (capa por defecto + overlay.yaml)
         ┌─────────────┬──────────┬──────────────┬───────────┐
@@ -125,7 +125,7 @@ El primer arranque crea el directorio de datos en `~/.berry/`. El modelo por def
 
 ### Kernel
 
-- **DAG unidireccional de 27 módulos**: todos con código, vigilados por `npm run lint:topology` — nada central más allá de instalar/ejecutar/proteger/almacenar, no desinstalable.
+- **DAG unidireccional de 28 módulos**: todos con código, vigilados por `npm run lint:topology` — nada central más allá de instalar/ejecutar/proteger/almacenar, no desinstalable.
 - **Modelo de tres anillos**: Ring 0 (kernel, fijo) → Ring 1 (filas requeridas, reemplazables) → Ring 2 (paquete oficial, cada pieza desinstalable) → Ring 3 (ecosistema de terceros).
 
 ### Sesiones y datos

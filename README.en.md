@@ -29,7 +29,7 @@ This is not science fiction. This is Berry's design goal: **an operating system 
 
 Berry's minimal kernel does exactly **install, run, guard, store**; everything else — conversation, coding agent, memory, long goals, scheduled tasks, MCP, LSP, observability, web UI — loads as an **application** on the composition tree. **Installable, unloadable, replaceable** — while your Agent's five lifelines (credentials, memory, trust history, budgets, ledgers) accumulate only once. Every app grows on the same state — **new brain, same body**.
 
-**27** modules (all implemented) · **27** lifecycle hooks · **26** durable event types · **15** official bundle pieces (14 Ring 2 + default berrycode app, each unloadable) · **2,700+** tests · **0** telemetry.
+**28** modules (all implemented) · **27** lifecycle hooks · **26** durable event types · **15** official bundle pieces (14 Ring 2 + default berrycode app, each unloadable) · **2,700+** tests · **0** telemetry.
 
 **Floor goal: the factory default layer ships at the daily-usable level of Codex / Claude Code.**
 
@@ -84,7 +84,7 @@ Alright, enough romance. **Now the steel and iron.**
 ```text
             ┌─────────────────────────────────────────────┐
             │  Fixed kernel (Ring 0): install · run ·     │
-            │  guard · store — 27-module one-way DAG,     │
+            │  guard · store — 28-module one-way DAG,     │
             │  machine-gated, not unloadable              │
             └──────────────────┬──────────────────────────┘
                                │ composition tree (default layer + overlay.yaml)
@@ -126,7 +126,7 @@ First launch creates the data directory at `~/.berry/`. The default model is `an
 
 ### Kernel
 
-- **27-module one-way DAG**: all implemented, machine-enforced by `npm run lint:topology` — no central anything beyond install/run/guard/store, not unloadable.
+- **28-module one-way DAG**: all implemented, machine-enforced by `npm run lint:topology` — no central anything beyond install/run/guard/store, not unloadable.
 - **Three-ring assembly**: Ring 0 (kernel, fixed) → Ring 1 (required rows, replaceable) → Ring 2 (official bundle, each unloadable) → Ring 3 (third-party ecosystem).
 
 ### Sessions & Data
