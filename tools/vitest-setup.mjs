@@ -24,8 +24,9 @@
  * spawn 子进程测试继承 env）会直写操作者真库，「外层 env 一并隔离」的承诺
  * 只兑现了一半。修法同统一模型：无条件 delete（delete 而非覆写——显式
  * set/restore 测试对的 prev=undefined、restore 即 delete，语义更干净）。
- * GIT_INDEX_FILE 同笔（第五十三批 pathspec 提交向钩子导出的夹具泄漏事故族——
- * 局部密封已有，全局 delete 把事故面收死）。
+ * GIT_* 同笔取全家前缀式（第五十三批 pathspec 提交向钩子导出的夹具泄漏
+ * 事故族；f9117046 补刀先密封 check-api-pr-gate 单点，第九十一批全面复盘刀二
+ * 升级全家——git 钩子导出的远不止 GIT_INDEX_FILE 一键，见下方实现注）。
  */
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,9 +38,16 @@ import { afterAll } from 'vitest';
 process.env['APP_DATA_DIR'] = mkdtempSync(join(realpathSync(tmpdir()), 'berry-vitest-data-'));
 
 // #47 密封另一半：优先级更高的直通车与钩子夹具泄漏源无条件 delete——
-// 外层残留即测试写真库/真 git 索引，与「确定性优先」承诺补齐
+// 外层残留即测试写真库/真 git 索引，与「确定性优先」承诺补齐。
+// GIT_* 取全家前缀式而非点名：git 钩子向子进程导出的远不止 GIT_INDEX_FILE
+// 一键（GIT_DIR/GIT_WORK_TREE/GIT_AUTHOR_* 全族），穿 npm→vitest→spawnSync
+// 传递后，测试内 spawn 的 git 会被 GIT_DIR 劫持仓定位——错读错写宿主仓
+// （gates-infra 的 install-hooks 探针即中招面：config 会写进宿主仓）。
+// 点名 delete 永远追着 git 的导出键清单跑——前缀循环一次把事故面收死
 delete process.env['APP_DB_PATH'];
-delete process.env['GIT_INDEX_FILE'];
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith('GIT_')) delete process.env[key];
+}
 
 // #16 per-file 清理：本文件收场（该测试文件全部用例结束）即删自己的临时根。
 // force 容忍「测试把目录内文件还开着」的边缘形态；同文件 spawn 的子进程测试

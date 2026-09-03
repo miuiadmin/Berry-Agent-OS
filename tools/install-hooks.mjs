@@ -17,9 +17,18 @@
 
 import { spawnSync } from 'node:child_process';
 
-/** 在 cwd 起 git 查询：返回 [成功与否, stdout 尾去空白] */
+/**
+ * 剥离 GIT_* 前缀环境（git 钩子泄漏面防线——check-api-pr-gate.mjs 同律）：
+ * prepare 脚本可能嵌在 git 操作的子壳环境内被调（npm install 由钩子/工具链
+ * 触发的边缘形态），宿主 git 导出的 GIT_DIR/GIT_WORK_TREE 会劫持下方
+ * rev-parse/config 的仓定位——把 core.hooksPath 错写进宿主仓而非 cwd 仓。
+ * 剥净后按 cwd 解析目标仓。
+ */
+const cleanGitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+
+/** 在 cwd 起 git 查询：返回 [成功与否, stdout 尾去空白]；env 剥 GIT_* 防钩子环境错仓 */
 function git(args) {
-  const r = spawnSync('git', args, { encoding: 'utf8' });
+  const r = spawnSync('git', args, { encoding: 'utf8', env: cleanGitEnv() });
   return [r.status === 0, String(r.stdout ?? '').trim()];
 }
 
