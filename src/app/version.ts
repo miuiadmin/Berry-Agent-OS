@@ -12,7 +12,7 @@
  *   4.x Liangzhu（良渚）· 5.x Erlitou（二里头）· 6.x Sanxingdui（三星堆）
  *   7.x Yinxu（殷墟）
  */
-export const VERSION = '1.0.0-alpha.0';
+export const VERSION = '1.0.0-alpha.1';
 
 /** 当前 major 版本的文化代号（品牌资产——--version / README 徽章 / Release 随附） */
 export const CODENAME = 'Peiligang';
