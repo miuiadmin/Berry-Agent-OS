@@ -480,7 +480,11 @@ describe('desktopMain：boot 序（起屏失败计数 / 熔断回锁 / 重试接
     expect(desktopIo.written.length).toBe(0); // 熔断态不起屏（引擎零写出）
     // /desktop 重试：好终端 → 起屏成功 → 接管 + 清账
     await sendLine('/desktop');
-    await waitForCond(() => read().includes('桌面已接管') && desktopIo.output.includes('Berry 桌面'));
+    // 静默退位（desktop D4-1，第九十二批 496227c0）：接管成功内核面零回执——
+    // 桌面首帧即交接回执（引擎已占 alt-screen，再写「桌面已接管」是视觉污染）。
+    // 等待锚换「命令回执 + 桌面首帧」双证；失败腿（继续计数的转述文案）断不出现
+    await waitForCond(() => read().includes('重试桌面起屏…') && desktopIo.output.includes('Berry 桌面'));
+    expect(read()).not.toContain('桌面起屏失败');
     expect(JSON.parse(readFileSync(bootFailuresPath(dataDir()), 'utf8'))).toEqual({
       version: currentPackageVersion(),
       count: 0,
