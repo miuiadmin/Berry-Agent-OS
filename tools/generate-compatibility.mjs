@@ -387,7 +387,10 @@ function renderDiffSection(lines, diff, apiVersion, deprecations) {
 
 /* ---------------- CLI 薄壳（--write 落盘；缺省 stdout） ---------------- */
 
-if (process.argv[1] !== undefined && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+// CLI 直跑判定（健壮形——与 extract-api-surface.mjs 同款）：URL 手拼对照在
+// 路径含 #/? 等保留字符时必错（# 截成 fragment）；resolve 对照 argv[1] 绝对
+// 化后与自身 fileURLToPath 逐字节比（遗漏大扫 20260904 #17）
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const surface = JSON.parse(readFileSync(SNAPSHOT_PATH, 'utf8'));
   const deprecations =
     process.env.CHECK_API_DEPRECATIONS !== undefined

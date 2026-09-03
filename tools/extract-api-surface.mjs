@@ -65,8 +65,17 @@ const imp = (rel) => jiti.import(fileURLToPath(new URL(rel, import.meta.url)));
  * - reexport：export { ... } from 'mod' / export * from 'mod' —— internal 时递归
  * - forwarded：reexport 目标是包说明符（typebox 族——上游承诺面，记载不承诺）
  */
-/** 单文件顶层导出扫描产物：names = 导出名 → forwarded（包说明符转发）；stars = 星出模块说明符清单一文件可多条
- * （check-api 查 2 自由符号半边消费——公开根自身的直导出形） */
+/**
+ * 单文件顶层导出扫描产物：
+ * - names = 导出名 → forwarded（包说明符转发）
+ * - stars = 星出模块说明符清单（一文件可多条；internal 由调用方递归——公开根
+ *   条目数随公开面演进，不锚定具体数字〔遗漏大扫 20260904 #18——硬编码计数
+ *   必再漂〕）
+ * - tags = 自由符号标级载体（§6.13.3 批 2 tier 载体分职）：声明形直导出名 →
+ *   紧前 JSDoc 标签（'stable'|'experimental'|'deprecated'）；无紧前 JSDoc 块或
+ *   块内无标签词 → null；转译形（具名转发/命名空间转发）不入 Map。check-api
+ *   查 2 自由符号半边与 freeSymbolTier 裁决消费
+ */
 export function scanTopLevelExports(sourceText) {
   const scanner = ts.createScanner(99 /* ESNext */, /* skipTrivia */ true);
   scanner.setText(sourceText);
@@ -98,8 +107,10 @@ export function scanTopLevelExports(sourceText) {
   };
   /** 导出名 → 转发标记（重名后者覆盖——contracts 无冲突星出，出现即真实 TS 错） */
   const names = new Map();
-  /** 星出说明符清单（一文件可多条——index.ts 即 13 条；internal 由调用方递归） */
+  /** 星出说明符清单（一文件可多条；internal 由调用方递归） */
   const stars = [];
+  /** 自由符号标级载体（仅声明形直导出——见函数头注 tags 语义） */
+  const tags = new Map();
   /** 模块级花括深度（模板栈空时才计——export 关键字只在深度 0 生效） */
   let depth = 0;
   let token = step();
@@ -120,6 +131,9 @@ export function scanTopLevelExports(sourceText) {
     else if (!inTemplate && token === ts.SyntaxKind.CloseBraceToken) depth = Math.max(0, depth - 1);
     if (token === ts.SyntaxKind.ExportKeyword && depth === 0 && !inTemplate) {
       // —— 解析一个顶层 export 语句（语句内 token 就地消费，不回流外层深度计）——
+      // export 关键字自身的源内起点（skipTrivia 下 getTokenStart 即 token 起点，
+      // 不含前导空白/注释）——声明形直导出的紧前 JSDoc 标级提取以此为锚
+      const exportStart = scanner.getTokenStart();
       const exported = [];
       let moduleSpec = null; // 非空 = reexport 形
       let star = false;
@@ -143,6 +157,10 @@ export function scanTopLevelExports(sourceText) {
           t = step();
           if (t === ts.SyntaxKind.Identifier) exported.push(text());
           t = step();
+          // 命名空间转发形到此为止（遗漏大扫 20260904 #12）：ns 本身已是面符号
+          // （运行时 barrel 仅 ns 一键可及），目标模块不再收编——目标进 stars
+          // 会被闭包递归展开成幻影面符号（目标私有导出被物化为顶层 API 面）
+          star = false;
         }
         if (t === ts.SyntaxKind.FromKeyword) {
           step(); // 'mod'
@@ -178,6 +196,11 @@ export function scanTopLevelExports(sourceText) {
         // 后者下一 token 是 {，已被上方 OpenBrace 分支的顺序兜住——此处必是声明）
         t = step();
         if (t === ts.SyntaxKind.Identifier) exported.push(text());
+        // 声明形 = 自由符号（非转译）：紧前 JSDoc 标级入 tags（§6.13.3 批 2
+        // tier 载体分职——直导出形用标签声明标级；无块/无标签词均记 null，
+        // 由查 2 逐符号执法点名，freeSymbolTier 再 fail-loud 兜底）
+        const tier = jsdocTierBefore(sourceText, exportStart);
+        for (const n of exported) tags.set(n, tier);
       }
       const forwarded = moduleSpec !== null && !moduleSpec.startsWith('.');
       for (const n of exported) names.set(n, { forwarded });
@@ -185,7 +208,30 @@ export function scanTopLevelExports(sourceText) {
     }
     token = step();
   }
-  return { names, stars };
+  return { names, stars, tags };
+}
+
+/**
+ * 取紧前 JSDoc 块的标级标签（自由符号标级载体提取——§6.13.3 批 2）。
+ * 「紧前」判据：export 关键字之前、与其只隔空白的最后一个块注释；开器取最后
+ * 出现（叠置注释时只有紧贴 export 的那块算数——前置 JSDoc 会被紧随的普通
+ * 注释截断）。块形必须是 JSDoc（双星开器）——单星普通注释形不认。
+ * @param {string} sourceText 源文件全文
+ * @param {number} exportStart export 关键字的源内起点（scanTopLevelExports 内锚）
+ * @returns {'stable'|'experimental'|'deprecated'|null} 标签词；无紧前 JSDoc 块或块内无标签词 → null
+ */
+function jsdocTierBefore(sourceText, exportStart) {
+  const before = sourceText.slice(0, exportStart);
+  const close = before.lastIndexOf('*/');
+  if (close === -1) return null; // 前文无注释块
+  // 紧前性：注释闭器与 export 之间只允许空白——夹有实码即非本声明的文档块
+  if (before.slice(close + 2).trim() !== '') return null;
+  const open = before.lastIndexOf('/*');
+  if (open === -1 || open > close) return null; // 防御：无开器或区间倒置（不可达，形状自证）
+  const block = before.slice(open, close + 2);
+  if (!block.startsWith('/**')) return null; // 紧前是普通 /* */ 注释——非 JSDoc 形不认
+  const m = block.match(/@(stable|experimental|deprecated)\b/);
+  return m === null ? null : m[1];
 }
 
 /** 字符串字面量去引号（token 文本含成对引号） */
@@ -196,32 +242,65 @@ function stripQuotes(s) {
 /**
  * 公开根传递闭包：从 index.ts 出发递归解星出/具名转发，收集全部导出符号。
  * internal（相对说明符）递归进目标文件再扫；包说明符（typebox 族）标 forwarded。
- * @returns { name: string, forwarded: boolean }[] （含直导出与转发——值与类型同收）
+ * @returns {{ symbols: { name: string, forwarded: boolean }[], rootTags: Map<string, string|null> }}
+ *   symbols 含直导出与转发（值与类型同收）；rootTags = 公开根本地声明形直导出的
+ *   JSDoc 标级载体（仅根文件采集——递归内部文件的直导出走键级，不适用标签载体）
  */
 function collectBarrelSymbols() {
   /** name → forwarded */
   const out = new Map();
+  /** 公开根声明形直导出的标级载体（tier 载体分职——§6.13.3 批 2） */
+  const rootTags = new Map();
   /** 递归防护（环 = 结构错误，fail-loud） */
   const visiting = new Set();
-  const visit = (absPath) => {
+  const visit = (absPath, isRoot) => {
     if (visiting.has(absPath)) throw new Error(`contracts 再导出成环：${absPath}`);
     visiting.add(absPath);
     const src = readFileSync(absPath, 'utf8');
-    const { names, stars } = scanTopLevelExports(src);
+    const { names, stars, tags } = scanTopLevelExports(src);
     for (const [name, info] of names) {
       out.set(name, { name, forwarded: info.forwarded === true });
+    }
+    if (isRoot) {
+      for (const [name, tier] of tags) rootTags.set(name, tier);
     }
     for (const spec of stars) {
       if (!spec.startsWith('.')) continue;
       // internal 星出：递归目标文件（'./x.js' → 同目录 x.ts；目录 → index.ts）
-      visit(resolveTsPath(dirname(absPath), spec));
+      visit(resolveTsPath(dirname(absPath), spec), false);
     }
     // 包说明符星出（export * from 'pkg'）：转发记号由具名转发条目承载，星出整体
     // 展开上游面超出豁免面（M4 不展开）——contracts 现役 typebox 走具名转发
     visiting.delete(absPath);
   };
-  visit(BARREL_PATH);
-  return [...out.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  visit(BARREL_PATH, true);
+  return {
+    symbols: [...out.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+    rootTags,
+  };
+}
+
+/**
+ * 自由符号标级裁决（§6.13.3 批 2 tier 载体分职的抽取侧兑现——遗漏大扫
+ * 20260904 #4/#5）：声明形直导出（rootTags 有键）标级 = 紧前 JSDoc 标签；
+ * 转译形（rootTags 无键——星出收编/具名转发）维持键级 tier。
+ * 标签缺席（null）= 闸面漏洞——fail-loud 拒绝静默降级键级（查 2 应已拦截，
+ * 此处是抽取侧兜底，两道执法互为印证）。
+ * @param {Map<string, string|null>} rootTags 公开根声明形直导出标级载体
+ * @param {{ name: string, forwarded: boolean }} symbol 闭包收集的单个符号
+ * @param {{ tier: string }} berryKey 键级载体（VIRTUAL_API_KEYS 的 berryagent 键）
+ * @returns {string} 该符号落快照的 tier
+ */
+export function freeSymbolTier(rootTags, symbol, berryKey) {
+  const tag = rootTags.get(symbol.name);
+  if (tag === undefined) return berryKey.tier; // 转译形——键级统治
+  if (tag === null) {
+    throw new Error(
+      `自由符号 ${symbol.name} 是公开根声明形直导出但无 @stable/@experimental/@deprecated 标签——` +
+        'check-api 查 2 应已红（逐符号执法）；抽取器拒绝静默降级键级，先补标签或改回转译形',
+    );
+  }
+  return tag;
 }
 
 /** 相对 .js 说明符 → 源 .ts 路径（目录说明符 → index.ts；.js 后缀剥换 .ts） */
@@ -261,7 +340,7 @@ export async function extractSurface() {
   const ff = (list) => [...list].sort();
 
   // —— #1a：berryagent 键（token 扫描 + jiti 值面自检）——
-  const barrelSymbols = collectBarrelSymbols();
+  const { symbols: barrelSymbols, rootTags } = collectBarrelSymbols();
   const runtimeBarrel = await imp('../src/contracts/index.ts');
   const runtimeNames = Object.keys(runtimeBarrel).sort();
   const scannedNames = new Set(barrelSymbols.map((s) => s.name));
@@ -273,7 +352,9 @@ export async function extractSurface() {
   const exports = barrelSymbols.map((s) => ({
     symbol: s.name,
     module: 'berryagent',
-    tier: berryKey.tier,
+    // 自由符号标级裁决（遗漏大扫 20260904 #4/#5）：声明形直导出走 JSDoc 标签、
+    // 转译形维持键级；标签缺席 fail-loud（查 2 先红、此处兜底）
+    tier: freeSymbolTier(rootTags, s, berryKey),
     since: berryKey.since,
     formFactors: ff(berryKey.formFactors),
     ...(s.forwarded ? { forwarded: true } : {}),

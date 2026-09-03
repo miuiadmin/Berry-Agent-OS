@@ -95,7 +95,7 @@ export function renderApiReference({ surface, deprecations }) {
   lines.push('## 能力面（capabilities）');
   lines.push('');
   lines.push(
-    '能力 = 件显式声明的语义单位（`ctx.host.capabilities` 派生源；server 形装载器按此拒载要求缺席能力的应用）。',
+    '能力 = 宿主能力目录登记的语义单位（providedBy 归因官方件；`ctx.host.capabilities` 派生源；server 形装载器按此拒载要求缺席能力的应用）。',
   );
   lines.push('');
   for (const cap of [...surface.capabilities].sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
@@ -107,7 +107,10 @@ export function renderApiReference({ surface, deprecations }) {
 
 /* ---------------- CLI 薄壳（--write 落盘；缺省 stdout） ---------------- */
 
-if (process.argv[1] !== undefined && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+// CLI 直跑判定（健壮形——与 extract-api-surface.mjs 同款）：URL 手拼对照在
+// 路径含 #/? 等保留字符时必错（# 截成 fragment）；resolve 对照 argv[1] 绝对
+// 化后与自身 fileURLToPath 逐字节比（遗漏大扫 20260904 #17）
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const jiti = createJiti(import.meta.url);
   // 注册簿装载与 generate-compatibility 同律（CHECK_API_DEPRECATIONS env 缝 + jiti
   // 真册缺省）——deprecated 符号行的 DEP 注记与查 8 渲染必须同输入，防两源分叉恒红

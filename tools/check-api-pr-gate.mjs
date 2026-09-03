@@ -24,6 +24,7 @@
  * 出口：绿静默过；红 stderr 指引 + exit 1。
  */
 import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** API 面真相文件（触其一 = 面变更 PR，须带裁决标签） */
@@ -82,7 +83,10 @@ export function adjudicatePrApiGate({ changedFiles, labels }) {
 
 /* ---------------- CLI 薄壳 ---------------- */
 
-if (process.argv[1] !== undefined && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+// CLI 直跑判定（健壮形——与 extract-api-surface.mjs 同款）：URL 手拼对照在
+// 路径含 #/? 等保留字符时必错（# 截成 fragment）；resolve 对照 argv[1] 绝对
+// 化后与自身 fileURLToPath 逐字节比（遗漏大扫 20260904 #17）
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const argv = process.argv.slice(2);
   /** --label 逐个收集（LABELS env JSON 数组优先——CI 注入形态） */
   const labels = [];

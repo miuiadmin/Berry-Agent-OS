@@ -25,7 +25,7 @@
  *
  * 出口：零问题静默过（门禁链惯例）；有问题 stderr 逐条 + exit 1。
  */
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -94,7 +94,12 @@ function walkFiles(dirRel, suffixes, out = []) {
     if (name === 'node_modules' || name === '.git' || name === 'dist') continue;
     const rel = join(dirRel, name);
     const full = join(SCAN_ROOT, rel);
-    if (statSync(full).isDirectory()) walkFiles(rel, suffixes, out);
+    // lstat 不解析链接（遗漏大扫 20260904 #13）：statSync 跟随会让扫描根外的
+    // 目录经符号链渗入扫描面（夹具树/CI checkout 的目录外世界不可信），环链
+    // 还会 ELOOP 崩闸——链接实体（文件/目录）一律跳过，兑现上方「不跟随」注释
+    const st = lstatSync(full);
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) walkFiles(rel, suffixes, out);
     else if (suffixes.some((s) => name.endsWith(s))) out.push(rel);
   }
   return out;
@@ -142,15 +147,16 @@ for (const entry of surface.exports) {
   // forwarded 条目（typebox 转发面）：tier 仅记载不承诺（M4）——词汇/形状仍验，执法豁免即到此为止
 }
 
-// 自由符号半边：公开根自身的直导出（非转译）必带 JSDoc 标签——现役为零，闸守新增
+// 自由符号半边：公开根声明形直导出（非转译）逐符号必带 JSDoc 标签——现役为零，
+// 闸守新增。逐符号执法（遗漏大扫 20260904 #4 腿3）：文件级「任一标签在文」探
+// 测一签遮全文件——同文件 tagged/untagged 并存时无标签者静默放行；tags 载体
+// 由扫描器逐声明提取（紧前 JSDoc——无块/无标签词均 null），此处只点名 null 者
 const barrelScan = scanTopLevelExports(readFileSync(BARREL_PATH, 'utf8'));
-if (barrelScan.names.size > 0) {
-  const barrelText = readFileSync(BARREL_PATH, 'utf8');
-  const tagged = /@(stable|experimental|deprecated)\b/.test(barrelText);
-  if (!tagged) {
+for (const [name, tag] of barrelScan.tags) {
+  if (tag === null) {
     v(
-      `[查 2] 公开根出现直导出（${[...barrelScan.names.keys()].join('、')}）而无 @stable/@experimental/@deprecated ` +
-        `JSDoc 标签——自由符号标级载体是 JSDoc（§6.13.3 标级载体分职）；或改走 export * 目录宿主形`,
+      `[查 2] 公开根直导出 ${name} 无 @stable/@experimental/@deprecated JSDoc 标签——` +
+        `自由符号标级载体是紧前 JSDoc（§6.13.3 标级载体分职）；或改走 export * 目录宿主形`,
     );
   }
 }

@@ -427,7 +427,7 @@
 
 ## 能力面（capabilities）
 
-能力 = 件显式声明的语义单位（`ctx.host.capabilities` 派生源；server 形装载器按此拒载要求缺席能力的应用）。
+能力 = 宿主能力目录登记的语义单位（providedBy 归因官方件；`ctx.host.capabilities` 派生源；server 形装载器按此拒载要求缺席能力的应用）。
 
 - `admin.apps` — builtin:admin，daemon / standalone
 - `browser.automation` — builtin:browser，daemon / standalone

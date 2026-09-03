@@ -24,7 +24,7 @@
  *    号已 bump / 纪元 pre-ignition / 归档族空三休眠形不红（机制常驻休眠语义锁）。
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -254,10 +254,46 @@ describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE �
       const r = runGate({ CHECK_API_ROOT: root });
       expect(r.status).toBe(1);
       expect(r.stderr).toContain('[查 2]');
-      expect(r.stderr).toContain('公开根出现直导出');
+      // 逐符号执法（20260904 #4 腿3）：文案点名具体符号——不再是文件级整述
+      expect(r.stderr).toContain('公开根直导出 zzFree 无');
       expect(r.stderr).toContain('zzFree');
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 2 自由符号半边逐符号执法：tagged+untagged 并存只红无标签者（遗漏大扫 20260904 #4 腿3——一签遮全文件修死）', () => {
+    const root = makeFixtureRoot();
+    try {
+      // 混合形：zzTagged 带标签 + zzUntagged 无标签——修前文件级 tagged 探测
+      // 一签遮全文件（exit 0 静默放行）；修后逐符号点名 zzUntagged
+      writeFileSync(
+        join(root, 'src/contracts/index.ts'),
+        "export * from './fixture-face.js';\n/** @experimental */\nexport const zzTagged = 1;\nexport const zzUntagged = 2;\n",
+      );
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('zzUntagged');
+      expect(r.stderr).not.toContain('zzTagged');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 3 扫描面不穿透符号链接：linked 目录不入 walkFiles 面（遗漏大扫 20260904 #13——兑现「不跟随」注释）', () => {
+    const root = makeFixtureRoot();
+    const outside = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'berry-outside-')));
+    try {
+      // 扫描根之外的目录放裸 @deprecated 标签文件——只有穿透符号链才会命中
+      // [查 3]（修前 statSync 跟随 → src/linked/legacy.ts 入扫描面）
+      writeFileSync(join(outside, 'legacy.ts'), '/** @deprecated 旧物 */\nexport const zzLegacy = 1;\n');
+      symlinkSync(outside, join(root, 'src', 'linked'));
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(0);
+      expect(r.stderr).not.toContain('src/linked');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   }, 60_000);
 
@@ -762,7 +798,53 @@ describe('scanTopLevelExports：手写扫描器单测（tsgo unstable/ast 依赖
       expect.arrayContaining(['alpha', 'beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta', 'eta', 'iota']),
     );
     expect(scan.names.has('internal')).toBe(false);
-    expect(scan.stars).toEqual(['./star.js', './ns.js']);
+    // `* as ns` 是命名空间转发形不入 stars（20260904 #12 修法同步重锚——旧锚
+    // ['.','./ns.js'] 锁定的正是目标被误收编的缺陷形状）
+    expect(scan.stars).toEqual(['./star.js']);
+  });
+
+  it('自由符号标级载体：声明形直导出的紧前 JSDoc tier 入 tags（遗漏大扫 20260904 #4/#5——tier 载体分职兑现）', () => {
+    const src = [
+      '/** @experimental */',
+      'export const zzTagged = 1;',
+      'export const zzUntagged = 2;', // 无 JSDoc 块 → null（无标级载体）
+      '/** 普通说明无 tier 词 */',
+      'export function zzNoTier() {}', // 有块无标签 → null
+      '/* 紧邻的非 JSDoc 注释——块归属以最后注释开器为准 */',
+      'export const zzCut = 3;', // 紧前是 /* 形非 JSDoc → null
+      'export { zzA } from "./other.js";', // 转译形（具名转发）不入 tags
+    ].join('\n');
+    const scan = scanTopLevelExports(src);
+    expect(scan.tags.get('zzTagged')).toBe('experimental');
+    expect(scan.tags.get('zzUntagged')).toBe(null);
+    expect(scan.tags.get('zzNoTier')).toBe(null);
+    expect(scan.tags.get('zzCut')).toBe(null);
+    expect(scan.tags.has('zzA')).toBe(false);
+  });
+
+  it('命名空间转发形不进 stars：export * as ns 的目标模块不收编（遗漏大扫 20260904 #12——幻影面符号修死）', () => {
+    // ns 本身已是面符号（运行时 barrel 仅 ns 一键可及）；目标进 stars 会被
+    // 闭包递归展开成幻影面符号——目标私有导出被物化为顶层 API 面
+    const scan = scanTopLevelExports("export * as ns from './internal.js';\n");
+    expect([...scan.names.keys()]).toEqual(['ns']);
+    expect(scan.stars).toEqual([]);
+  });
+
+  it('自由符号 tier 裁决纯函数：标签覆盖键级 / 缺标签 fail-loud / 非直导出维持键级（遗漏大扫 20260904 #4 腿1）', async () => {
+    // 动态 import：修前无此导出（undefined 调用即红）——不静态 import 以免
+    // 整测试文件在修前全红殃及他锁
+    const { freeSymbolTier } = await import('./extract-api-surface.mjs');
+    const key = { tier: 'stable' };
+    const tags = new Map([
+      ['zzTagged', 'experimental'],
+      ['zzUntagged', null],
+    ]);
+    // 声明形直导出：标签覆盖键级 tier
+    expect(freeSymbolTier(tags, { name: 'zzTagged', forwarded: false }, key)).toBe('experimental');
+    // 内部星出收编形（非公开根直导出）：无标签可言，维持键级
+    expect(freeSymbolTier(tags, { name: 'zzCollected', forwarded: false }, key)).toBe('stable');
+    // 声明形直导出而标签缺席：fail-loud（闸面漏执法不允许静默降级）
+    expect(() => freeSymbolTier(tags, { name: 'zzUntagged', forwarded: false }, key)).toThrow();
   });
 
   it('tsgo 模板幻影陷阱：`${}` 插值后的代码大括号不被吞（templateStack 协议回归锁）', () => {
