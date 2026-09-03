@@ -242,6 +242,9 @@ await jiti.import(fileURLToPath(new URL('../src/checkpoint/events.ts', import.me
 // goal 轮结算账本词同款（src/goal/events.ts——goal/evidence 轮结算写点在
 // goal/tools.ts，第三十九批 T4-A；goal/summary 随第四刀沉淀④步同笔注册）
 await jiti.import(fileURLToPath(new URL('../src/goal/events.ts', import.meta.url)));
+// 废弃遥测词（src/contracts/deprecations.ts——§6.13.7 批 3：apps/deprecation-used
+// reserved 标记注册，宿主写点 = 批 4 废弃桥入口，词汇面先登记进目录）
+await jiti.import(fileURLToPath(new URL('../src/contracts/deprecations.ts', import.meta.url)));
 // 错误码注册表（族 6 数据源——基建大扫 #46：errors.ts 头注「CI 可校验」兑现，
 // 与事件词汇面同纪律的机器执法）
 const errorsMod = await jiti.import(fileURLToPath(new URL('../src/contracts/errors.ts', import.meta.url)));

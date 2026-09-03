@@ -52,14 +52,14 @@ export interface EventEnvelope {
   readonly event: EnvelopeEvent;
 }
 
-/** 四张 rollup 表名（alerts 规则表不是 metric——冷读 M1） */
-export type RollupTable = 'llm' | 'tool' | 'turn' | 'approval';
+/** 五张 rollup 表名（alerts 规则表不是 metric——冷读 M1；v3 增 deprecation） */
+export type RollupTable = 'llm' | 'tool' | 'turn' | 'approval' | 'deprecation';
 
 /** 单桶度量增量（列可负 = 回退）；dur_ms_max 例外——单调水印绝对值只升不降 */
 export interface BucketDelta {
   readonly table: RollupTable;
   readonly hourTs: number;
-  /** 依表维度（llm=[app,model,priority] / tool=[app,tool] / turn=[app] / approval=[app]） */
+  /** 依表维度（llm=[app,model,priority] / tool=[app,tool] / turn=[app] / approval=[app] / deprecation=[app,dep]） */
   readonly dims: readonly string[];
   /** 度量列增量（dur_ms_max 除外——绝对水印，落库走 MAX 合并） */
   readonly cols: Readonly<Record<string, number>>;
@@ -326,6 +326,17 @@ export function createAggregator(): Aggregator {
         const column = APPROVAL_COLUMNS[String(data['decision'])];
         if (column === undefined) return; // 未知 decision（防御位）——不计不炸
         record(seqKey, apply('approval', hour, [app], { [column]: 1 }));
+        return;
+      }
+      case 'apps/deprecation-used': {
+        // 废弃遥测（§6.13.7，批 3）：载荷 { app, dep }——app 维载荷显式打标优先，
+        // 缺席回落会话血缘桶（与 request/header 同律的取值序）；dep 非字符串或
+        // 空即防御跳过（宿主写点批 4 才落，现役零派发——本 case 先建聚合位）
+        const dep = data['dep'];
+        if (typeof dep !== 'string' || dep === '') return;
+        const declaredApp = data['app'];
+        const owner = typeof declaredApp === 'string' && declaredApp !== '' ? declaredApp : app;
+        record(seqKey, apply('deprecation', hour, [owner, dep], { uses: 1 }));
         return;
       }
       default:

@@ -354,3 +354,50 @@ describe('obs 聚合核：复盘 20260901 R-4/D-3 回归锁（内存有界三律
     expect(warmMisses).toBe(0);
   });
 });
+
+describe('obs 聚合核：apps/deprecation-used 废弃遥测（第八十七批批 3，契约篇 §6.13.7）', () => {
+  it('载荷显式打标优先：payload app 在场即用 payload 值（与 request/header 同律取值序）', () => {
+    const agg = createAggregator();
+    agg.ingest(env('s1', 0, 'request/header', { app: 'chat', reason: 'initial' }));
+    // 载荷显式打标 berrycode —— 会话血缘是 chat，但事件载荷说了算
+    agg.ingest(env('s1', 1, 'apps/deprecation-used', { app: 'berrycode', dep: 'DEP-001' }));
+    const [dep] = ofTable(take(agg), 'deprecation');
+    expect(dep).toMatchObject({
+      hourTs: Math.floor(T0 / 3_600_000) * 3_600_000,
+      dims: ['berrycode', 'DEP-001'],
+      cols: { uses: 1 },
+    });
+  });
+
+  it('载荷 app 缺席回落会话血缘桶；header 亦缺席回落 host 桶', () => {
+    const agg = createAggregator();
+    agg.ingest(env('s2', 0, 'request/header', { app: 'chat', reason: 'initial' }));
+    agg.ingest(env('s2', 1, 'apps/deprecation-used', { dep: 'DEP-002' }));
+    agg.ingest(env('s3', 0, 'apps/deprecation-used', { dep: 'DEP-002' }));
+    const rows = ofTable(take(agg), 'deprecation');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.dims).toEqual(['chat', 'DEP-002']); // 血缘桶
+    expect(rows[1]?.dims).toEqual(['host', 'DEP-002']); // 血缘缺席兜底
+  });
+
+  it('dep 非字符串或空串防御跳过（不计不炸——与未知 decision 同律）', () => {
+    const agg = createAggregator();
+    agg.ingest(env('s4', 0, 'apps/deprecation-used', { app: 'chat' }));
+    agg.ingest(env('s4', 1, 'apps/deprecation-used', { app: 'chat', dep: '' }));
+    agg.ingest(env('s4', 2, 'apps/deprecation-used', { app: 'chat', dep: 42 }));
+    expect(ofTable(take(agg), 'deprecation')).toHaveLength(0);
+  });
+
+  it('同 app×dep 多次使用累加 + surfaceOp 遮蔽回退（贡献登记走通用机制）', () => {
+    const agg = createAggregator();
+    agg.ingest(env('s5', 0, 'apps/deprecation-used', { app: 'chat', dep: 'DEP-001' }));
+    agg.ingest(env('s5', 1, 'apps/deprecation-used', { app: 'chat', dep: 'DEP-001' }));
+    // 遮蔽载体（seq 2 覆盖 0-1）：两笔贡献齐回退 + 载体自身照常计数 → 2 - 2 + 1 = 1
+    const misses = agg.ingest(
+      env('s5', 2, 'apps/deprecation-used', { app: 'chat', dep: 'DEP-001' }, T0, { op: 'replace', start: 0, end: 1 }),
+    );
+    expect(misses).toBe(0); // 回退时目标增量未 drain——登记落账零落空
+    const [row] = ofTable(take(agg), 'deprecation');
+    expect(row?.cols).toEqual({ uses: 1 });
+  });
+});

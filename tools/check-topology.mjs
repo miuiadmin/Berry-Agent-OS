@@ -206,7 +206,7 @@ const PUBLIC_FACES = new Set(['index', 'types', 'events', 'contract']);
 /** 存量深挖面册（P1-9 摸底收册，2026-09-02）：产码跨模块实际引用的深文件全清单——
  * 双向棘轮：新深挖（册外）即红——先入对方公开面再导出；册死项（产码跨模块零引用）
  * 即红——已收敛进公开面或已内聚，删册行。册随真用单向收紧，勿扩册。
- * 大头注记：contracts 域 13 项是 L0 分域契约面本体（errors/tools/typebox 等按域拆的
+ * 大头注记：contracts 域 15 项是 L0 分域契约面本体（errors/tools/typebox 等按域拆的
  * 公共类型件）——收敛方向是 contracts 域 index 再导出，非各引用方改 import。
  * （注记数曾写 11 与册不符——遗漏大扫 20260902 U4 机械计数修正；册本身为准） */
 const LEGACY_DEEP_FACES = new Set([
@@ -228,6 +228,7 @@ const LEGACY_DEEP_FACES = new Set([
   'contracts/app.ts',
   'contracts/bridge.ts',
   'contracts/channels.ts',
+  'contracts/deprecations.ts',
   'contracts/errors.ts',
   'contracts/exec.ts',
   'contracts/jobs.ts',

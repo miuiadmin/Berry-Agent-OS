@@ -3733,6 +3733,17 @@
       ]
     },
     {
+      "symbol": "apps/deprecation-used",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
       "symbol": "assistant/message",
       "module": "session-events",
       "tier": "stable",

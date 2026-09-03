@@ -3,11 +3,14 @@
  * check-topology.test.mjs / check-events.test.mjs 同款收编（vitest 窄面 spawn
  * 真脚本 + 纯函数单测，tsc 视门外纯 node 语义直跑）。
  *
- * 三层锁：
+ * 四层锁：
  * 1. 净树 spawn：七查全绿 exit 0（门禁链占位在岗——脚本被删/依赖断链先在此红）；
  * 2. 查 1 可红探针：CHECK_API_SNAPSHOT env 缝注入篡改快照（tier 改形）→ exit 1
  *    且 stderr 点名 [查 1]——drift 侦测不静默退化（守护炮负例探针纪律）；
- * 3. scanTopLevelExports 单测（手写 token 扫描器——含 tsgo 模板幻影陷阱回归锁：
+ * 3. 查 3/查 4 可红探针：CHECK_API_DEPRECATIONS env 缝注入假注册簿（批 3）——
+ *    坏行五红（格式/坐标/窗口/替代/册外标签）+ 真实坐标证明查 4 扫描面执法
+ *    （定义点豁免不吞使用点）；
+ * 4. scanTopLevelExports 单测（手写 token 扫描器——含 tsgo 模板幻影陷阱回归锁：
  *    独立 scanner 在 `${}` 插值闭 } 后不重扫模板尾，会把后续代码大括号吞进幻影
  *    模板——templateStack + reScanTemplateToken 协议丢失时此测红）。
  */
@@ -28,6 +31,74 @@ describe('check-api 机器闸：净树全绿（七查集成锁）', () => {
   it('spawn 真脚本 exit 0——快照与抽取真值同步 + 七查零问题', () => {
     const r = spawnSync(process.execPath, [SCRIPT], { cwd: ROOT, encoding: 'utf8' });
     expect(r.status).toBe(0);
+  }, 60_000);
+});
+
+describe('check-api 查 3/查 4：废弃登记执法可红探针（CHECK_API_DEPRECATIONS env 缝）', () => {
+  /**
+   * 缝纪律同查 1：注入假注册簿证查 3/4 可红，不动共享树真身。注入行走全部
+   * 五道行不变式 + 注册簿↔面清单对照 + JSDoc 双向 + 查 4 扫描——一次注入多红，
+   * 断言取关键消息（contains 语义，多红不互斥）。
+   */
+  it('坏行注册簿（格式/坐标/窗口/替代全缺 + 册外编号）→ exit 1 且 stderr 点名 [查 3] 各道', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-dep-'));
+    const fake = join(dir, 'fake-deprecations.json');
+    // 一行五红：dep 格式非法（X-1 非 DEP-三位）/ symbol 单段非坐标形 /
+    // 窗口不足（1.0→1.1 < 3 minor）/ replacement 空 / 无 JSDoc 标签对应
+    writeFileSync(
+      fake,
+      JSON.stringify([{ dep: 'X-1', symbol: 'bad', introducedIn: '1.0', removalIn: '1.1', replacement: '' }]),
+    );
+    try {
+      const r = spawnSync(process.execPath, [SCRIPT], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, CHECK_API_DEPRECATIONS: fake },
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 3]');
+      expect(r.stderr).toContain('DEP 编号格式非法');
+      expect(r.stderr).toContain('两段坐标形');
+      expect(r.stderr).toContain('废弃窗不足');
+      expect(r.stderr).toContain('replacement 为空');
+      expect(r.stderr).toContain('不在面清单');
+      expect(r.stderr).toContain('无对应 @deprecated JSDoc 标签');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('真实坐标注入 → [查 4] 官方产码使用废弃面红（定义点豁免不吞使用点）', () => {
+    // 坐标取真实面符号（berryagent::AppError）：定义位 errors.ts 经 export 声明
+    // 豁免，使用位（apply-patch/pipeline 等全仓）逐文件点名——查 4 扫描面执法证明
+    const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-dep-'));
+    const fake = join(dir, 'fake-deprecations.json');
+    writeFileSync(
+      fake,
+      JSON.stringify([
+        {
+          dep: 'DEP-042',
+          symbol: 'berryagent::AppError',
+          introducedIn: '1.0',
+          removalIn: '1.3',
+          replacement: 'core/AppError',
+        },
+      ]),
+    );
+    try {
+      const r = spawnSync(process.execPath, [SCRIPT], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, CHECK_API_DEPRECATIONS: fake },
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 4]');
+      expect(r.stderr).toContain('AppError');
+      // 定义位豁免证明：errors.ts 自身不进使用红名单
+      expect(r.stderr).not.toContain('src/contracts/errors.ts 使用废弃面');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 60_000);
 });
 

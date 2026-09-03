@@ -21,7 +21,8 @@ import { normalizeMigrations, type MigrationSpec } from '../persist/index.js';
 import type { BucketDelta, RollupTable } from './rollup.js';
 
 /**
- * 件私有迁移链（v1：四 rollup 表 + alerts 规则表占位 + 维度唯一索引）。
+ * 件私有迁移链（v1：四 rollup 表 + alerts 规则表占位 + 维度唯一索引；v2：失败
+ * 信号/耗时扩列；v3：deprecation_rollup_hour 废弃遥测第五表——批 3 API 治理）。
  * alerts 刀一建空表不执法（契约篇 §6.9 刀二拍板定形）。
  * DDL 全带 IF NOT EXISTS 幂等（2026-09-01 复盘 R-3）：迁移事务外崩溃残留
  * （表已建、user_version 归零）重开补跑无害——判定读 user_version 保持事务外
@@ -86,6 +87,21 @@ const MIGRATIONS: readonly MigrationSpec[] = normalizeMigrations(
         ALTER TABLE turn_rollup_hour ADD COLUMN dur_ms_max INTEGER NOT NULL DEFAULT 0;
       `,
     },
+    {
+      // v3（第八十七批批 3 API 治理·废弃遥测，契约篇 §6.9 表族五 + §6.13.7）：
+      // 废弃使用聚合表——`apps/deprecation-used` 事件的小时粒度计数（维度
+      // app × DEP 编号）。纯建表 DDL 带 IF NOT EXISTS 幂等（与 v1 同判语义，
+      // 无 v2 式 ALTER 自愈需求）
+      version: 3,
+      name: 'obs-rollup-v3-deprecation',
+      sql: `
+        CREATE TABLE IF NOT EXISTS deprecation_rollup_hour (
+          hour_ts INTEGER NOT NULL, app TEXT NOT NULL, dep TEXT NOT NULL,
+          uses INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (hour_ts, app, dep)
+        );
+      `,
+    },
   ],
   0,
 );
@@ -115,6 +131,8 @@ const TABLE_META: Readonly<
     watermark: 'dur_ms_max',
   },
   approval: { dims: ['app'], measures: ['asked', 'approved', 'rejected', 'always', 'cancel', 'unavailable'] },
+  // v3（第八十七批批 3）：废弃遥测聚合——app × DEP 编号双维，uses 单计数列
+  deprecation: { dims: ['app', 'dep'], measures: ['uses'] },
 };
 
 /** 各表全列序（upsert 归一用——增量缺列补 0，语句静态化） */
@@ -147,6 +165,7 @@ const TABLE_COLUMNS: Readonly<Record<RollupTable, readonly string[]>> = {
     'dur_ms_max',
   ],
   approval: ['hour_ts', 'app', 'asked', 'approved', 'rejected', 'always', 'cancel', 'unavailable'],
+  deprecation: ['hour_ts', 'app', 'dep', 'uses'],
 };
 
 /** 预编译 upsert 语句面（better-sqlite3 Statement 的 run 面收窄——动态全列参数用） */
@@ -157,7 +176,7 @@ interface UpsertStatement {
 
 /** 聚合查询入参（obs_query 工具与 /obs 命令共用） */
 export interface RollupQuery {
-  /** 四表名枚举（alerts 不是 metric——冷读 M1） */
+  /** 五表名枚举（alerts 不是 metric——冷读 M1；v3 增 deprecation） */
   readonly metric: RollupTable;
   /** 起始毫秒（含） */
   readonly fromMs: number;
@@ -220,7 +239,7 @@ export function parseAlertMetric(metric: string): { table: RollupTable; column: 
 export function validateAlertInput(input: AlertRuleInput): AlertRuleInput {
   if (parseAlertMetric(input.metric) === undefined) {
     throw new Error(
-      `告警 metric 非法「${input.metric}」——闭集 = 表名.度量列（四表：${(Object.keys(TABLE_META) as RollupTable[]).map((t) => `${t}.{${[...TABLE_META[t]!.measures, ...(TABLE_META[t]!.watermark === undefined ? [] : [TABLE_META[t]!.watermark])].join(',')}}`).join(' ')}）`,
+      `告警 metric 非法「${input.metric}」——闭集 = 表名.度量列（五表：${(Object.keys(TABLE_META) as RollupTable[]).map((t) => `${t}.{${[...TABLE_META[t]!.measures, ...(TABLE_META[t]!.watermark === undefined ? [] : [TABLE_META[t]!.watermark])].join(',')}}`).join(' ')}）`,
     );
   }
   if (input.agg !== 'sum' && input.agg !== 'avg' && input.agg !== 'max') {

@@ -355,6 +355,8 @@ export async function extractSurface() {
   await imp('../src/compaction/events.ts');
   await imp('../src/checkpoint/events.ts');
   await imp('../src/goal/events.ts');
+  // 废弃遥测词汇（§6.13.7 批 3）：registerSessionEventType 副作用收割——导入即登记
+  await imp('../src/contracts/deprecations.ts');
   const sessionEventsMod = await imp('../src/contracts/session-events.ts');
   for (const def of sessionEventsMod.listSessionEventTypes()) {
     exports.push({
@@ -395,6 +397,22 @@ export async function extractSurface() {
     formFactors: [...c.formFactors],
     providedBy: c.providedBy,
   })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+  // —— #7：DEP 注册簿 join（§6.13.6 废弃载荷终段——批 3）——
+  // 注册簿是 tier=deprecated 的单源：命中 module::symbol 坐标即改标 tier 并挂
+  // deprecated 载荷 { dep, removalIn, replacement }；反向 fail-loud——注册簿指向
+  // 面清单缺席的坐标 = 登记漂移（登记了不存在/已删的面，抽取期即炸不待查 3）
+  const depMod = await imp('../src/contracts/deprecations.ts');
+  const surfaceKey = (e) => `${e.module}::${e.symbol}`;
+  const exportByKey = new Map(exports.map((e) => [surfaceKey(e), e]));
+  for (const reg of depMod.DEPRECATIONS) {
+    const target = exportByKey.get(reg.symbol);
+    if (target === undefined) {
+      throw new Error(`DEP 注册簿 symbol 不在面清单：${reg.symbol}（先修注册簿坐标——废弃登记指向不存在的面）`);
+    }
+    target.tier = 'deprecated';
+    target.deprecated = { dep: reg.dep, removalIn: reg.removalIn, replacement: reg.replacement };
+  }
 
   // 宿主 apiVersion（package.json 预置号——快照自描述，drift 闸随 release 版本联动）
   const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));

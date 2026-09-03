@@ -121,11 +121,21 @@ if (barrelScan.names.size > 0) {
   }
 }
 
-/* ---------------- 查 3：废弃登记完整性（骨架——批 3 充实） ---------------- */
+/* ---------------- 查 3：废弃登记完整性（批 3 充实——DEP 注册簿执法） ---------------- */
 
 const deprecatedEntries = surface.exports.filter((e) => e.tier === 'deprecated');
+/**
+ * DEP 注册簿数据源。`CHECK_API_DEPRECATIONS` env 缝 = 回归锁换片位（CHECK_API_SNAPSHOT
+ * 同款纪律）：测试注入带违规行的假注册簿证查 3/4 可红，不动共享树文件；缺省 jiti
+ * 载真册。注意查 1 的 surface 真值恒走真册（drift 面不参与 seam）。
+ */
+const DEPRECATIONS =
+  process.env.CHECK_API_DEPRECATIONS !== undefined
+    ? JSON.parse(readFileSync(resolve(REPO_ROOT, process.env.CHECK_API_DEPRECATIONS), 'utf8'))
+    : (await imp('../src/contracts/deprecations.ts')).DEPRECATIONS;
 {
-  // 形状半边（批 2 已可执法）：deprecated 条目必带 deprecated 载荷 { dep, removalIn, replacement }
+  // —— 3a 形状半边（批 2 载荷形状 + 批 3 注册簿行不变式——CI 闸是唯一执法位，
+  // deprecations.test.ts 同律锁是镜像非冗余：门禁先红、测试锁回归）——
   const depIds = [];
   for (const entry of deprecatedEntries) {
     const d = entry.deprecated;
@@ -144,22 +154,106 @@ const deprecatedEntries = surface.exports.filter((e) => e.tier === 'deprecated')
   }
   const dup = depIds.filter((id, i) => depIds.indexOf(id) !== i);
   if (dup.length > 0) v(`[查 3] DEP 编号重复：${[...new Set(dup)].join('、')}（编号唯一——§6.13.8 查 3）`);
-  // @deprecated JSDoc ↔ 注册簿双向对照与 removalIn 窗口算术随批 3 DEP 注册簿落地充实
+
+  const apiContracts = await imp('../src/contracts/api.ts');
+  const DEP_ID_RE = /^DEP-\d{3}$/;
+  const registryIds = [];
+  for (const reg of DEPRECATIONS) {
+    // 行不变式四道：编号格式 / 坐标形 / 版本格式 / 窗口算术 + 替代指引非空
+    if (!DEP_ID_RE.test(reg.dep)) v(`[查 3] 注册簿 ${reg.dep}：DEP 编号格式非法（DEP-001 式三位数）`);
+    const segs = String(reg.symbol).split('::');
+    if (segs.length !== 2 || segs[0] === '' || segs[1] === '') {
+      v(`[查 3] 注册簿 ${reg.dep}：symbol 非模块::符号 两段坐标形（${reg.symbol}）`);
+    }
+    if (!apiContracts.isValidApiVersion(reg.introducedIn) || !apiContracts.isValidApiVersion(reg.removalIn)) {
+      v(`[查 3] 注册簿 ${reg.dep}：版本格式非法（${reg.introducedIn} → ${reg.removalIn}，应为 MAJOR.MINOR）`);
+    } else {
+      const [iMajor, iMinor] = reg.introducedIn.split('.').map(Number);
+      const [rMajor] = reg.removalIn.split('.').map(Number);
+      if (rMajor !== iMajor || apiContracts.compareApiVersions(reg.removalIn, `${iMajor}.${iMinor + 3}`) < 0) {
+        v(
+          `[查 3] 注册簿 ${reg.dep}：废弃窗不足（${reg.introducedIn} → ${reg.removalIn}，须同 MAJOR 且 ≥ 3 minor——拍板⑤）`,
+        );
+      }
+    }
+    if (typeof reg.replacement !== 'string' || reg.replacement === '') {
+      v(`[查 3] 注册簿 ${reg.dep}：replacement 为空（废弃不给替代 = 断头路——§6.13.6）`);
+    }
+    registryIds.push(reg.dep);
+  }
+  const regDup = registryIds.filter((id, i) => registryIds.indexOf(id) !== i);
+  if (regDup.length > 0) v(`[查 3] 注册簿 DEP 编号重复：${[...new Set(regDup)].join('、')}`);
+
+  // —— 3b 注册簿 ↔ 面清单双向对照（join 键 = module::symbol 坐标；抽取器终段
+  // 已从注册簿挂 tier 与载荷——此查对 seam 注入行与篡改面同红）——
+  const exportByKey = new Map(surface.exports.map((e) => [`${e.module}::${e.symbol}`, e]));
+  for (const reg of DEPRECATIONS) {
+    const target = exportByKey.get(reg.symbol);
+    if (target === undefined) {
+      v(`[查 3] 注册簿 ${reg.dep}：symbol ${reg.symbol} 不在面清单（登记指向不存在的面——先修坐标）`);
+      continue;
+    }
+    if (target.tier !== 'deprecated' || target.deprecated?.dep !== reg.dep) {
+      v(
+        `[查 3] 注册簿 ${reg.dep}：面清单 ${reg.symbol} 未标 deprecated 或载荷 DEP 编号不一致（重跑抽取器 --write 落同笔快照）`,
+      );
+    }
+  }
+
+  // —— 3c deprecated JSDoc 标签 ↔ 注册簿双向对照（标签形 = `@deprecated DEP-001
+  // <说明>`——裸标签红：无编号的标签无法对账；注册行无标签红：登记不落码面
+  // 标注即双源）——
+  const jsdocFiles = walkFiles('src', ['.ts']).filter((f) => !f.endsWith('.test.ts'));
+  const taggedIds = new Set();
+  for (const file of jsdocFiles) {
+    const text = readFileSync(join(REPO_ROOT, file), 'utf8');
+    for (const m of text.matchAll(/@deprecated\s+(DEP-\d{3})/g)) taggedIds.add(m[1]);
+    if (/@deprecated(?!\s+DEP-\d{3})/.test(text)) {
+      v(`[查 3] ${file}：裸 @deprecated 标签未携带 DEP 编号（标签形 = @deprecated DEP-001 说明——§6.13.6 双向断言）`);
+    }
+  }
+  for (const id of taggedIds) {
+    if (!registryIds.includes(id)) v(`[查 3] JSDoc 标签 ${id} 未在 DEP 注册簿登记（标签 ↔ 注册簿双向——先登记再标码）`);
+  }
+  for (const id of registryIds) {
+    if (!taggedIds.has(id)) v(`[查 3] 注册簿 ${id} 无对应 @deprecated JSDoc 标签（登记须同步落码面标注——§6.13.6）`);
+  }
 }
 
-/* ---------------- 查 4：官方全家桶零废弃使用（骨架——批 3 充实） ---------------- */
+/* ---------------- 查 4：官方全家桶零废弃使用（批 3 充实——扫面含 examples） ---------------- */
 
 {
-  // 逐废弃符号全仓产码扫描（测试豁免同 DAG 纪律；批 3 充实定义点/使用点区分与扫面治理）
-  if (deprecatedEntries.length > 0) {
-    const srcFiles = walkFiles('src', ['.ts']).filter((f) => !f.endsWith('.test.ts'));
-    const texts = new Map(srcFiles.map((f) => [f, readFileSync(join(REPO_ROOT, f), 'utf8')]));
-    for (const entry of deprecatedEntries) {
-      const re = new RegExp(`\\b${entry.symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+  // 扫描面 = src 非测试产码 + examples（官方示例是全家桶的公开面）；定义点豁免
+  // 机械推导：export 声明该符号的文件是定义位非使用位（registry 文件自身另免——
+  // 注册簿坐标串是元数据非使用）。seam 注入行走同一扫面（红路径可测）。
+  // 扫描目标 = 注册簿腿 ∪ 面清单腿（join 一致时同符号——按坐标去重防双报）
+  const scanTargets = [
+    ...DEPRECATIONS.map((reg) => ({ dep: reg.dep, symbol: reg.symbol })),
+    ...deprecatedEntries.map((e) => ({
+      dep: e.deprecated?.dep ?? '(载荷缺 dep)',
+      symbol: `${e.module}::${e.symbol}`,
+    })),
+  ].filter((t, i, arr) => arr.findIndex((o) => o.symbol === t.symbol) === i);
+  if (scanTargets.length > 0) {
+    const srcFiles = walkFiles('src', ['.ts']).filter(
+      (f) => !f.endsWith('.test.ts') && !f.endsWith('contracts/deprecations.ts'),
+    );
+    const exampleFiles = walkFiles('examples', ['.ts']);
+    const texts = new Map([...srcFiles, ...exampleFiles].map((f) => [f, readFileSync(join(REPO_ROOT, f), 'utf8')]));
+    for (const target of scanTargets) {
+      const name = target.symbol.split('::')[1] ?? target.symbol;
+      // 键形符号（含 /）按子串（import 说明符无词边界）；标识符按 \b 词边界
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const useRe = name.includes('/') ? new RegExp(escaped) : new RegExp(`\\b${escaped}\\b`);
+      // 定义点 = export 声明该符号的文件（含 declare 前缀形——机械推导，首真实废弃日执法面即正确）
+      const defRe = new RegExp(
+        `export\\s+(?:declare\\s+)?(?:const|function|class|interface|type|enum|let|var)\\s+${escaped}\\b`,
+      );
       for (const [file, text] of texts) {
-        if (re.test(text)) {
+        if (defRe.test(text)) continue; // 定义位非使用位
+        if (useRe.test(text)) {
           v(
-            `[查 4] 官方产码 ${file} 使用废弃面 ${entry.module}::${entry.symbol}——迁移路径先被狗家证明（拍板⑥，§6.13.8 查 4）`,
+            `[查 4] 官方产码 ${file} 使用废弃面 ${target.symbol}（DEP ${target.dep}）——迁移路径先被狗家证明（拍板⑥，§6.13.8 查 4）`,
           );
         }
       }

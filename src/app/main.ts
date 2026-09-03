@@ -31,6 +31,7 @@ import { upgradeMain } from './upgrade.js';
 import { desktopMain } from './desktop-main.js';
 import { runOnceMain } from './run-main.js';
 import { tickMain } from './tick-main.js';
+import { appsCheckMain } from './apps-check.js';
 import { dumpConfigMain } from './dump-config.js';
 import { relaunchUnderHostSandbox } from './host-sandbox.js';
 import { daemonCommandMain, daemonDoctorMain, daemonForegroundMain, detectDaemonHandshake } from './daemon.js';
@@ -63,6 +64,9 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
   berry reboot [--yes]    重启动词：shutdown 语义后接力——有活 daemon 先 stop 再
                          start；无 daemon 诚实退 0（进程内形态的桌面 /reboot 自带
                          spawn 接力，不经 CLI）
+  berry apps check      应用 API 体检（契约篇 §6.13.9）：全部已装应用 × 当前
+                         apiVersion 三色（✓ 通过 / ⚠ 用废弃·容忍窗 / ✗ 断裂）；
+                         只读零装配——退出码 0 无断裂 / 1 有断裂
   berry dump-config      打印实际生效的组合树
 
 旗标：
@@ -619,6 +623,28 @@ function main(argv: string[]): number {
       case 'dump-config':
         // 安全模式同径可见：诊断面打印的就是实际生效装配（Ring 1 行 + 标记行）
         return dumpConfigMain({ ...(noApps ? { noApps: true } : {}) });
+      case 'apps': {
+        // 第九动词的子命令族首位（契约篇 §6.13.9，第八十七批批 3）：`berry apps
+        // check` 应用 API 体检——只读面零装配零主库（migrate 批 5 预留）。互斥
+        // 面同 upgrade/shutdown 律（形态面互斥——run 族/端口/前台旗标不属体检）
+        if (
+          args[0] !== 'check' ||
+          args.length > 1 ||
+          readOnly ||
+          background ||
+          tick !== undefined ||
+          app !== undefined ||
+          port !== undefined ||
+          noApps ||
+          sandboxHost ||
+          foreground ||
+          appFile !== undefined
+        ) {
+          process.stderr.write('用法：berry apps check（无旗标——只读体检动词不与运行形态旗标并用）\n');
+          return 2;
+        }
+        return appsCheckMain();
+      }
       default:
         process.stderr.write(`未知命令：${command}\n\n${HELP}\n`);
         return 2;

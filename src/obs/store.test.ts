@@ -70,7 +70,7 @@ describe('obs 自管库面', () => {
     store.close();
   });
 
-  it('v2 扩列迁移（基建大扫 #13/#26/#50）：llm +exhausted/dur_ms_sum/dur_ms_max、turn +turn_failures/dur_ms_sum/dur_ms_max；user_version=2', () => {
+  it('v2 扩列迁移（基建大扫 #13/#26/#50）：llm +exhausted/dur_ms_sum/dur_ms_max、turn +turn_failures/dur_ms_sum/dur_ms_max', () => {
     const path = tmpDb();
     openRollupStore(path).close();
     // raw 句柄经 persist 正路 face 取（better-sqlite3 裸导入仅 persist 允许）
@@ -79,8 +79,37 @@ describe('obs 自管库面', () => {
       (raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
     expect(cols('llm_rollup_hour')).toEqual(expect.arrayContaining(['exhausted', 'dur_ms_sum', 'dur_ms_max']));
     expect(cols('turn_rollup_hour')).toEqual(expect.arrayContaining(['turn_failures', 'dur_ms_sum', 'dur_ms_max']));
-    expect((raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
+    // v3 上库后链顶 = 3（v2 断言曾锁 2——v3 迁移追加即同笔上移锚）
+    expect((raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(3);
     raw.close();
+  });
+
+  it('v3 废弃遥测表（第八十七批批 3）：deprecation_rollup_hour 建表 + uses 往返 + app×dep 双维分组', () => {
+    const path = tmpDb();
+    openRollupStore(path).close();
+    const raw = createAppSqliteFace().openDatabase(path);
+    const cols = (raw.prepare('PRAGMA table_info(deprecation_rollup_hour)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    expect(cols).toEqual(['hour_ts', 'app', 'dep', 'uses']);
+    raw.close();
+    const store = openRollupStore(path);
+    store.apply([
+      { table: 'deprecation', hourTs: T0, dims: ['chat', 'DEP-001'], cols: { uses: 1 } },
+      { table: 'deprecation', hourTs: T0, dims: ['chat', 'DEP-001'], cols: { uses: 1 } },
+      { table: 'deprecation', hourTs: T0, dims: ['berrycode', 'DEP-001'], cols: { uses: 1 } },
+    ]);
+    // 总计（空 groupBy）与 app×dep 双维分组两口径
+    const total = store.query({ metric: 'deprecation', fromMs: T0, toMs: T0, groupBy: [] })[0]!.measures;
+    expect(total['uses']).toBe(3);
+    const byDep = store.query({ metric: 'deprecation', fromMs: T0, toMs: T0, groupBy: ['app', 'dep'] });
+    expect(byDep).toHaveLength(2);
+    // 行序随 SQL 分组序（berrycode < chat 字母序）——按维度键断言不按位序
+    expect(byDep[0]?.dims).toMatchObject({ app: 'berrycode', dep: 'DEP-001' });
+    expect(byDep[0]?.measures['uses']).toBe(1);
+    expect(byDep[1]?.dims).toMatchObject({ app: 'chat', dep: 'DEP-001' });
+    expect(byDep[1]?.measures['uses']).toBe(2);
+    store.close();
   });
 
   it('llm/turn 新列往返 + dur_ms_max MAX 合并（与 tool 表同机制跨到两表）', () => {

@@ -5,7 +5,7 @@
  * 刀一 = 摄取 + 聚合 + 查询面：
  * - **摄取**：订阅 session/event 总线信封（hostReserved 目录词——官方全局行
  *   名位是结构前提）→ 聚合器纯内存增量 → flushMs/flushBatch 批量落 rollup.db；
- * - **查询面两路**：模型工具 `obs_query`（四表聚合查询）+ TUI 命令 `/obs
+ * - **查询面两路**：模型工具 `obs_query`（五表聚合查询）+ TUI 命令 `/obs
  *   [tools|usage|turns|approvals]`（今日速览）；
  * - **停摄取纪律**（契约篇 §6.9）：自管库写失败 → 停摄取 + warn 留痕
  *   （/obs-rebuild 判据触发面）。
@@ -121,8 +121,8 @@ function rotateAlertsIfNeeded(
   }
 }
 
-/** obs_query 四表枚举（alerts 不是 metric——冷读 M1） */
-const OBS_METRICS = ['llm', 'tool', 'turn', 'approval'] as const;
+/** obs_query 五表枚举（alerts 不是 metric——冷读 M1；v3 增 deprecation） */
+const OBS_METRICS = ['llm', 'tool', 'turn', 'approval', 'deprecation'] as const;
 
 /** ISO 8601 → 毫秒（非法即抛——参数已过 schema，这里是语义校验） */
 const parseIso = (value: string, field: string): number => {
@@ -149,9 +149,10 @@ function createObsQueryTool(store: RollupStore, stoppedNote: () => string | unde
   return {
     name: 'obs_query',
     description:
-      '查询观测聚合（小时粒度 rollup）。metric 四表：llm（调用/重试/token 四桶，维度 app/model/priority）、' +
+      '查询观测聚合（小时粒度 rollup）。metric 五表：llm（调用/重试/token 四桶，维度 app/model/priority）、' +
       'tool（调用/守门拦截/失败/超时/时长，维度 app/tool）、turn（轮次/消息/工具调用计数，维度 app）、' +
-      'approval（审批五值桶，维度 app）。groupBy 可含 hour；空数组 = 窗口总计。',
+      'approval（审批五值桶，维度 app）、deprecation（废弃 API 使用计数，维度 app/dep——DEP 编号）。' +
+      'groupBy 可含 hour；空数组 = 窗口总计。',
     effect: 'read',
     parameters: Type.Object({
       metric: Type.Union(
@@ -214,7 +215,7 @@ function renderObsView(store: RollupStore, view: string, stoppedNote?: string): 
   switch (view) {
     case '':
     case 'overview': {
-      // 总览四行（今日窗口、全维度总计）
+      // 总览五行（今日窗口、全维度总计）
       const summary = (metric: RollupTable): string => {
         const rows = store.query({ metric, fromMs: from, toMs: to, groupBy: [] });
         if (rows.length === 0) return '0';
@@ -225,6 +226,7 @@ function renderObsView(store: RollupStore, view: string, stoppedNote?: string): 
           return `${m['calls']} 次调用（拦截 ${m['blocked']} · 失败 ${m['failures']} · 超时 ${m['timeouts']}）`;
         if (metric === 'turn')
           return `${m['turns']} 轮（用户 ${m['user_msgs']} · 助手 ${m['assistant_msgs']} · 工具 ${m['tool_calls']}）`;
+        if (metric === 'deprecation') return `${m['uses']} 次废弃 API 使用`;
         return `asked ${m['asked']}（批准 ${m['approved']} · 拒绝 ${m['rejected']} · 取消 ${m['cancel']} · 不可用 ${m['unavailable']}）`;
       };
       return [
@@ -235,6 +237,7 @@ function renderObsView(store: RollupStore, view: string, stoppedNote?: string): 
         `  工具：${summary('tool')}`,
         `  轮次：${summary('turn')}`,
         `  审批：${summary('approval')}`,
+        `  废弃：${summary('deprecation')}`,
       ].join('\n');
     }
     case 'tools':
@@ -245,8 +248,10 @@ function renderObsView(store: RollupStore, view: string, stoppedNote?: string): 
       return `今日轮次（按小时）：\n${q('turn', ['hour'])}`;
     case 'approvals':
       return `今日审批（按小时）：\n${q('approval', ['hour'])}`;
+    case 'deprecations':
+      return `今日废弃 API 使用（按应用 × DEP）：\n${q('deprecation', ['app', 'dep'])}`;
     default:
-      return `未知视图「${view}」——/obs [tools|usage|turns|approvals]`;
+      return `未知视图「${view}」——/obs [tools|usage|turns|approvals|deprecations]`;
   }
 }
 
@@ -516,8 +521,8 @@ export function createObsApp(): BuiltinAppModule {
         ctx.effect(() =>
           channels.registerCommand({
             name: 'obs',
-            description: '观测面今日速览（/obs [tools|usage|turns|approvals]）',
-            argumentHint: '[tools|usage|turns|approvals]',
+            description: '观测面今日速览（/obs [tools|usage|turns|approvals|deprecations]）',
+            argumentHint: '[tools|usage|turns|approvals|deprecations]',
             source: 'app',
             handler: (args: string): void => {
               ui.notify(renderObsView(store, args.trim(), stoppedNote()));
