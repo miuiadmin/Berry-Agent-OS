@@ -16,14 +16,33 @@ import type { RendererDefinition } from './types.js';
 const BRIEF_MAX = 160;
 
 /**
- * 单行摘要截断（超长加省略号）。切片按**码点**（`[...text]` 展开）——UTF-16
- * 原生 slice 会在边界把 4 字节 emoji 切成孤代理项，终端渲染为乱码问号
- * （TUI-5：⚙ 工具摘要 / ✖ 错误行 / ↳ 结果行三个触发面同走此单点，一处修
- * 全覆盖）。触发判据仍是 UTF-16 长度（截断门槛不变，只有切法换码点）。
+ * 字素簇切片器（懒初始化单例——truncate 首次截断时构造；Intl.Segmenter 是
+ * Node 全环境内置，零新依赖）
+ */
+let graphemeSegmenter: Intl.Segmenter | undefined;
+
+/**
+ * 单行摘要截断（超长加省略号）。切片按**字素簇**（Intl.Segmenter
+ * granularity:'grapheme'——平台内置 API 直用；desktop 件的 Intl.Segmenter
+ * 同源 kinship，但 channels→desktop 拓扑边不在白名单，故零 import 只在
+ * 此注记亲缘）。演进两跳：UTF-16 原生 slice 会切出孤代理项（TUI-5 修成
+ * 码点切片）；码点切片在 ZWJ 序列（👨‍👩‍👧‍👦 = 多码点一簇）与组合字符
+ * （基字符 + 变音符号）边界仍会把一簇切两半——簇碎裂渲染残字（A9，第十一轮
+ * 遗漏大扫 20260904-b 修成字素簇切片；⚙ 工具摘要 / ✖ 错误行 / ↳ 结果行
+ * 三个触发面同走此单点，一处修全覆盖）。触发判据仍是 UTF-16 长度（截断
+ * 门槛不变，只有切法换字素簇）。
  */
 export function truncate(text: string, max: number = BRIEF_MAX): string {
   if (text.length <= max) return text;
-  return `${[...text].slice(0, max - 1).join('')}…`;
+  graphemeSegmenter ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  let out = '';
+  let seen = 0;
+  for (const { segment } of graphemeSegmenter.segment(text)) {
+    if (seen >= max - 1) break; // 已收满 max-1 簇——第 max 位让给省略号
+    out += segment;
+    seen += 1;
+  }
+  return `${out}…`;
 }
 
 /** 拼接文本/图片内容块的文本部分（图片块以占位符表示） */

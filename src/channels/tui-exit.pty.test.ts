@@ -210,6 +210,9 @@ describe('TUI 硬退终端态复原真 pty 锁（骨架篇 §1.3 终端态复原
       // tui.stop() 单源复位在场——修前修后都必须绿（否则计数法坏 = fatal 腿假绿）
       expect(count(out, '\x1b[?2004l')).toBeGreaterThanOrEqual(1);
       expect(count(out, '\x1b[<u')).toBeGreaterThanOrEqual(1);
+      // 光标显同腿活证：pi-tui stop() 的 showCursor 复位（A8——渲染期 hideCursor
+      // 藏掉的设备态由停屏写回；缺省 PI_HARDWARE_CURSOR 关 = 渲染期无自发 ?25h）
+      expect(count(out, '\x1b[?25h')).toBeGreaterThanOrEqual(1);
     },
   );
 
@@ -227,6 +230,10 @@ describe('TUI 硬退终端态复原真 pty 锁（骨架篇 §1.3 终端态复原
       expect(count(out, '\x1b[?2004l')).toBeGreaterThanOrEqual(1); // 括号粘贴关闭
       expect(count(out, '\x1b[<u')).toBeGreaterThanOrEqual(1); // kitty 键盘协议弹栈
       expect(count(out, '\x1b[>4;0m')).toBeGreaterThanOrEqual(1); // modifyOtherKeys 复位
+      // 光标显补位（A8）：pi-tui 起屏/渲染期 hideCursor 藏光标，tui.stop() 的
+      // showCursor 不经——修前 0 在场（缺省 PI_HARDWARE_CURSOR 关 = 渲染期无自发
+      // ?25h，计数判据不掺水），修后复原钩子写回
+      expect(count(out, '\x1b[?25h')).toBeGreaterThanOrEqual(1); // 光标显
     },
   );
 });

@@ -248,6 +248,7 @@ function armTerminalRestore(): void {
       process.stdout.write('\x1b[?2004l'); // 括号粘贴模式关闭
       process.stdout.write('\x1b[<u'); // kitty 键盘协议弹栈（空栈弹栈合法）
       process.stdout.write('\x1b[>4;0m'); // modifyOtherKeys 复位缺省
+      process.stdout.write('\x1b[?25h'); // 光标显（A8：pi-tui 起屏/渲染期 hideCursor 藏掉的设备态——镜像 stop() 的 showCursor；已显再显幂等无害）
       process.stdin.setRawMode?.(false); // raw 交还（Node 出场钩亦会做——幂等兜底）
     } catch {
       // 复位尽力而为——退出路径不允许二次异常（crash.log 同款纪律）
