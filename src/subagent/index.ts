@@ -5,7 +5,7 @@
  * - 纵切一：Job 注册表（ctx.jobs）
  * - 纵切二：ctx.subagents 服务 + in-process provider（能力协商/Job 映射/预算帽/深度执法）
  */
-export { createJobsService } from './jobs.js';
+export { createJobsService, drainJobsBounded, JOBS_DRAIN_BUDGET_MS } from './jobs.js';
 export { createSubagentsService } from './service.js';
 export {
   createInProcessProvider,

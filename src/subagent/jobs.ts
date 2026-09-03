@@ -358,3 +358,53 @@ export function createJobsService(
 
   return service;
 }
+
+/** 关停序 drain 主路径的等待预算（毫秒）——全面复盘 20260903 #19 补裁：病态
+ *  executor（应用自定义 kind 无视取消信号、永不 settle）5s 内不结算即放弃等待
+ *  （批判注量级 5-10s 取下界——executor 常态结算亚秒，5s = best-effort 上限） */
+export const JOBS_DRAIN_BUDGET_MS = 5_000;
+
+/**
+ * drain 的 bounded 等待（全面复盘 20260903 #19，骨架篇 §1.3 ③ 补裁——对齐
+ * session_shutdown 的 emitSessionShutdownBounded 先例形态）。
+ *
+ * 缺陷背景：drainAll = 全量 requestCancel + 无界 `Promise.all(entry.done)`，
+ * requestCancel 仅 abort 信号不代答终态——executor 永不结算则 drain 永挂，
+ * 关停序被绑架（其后的 flush/hooks/close 全堵死，write-behind 缓冲不清零）。
+ *
+ * 语义：预算内排空完成即正常返回；到点未完成 warn 放行（挂死 executor 由进程
+ * 退出自然终结，不绑架关停与落盘）；排空自身失败仍抛（保留原裸 await 的抛错
+ * 语义——关停序外层 try 捕获、finally ctx 回卷必达）。败者 promise 已在
+ * then 第二参数内消费，无 unhandledRejection 悬账。
+ *
+ * @param jobs    排空面（ctx.jobs 服务面或注册表测试直传）
+ * @param logger  超预算告警落点
+ * @param budgetMs 等待预算覆写（缺省 JOBS_DRAIN_BUDGET_MS——测试注小值）
+ */
+export async function drainJobsBounded(
+  jobs: Pick<JobsServiceFace, 'drain'>,
+  logger: Pick<Logger, 'warn'>,
+  budgetMs: number = JOBS_DRAIN_BUDGET_MS,
+): Promise<void> {
+  // 预算钟：到点先 resolve 'timeout' 让 race 胜出（unref 保险——不阻进程退出）
+  const budget = new Promise<'timeout'>((resolve) => {
+    const timer = setTimeout(() => resolve('timeout'), budgetMs);
+    timer.unref?.();
+  });
+  // 排空失败映射为 'error' 携原错（败者不分时机都已被此回调消费——无悬账）
+  let drainError: unknown;
+  const settled = jobs.drain().then(
+    () => 'done' as const,
+    (err: unknown) => {
+      drainError = err;
+      return 'error' as const;
+    },
+  );
+  const outcome = await Promise.race([settled, budget]);
+  if (outcome === 'timeout') {
+    // 不抛错不重试：warn 可见后继续关停（flush/hooks/close 照跑）
+    logger.warn(`Job 排空超 ${budgetMs}ms 预算，放弃等待继续关停（病态 executor 由进程退出自然终结）`);
+    return;
+  }
+  if (outcome === 'error') throw drainError;
+}

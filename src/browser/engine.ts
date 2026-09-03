@@ -74,7 +74,11 @@ export function nodeVersionProblem(v: string): string | undefined {
 
 /** 裸 spawn 产物结构（组合根 browser-spawn.ts 投影——pid + 活探测两键） */
 export interface EngineChild {
-  readonly pid: number;
+  /** 引擎进程 pid。undefined = spawn 失败腿（EACCES/ENOEXEC 等——无进程可
+   *  杀）。禁止 -1 哨兵代偿（全面复盘 20260903 #18，契约篇 §6.10 ⑧）：POSIX
+   *  process.kill(-pid) 收 -1 时归一为 kill(1) = 杀 init/自身；消费面统一以
+   *  undefined 判缺席（killTree 原生 undefined 早退 = 批 90 统一语义）。 */
+  readonly pid: number | undefined;
   /** 进程仍活（exitCode === null 语义——树杀竞态判据） */
   readonly alive: () => boolean;
 }
@@ -371,13 +375,20 @@ export class BrowserEngine {
     this.status = { state: 'starting' };
     const child = this.deps.spawnEngine({ command: discovered.path, args });
     this.child = child;
-    this.deps.registry.add({
-      hostPid: process.pid,
-      childPid: child.pid,
-      server: 'browser-engine',
-      command: discovered.path,
-    });
-    this.deps.logger.info(`browser 引擎 spawn（pid=${child.pid}，profile=profile-${bootId.slice(0, 8)}）`);
+    // pid 缺席形态不入登记簿（全面复盘 20260903 #18，契约篇 §6.10 ⑧）：spawn
+    // 失败腿（child.pid undefined——无进程可杀）入册只会留 children.json 死账，
+    // 且遗留 -1 哨兵条目会被下次启动清扫再触 kill(1) 链——在场才记
+    if (child.pid !== undefined) {
+      this.deps.registry.add({
+        hostPid: process.pid,
+        childPid: child.pid,
+        server: 'browser-engine',
+        command: discovered.path,
+      });
+    }
+    this.deps.logger.info(
+      `browser 引擎 spawn（pid=${child.pid ?? 'n/a（spawn 失败腿——无进程）'}，profile=profile-${bootId.slice(0, 8)}）`,
+    );
 
     try {
       // ---- DevToolsActivePort 轮询（spawn → 可握手之间的就绪信号） ----
@@ -493,7 +504,9 @@ export class BrowserEngine {
     if (this.connection === undefined && this.child === undefined) {
       this.status = { state: 'closed' };
     }
-    if (atClose.child !== undefined) {
+    if (atClose.child !== undefined && atClose.child.pid !== undefined) {
+      // pid 在场才树杀/净退（全面复盘 20260903 #18）：undefined = spawn 失败腿
+      // （无进程可杀、也从未入册）——两调用在此形下都是死账面动作
       this.deps.killTree(atClose.child.pid); // 树杀兜底（Browser.close 未达/竞态）
       this.deps.registry.remove(atClose.child.pid);
     }

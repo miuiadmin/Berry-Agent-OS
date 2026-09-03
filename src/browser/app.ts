@@ -113,12 +113,21 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
       /* ---- 云端 provider 占位（凭证检测 + 优先级链数据面——执行面零接） ---- */
       detectProviders(cfg, ui, ctx);
 
-      // 孤儿清扫（先于自家 spawn——上次宿主非正常退出残留的引擎进程树）
-      void deps.registry.sweep({ kill: (pid) => deps.killTree(pid) }).then((report) => {
-        if (report.killed.length > 0) {
-          ctx.logger.warn(`browser 孤儿引擎清扫 ${report.killed.length} 株（${report.killed.join(',')}）`);
-        }
-      });
+      // 孤儿清扫（先于自家 spawn——上次宿主非正常退出残留的引擎进程树）。
+      // kill 闭包加 pid>0 卫（全面复盘 20260903 #18，契约篇 §6.10 ⑧）：在册
+      // 历史 -1 哨兵死账（修码前的 children.json 遗留）与非法 pid 不触信号——
+      // killTree(-1) 会归一成 process.kill(1) = 杀 init/自身
+      void deps.registry
+        .sweep({
+          kill: (pid) => {
+            if (pid > 0) deps.killTree(pid);
+          },
+        })
+        .then((report) => {
+          if (report.killed.length > 0) {
+            ctx.logger.warn(`browser 孤儿引擎清扫 ${report.killed.length} 株（${report.killed.join(',')}）`);
+          }
+        });
 
       // 引擎构造（零 spawn——首用才起链；notify/logger 经 ctx 接线）
       const engine = new BrowserEngine({

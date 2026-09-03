@@ -4,9 +4,9 @@
  * 全真件：真 createContext + 真注册表，零 mock（纯逻辑层，无模型面）。
  * 锁行为面：kind 词汇纪律 / run 糖结算映射 / cancel=请求非结算 /
  * first-wins / done 永不 reject / owner 围栏 / drain 排空 / job_settled 载荷 /
- * 作用域回卷兜底。
+ * 作用域回卷兜底 / drain bounded 等待（全面复盘 20260903 #19）。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createContext } from '../context/context.js';
 import { createLogger } from '../context/logger.js';
 import type { ContextScope } from '../context/types.js';
@@ -19,7 +19,7 @@ import {
   JOB_OWNER_MISMATCH,
 } from '../contracts/errors.js';
 import type { JobsServiceFace } from '../contracts/jobs.js';
-import { createJobsService, TERMINAL_RETENTION_CAP } from './jobs.js';
+import { createJobsService, drainJobsBounded, TERMINAL_RETENTION_CAP } from './jobs.js';
 
 /** 建根作用域 + 注册表（silent logger——测试不产日志噪声） */
 function setup(): { ctx: ContextScope; jobs: JobsServiceFace } {
@@ -382,3 +382,35 @@ describe('Job 注册表 — 终态条目保留帽（骨架篇 §6.2，复盘 202
 function expectCodeSync(code: string, fn: () => unknown): void {
   expect(fn).toThrowError(expect.objectContaining({ code }));
 }
+
+describe('drainJobsBounded —— 关停序 drain 有界等待（全面复盘 20260903 #19）', () => {
+  it('预算内排空完成：真等迟到结算、正常返回零告警', async () => {
+    const { jobs } = setup();
+    const entry = jobs.create({ kind: 'subagent' }); // 由下方计时器迟到结算
+    setTimeout(() => entry.settle('completed'), 20);
+    const warn = vi.fn();
+    const start = Date.now();
+    await drainJobsBounded(jobs, { warn }, 2_000);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(15); // 真等待了结算（非跳过 drain）
+    expect(warn).not.toHaveBeenCalled();
+    await expect(entry.handle.done).resolves.toBe('completed');
+  });
+
+  it('病态 executor（无视取消、永不结算）：预算到点 warn 放行不挂死', async () => {
+    const { jobs } = setup();
+    jobs.create({ kind: 'subagent' }); // settle 从不被调——requestCancel 仅 abort 不代答终态
+    const warn = vi.fn();
+    const start = Date.now();
+    await drainJobsBounded(jobs, { warn }, 30); // 小预算注入（缺省 5s——测试不等满额）
+    expect(Date.now() - start).toBeLessThan(2_000); // 放行不挂死（无界裸 await 时代本行永挂）
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain('放弃等待继续关停');
+  });
+
+  it('排空自身失败仍抛（原裸 await 抛错语义保留——关停序 try 捕获走 finally 回卷）', async () => {
+    const warn = vi.fn();
+    const boom = new Error('drain 炸');
+    await expect(drainJobsBounded({ drain: () => Promise.reject(boom) }, { warn }, 2_000)).rejects.toBe(boom);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});

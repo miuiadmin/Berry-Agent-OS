@@ -30,5 +30,9 @@ export function spawnEngineProcess(opts: { command: string; args: readonly strin
   const alive = (): boolean => child.exitCode === null && child.signalCode === null;
   // 子进程引用脱钩（宿主不 wait 引擎退出——收场走树杀，防 zombie 也不归我们）
   child.unref();
-  return { pid: child.pid ?? -1, alive };
+  // pid 直返不产哨兵（全面复盘 20260903 #18，契约篇 §6.10 ⑧）：spawn 失败腿
+  // （EACCES/ENOEXEC——无进程）child.pid 为 undefined，`?? -1` 代偿会被
+  // killTree(-1) 归一成 process.kill(1) = 杀 init/自身（批 90 pid 哨兵毒化
+  // 裁定的同律漏网）；undefined 判缺席交消费面早退（engine.ts 三处守门）
+  return { pid: child.pid, alive };
 }

@@ -517,8 +517,10 @@ describe('browser 引擎生命周期', () => {
     alive?: () => boolean;
     /** 起链等待帽覆写（缺省 2000——超帽腿注入小值） */
     startupTimeoutMs?: number;
-    /** spawn pid 序列（缺省恒 424242——代际竞速腿第二次 spawn 换新 pid） */
-    pids?: number[];
+    /** spawn pid 序列（缺省恒 424242——代际竞速腿第二次 spawn 换新 pid；元素
+     *  显式 undefined = spawn 失败腿〔EACCES/ENOEXEC——child.pid undefined〕，
+     *  全面复盘 20260903 #18 红锁用；序列短于 spawn 次数仍回缺省值） */
+    pids?: Array<number | undefined>;
   }): {
     engine: BrowserEngine;
     killTree: ReturnType<typeof vi.fn>;
@@ -553,7 +555,11 @@ describe('browser 引擎生命周期', () => {
           );
         }
         spawnCount += 1;
-        return { pid: opts.pids?.[spawnCount - 1] ?? 424_242, alive: opts.alive ?? (() => true) };
+        // pid 序列取值：显式 undefined 原样透传（spawn 失败腿——不可 ?? 兜底
+        // 回真值，否则 #18 红锁测不到失败形态）；序列短于次数回缺省值
+        const pidSeq = opts.pids;
+        const pid = pidSeq !== undefined && spawnCount - 1 < pidSeq.length ? pidSeq[spawnCount - 1] : 424_242;
+        return { pid, alive: opts.alive ?? (() => true) };
       },
       killTree,
       registry,
@@ -606,6 +612,23 @@ describe('browser 引擎生命周期', () => {
     expect(other.session.browserContextId).toBe('CTX-2');
 
     await engine.dispose();
+  });
+
+  it('spawn 无 pid 形（不可执行引擎腿）：不入登记簿、起链失败清算不树杀不净退（全面复盘 20260903 #18——pid 哨兵毒化）', async () => {
+    const dataDir = makeEngineDir();
+    const { engine, killTree, registry } = makeEngine({
+      dataDir,
+      idleMs: 60_000,
+      pids: [undefined], // spawn 失败腿：引擎路径在盘但 EACCES/ENOEXEC——child.pid undefined
+      alive: () => false, // 启动即死：waitForDevToolsPort 首轮即拒（不烧 20s 超帽）
+    });
+    // 修前红（`?? -1` 哨兵形态）：childPid:-1 入 children.json 死账 + teardown
+    // killTree(-1)（POSIX kill(-pid) 收 -1 归一 kill(1) = 杀 init/自身）+
+    // remove(-1)；修后（pid undefined 判缺席）三面全静默——契约篇 §6.10 ⑧
+    await expect(engine.acquireContext('sess-A')).rejects.toThrow();
+    expect(registry.add).not.toHaveBeenCalled();
+    expect(killTree).not.toHaveBeenCalled();
+    expect(registry.remove).not.toHaveBeenCalled();
   });
 
   it('两级闲置回收：context 闲置 dispose → 零活 context 引擎闲置收场（树杀+净退）', async () => {

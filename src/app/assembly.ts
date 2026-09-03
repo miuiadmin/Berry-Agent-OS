@@ -161,7 +161,12 @@ import { createSubagentChildFactory } from './subagent-factory.js';
 import { emitSessionShutdownBounded } from './subagent-child.js';
 import { createTickRunner } from './scheduler-runner.js';
 import { createTickOsRegistrar } from './tick-register.js';
-import { createJobsService, createSubagentsService, createInProcessProvider } from '../subagent/index.js';
+import {
+  createJobsService,
+  createSubagentsService,
+  createInProcessProvider,
+  drainJobsBounded,
+} from '../subagent/index.js';
 import { createAgentTool } from './subagent-app.js';
 import type { SubagentSettlement } from '../contracts/subagent.js';
 import { createSubagentNotifier } from './notify.js';
@@ -3097,10 +3102,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         // 变更监听先退订：后续 ctx 回卷逐件注销应用工具/段时的广播不再触发
         // writeHeader/提示词重建（库未关也不落关停期快照——非模型可见时点）
         unwatchChangeEvents();
-        // Job 排空主路径（骨架篇 §6.2）：全量 cancel + await 全部结算——子代理等
-        // 后台任务的 executor 在结算路里可能还要写子会话事件，必须在 flush 屏障
-        // 前收口（作用域回卷的 fire-and-forget 兜底只管异常路径，见 jobs.ts）
-        await jobs.drain();
+        // Job 排空主路径（骨架篇 §6.2 + §1.3 ③ 补裁）：全量 cancel + await 全部
+        // 结算——子代理等后台任务的 executor 在结算路里可能还要写子会话事件，
+        // 必须在 flush 屏障前收口（作用域回卷的 fire-and-forget 兜底只管异常路
+        // 径，见 jobs.ts）。bounded 等待（全面复盘 20260903 #19）：病态 executor
+        // （无视取消信号永不 settle）5s 预算到点 warn 放行——不绑架其后的
+        // flush/hooks/close（write-behind 缓冲不被堵死）；排空失败仍抛（原裸
+        // await 语义，本段 try 捕获 → finally ctx 回卷必达）
+        await drainJobsBounded(jobs, ctx.logger);
         // worker 域收编（契约篇 §1.7 关停编舞：jobs drain 之后、persistence.close
         // 之前——域死回卷/在途结算不再产生待落盘面；两舰队同批，与 ctx LIFO 同段）
         ring1Fleet.terminateAll('进程关停域收编');

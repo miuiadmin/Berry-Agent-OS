@@ -63,6 +63,7 @@ import { runInCallerChain, runInSessionChain } from '../context/chain.js';
 // D3 装载分面分区测试出口：按区身份探服务 + 应用区 id 构造（context 模块词汇单源）
 import { appZoneId, tryResolveService } from '../context/index.js';
 import type { SubagentProvider, SubagentResult, SubagentsServiceFace } from '../contracts/subagent.js';
+import type { JobsServiceFace } from '../contracts/jobs.js';
 import { fauxProvider, type LlmService } from '../llm/index.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -3646,6 +3647,24 @@ describe('session_shutdown parallel bounded（二十九批增补 8②）', () =>
     await runtime.shutdown(); // 无上限时代本行挂死 → 测试超时红
     expect(Date.now() - start).toBeLessThan(5_000); // 2s 预算 + flush/close 余量
   }, 10_000);
+});
+
+describe('jobs drain bounded（全面复盘 20260903 #19——关停序有界等待）', () => {
+  it('病态 executor（自定义 kind 无视取消、永不结算）：drain 5s 预算到点放行——shutdown 不挂死、flush/hooks/close 照跑', async () => {
+    const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
+    const jobs = runtime.ctx.get<JobsServiceFace>('jobs');
+    const unregister = jobs.registerKind('hang-exec');
+    // 形状 (a)（finding #19 验证节）：应用自定义 kind 的 executor 无视取消信号、
+    // settle 从不被调——drain 的 requestCancel 仅 abort 不代答终态，裸 await 时代
+    // 整个关停序永挂（flush 缓冲堵死）
+    jobs.create({ kind: 'hang-exec' });
+    const start = Date.now();
+    await runtime.shutdown(); // 无界时代本行挂死 → 测试超时红
+    // 预算钟真等了（非跳过 drain——排空仍是关停序主路径）且 bounded 放行
+    expect(Date.now() - start).toBeGreaterThanOrEqual(4_800);
+    expect(Date.now() - start).toBeLessThan(10_000); // 5s 预算 + flush/hooks/close 余量
+    unregister();
+  }, 20_000);
 });
 
 describe('S6 关停序（abort-all / quiesce 断言——骨架篇 §1.3 S6 形态⑤）', () => {
