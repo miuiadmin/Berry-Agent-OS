@@ -149,25 +149,25 @@ describe('事件词汇纪律', () => {
   });
 
   it('registerSessionEventType 显式注册后可写；重复注册拒绝', () => {
-    registerSessionEventType({ type: 'test/custom-event', category: 'log-only' });
+    registerSessionEventType({ type: 'test/custom-event', tier: 'stable', category: 'log-only' });
     const s = new Session();
     s.append('test/custom-event', { k: 1 });
     expect(s.length).toBe(1);
-    expect(() => registerSessionEventType({ type: 'test/custom-event', category: 'log-only' })).toThrowError(
-      /重复注册/,
-    );
+    expect(() =>
+      registerSessionEventType({ type: 'test/custom-event', tier: 'stable', category: 'log-only' }),
+    ).toThrowError(/重复注册/);
   });
 
   // ignorable 盖章纪律（2026-08-23 生态读码补钉 dsh-1）：向前兼容位唯一生产者 = 注册项
   it('注册项声明 ignorable → append 盖章写入事件（调用者无法手填）', () => {
-    registerSessionEventType({ type: 'test/ignorable-event', category: 'log-only', ignorable: true });
+    registerSessionEventType({ type: 'test/ignorable-event', category: 'log-only', tier: 'stable', ignorable: true });
     const s = new Session();
     const event = s.append('test/ignorable-event', { k: 1 });
     expect(event.ignorable).toBe(true);
   });
 
   it('注册项未声明 ignorable → 事件不携带该位（缺省 = 读侧必须认识）', () => {
-    registerSessionEventType({ type: 'test/plain-event', category: 'log-only' });
+    registerSessionEventType({ type: 'test/plain-event', tier: 'stable', category: 'log-only' });
     const s = new Session();
     const event = s.append('test/plain-event', { k: 2 });
     expect(event.ignorable).toBeUndefined();

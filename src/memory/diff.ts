@@ -31,7 +31,7 @@ export const MEMORY_DIFF_TYPE = 'memory/diff';
 
 // 模块加载时注册词汇（官方件每进程只经宿主注册表 import 一次，无重复注册路径；
 // 文件应用 + /reload 的重注册 seam 见记忆篇 §6 落码定稿注记）
-registerSessionEventType({ type: MEMORY_DIFF_TYPE, category: 'surface' });
+registerSessionEventType({ type: MEMORY_DIFF_TYPE, category: 'surface', tier: 'stable' });
 
 /** 三态操作词汇：'+', '~', and '-' (新增 / 修正 / 撤回——ASCII 编码，规范篇的 '−' 是排版形态) */
 export type MemoryDiffOp = '+' | '~' | '-';

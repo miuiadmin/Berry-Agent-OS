@@ -150,7 +150,7 @@ describe('契约 5 planTagOperations / assertDistTagTerminal：终态统一律',
 });
 
 describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
-  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + LICENSE + 教学例 + 官方应用清单 + 出厂技能 + 构建溯源面 + 版本史入口） */
+  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + LICENSE + 教学例 + 官方应用清单 + 出厂技能 + 构建溯源面 + 版本史入口 + API 面） */
   const CLEAN = [
     'package.json',
     'README.md',
@@ -162,6 +162,19 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     // 构建溯源面（遗漏大扫 20260902 #4）：build 链尾步写的 commit 元数据——缺席
     // 时运行侧 readBuildMeta=null 静默降级，检视面显式锚定
     'dist/.build-meta.json',
+    // API 面随包物（API 治理 §6.13.9，第八十七批批 2）：六键 d.ts 面 + surface.json
+    // 运行时位 + paths 模板 + 声明树三锚（包内相对引用的解析目标）
+    'dist/api/surface.json',
+    'dist/api/berryagent.d.ts',
+    'dist/api/typebox.d.ts',
+    'dist/api/typebox-value.d.ts',
+    'dist/api/typebox-compile.d.ts',
+    'dist/api/berryagent-llm.d.ts',
+    'dist/api/berryagent-sqlite.d.ts',
+    'dist/api/tsconfig.paths.json',
+    'dist/contracts/index.d.ts',
+    'dist/llm/provider-face.d.ts',
+    'dist/persist/app-sqlite.d.ts',
     'examples/tool-echo/index.ts',
     'examples/tool-echo/README.md',
     'apps/berrycode.app.yaml',
@@ -203,15 +216,33 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     expect(v.missing.join(' ')).toMatch(/CHANGELOG\.md/);
   });
   it('测试/声明/映射/源码/构建配置混入 → 违禁（violations 逐个点名）', () => {
+    // 声明违禁代表换成 dist/app/ 路径：dist/contracts/index.d.ts 自批 2 起是
+    // API 声明树例外位（CLEAN 已含），例外区外的主构建声明泄漏照红
     const v = inspectPackEntries([
       ...CLEAN,
       'dist/tools/fs.test.js',
-      'dist/contracts/index.d.ts',
+      'dist/app/main.d.ts',
       'dist/app/main.js.map',
       'src/app/main.ts',
     ]);
     expect(v.ok).toBe(false);
     expect(v.violations).toHaveLength(4);
+  });
+  it('API 声明三区豁免：dist/api/** + dist/contracts/** + llm/persist 两类型锚零违禁（§6.13.9 刻意随包——零声明纪律的例外面）', () => {
+    // 例外区外新增声明（主构建产物）照红——豁免是三区白名单不是 .d.ts 全放行
+    const v = inspectPackEntries([...CLEAN, 'dist/contracts/events.d.ts', 'dist/api/extra.d.ts']);
+    expect(v.violations).toHaveLength(0);
+    expect(v.ok).toBe(true);
+  });
+  it('缺 dist/api/surface.json → 检视不过（API 治理 §6.13.9：运行时消费位裸奔即发布物残缺）', () => {
+    const v = inspectPackEntries(CLEAN.filter((p) => p !== 'dist/api/surface.json'));
+    expect(v.ok).toBe(false);
+    expect(v.missing.join(' ')).toMatch(/dist\/api\/surface\.json/);
+  });
+  it('dist/api/ 声明面计数 <6 → 检视不过（六键缺一即应用侧 tsc 断链——计数不点名单，api-decls/ 增键不回改本清单）', () => {
+    const v = inspectPackEntries(CLEAN.filter((p) => p !== 'dist/api/typebox-compile.d.ts'));
+    expect(v.ok).toBe(false);
+    expect(v.missing.join(' ')).toMatch(/dist\/api\/\*\.d\.ts/);
   });
   it('examples/*.ts 教学源码不违禁（必在例外——随包发布物非待编译源码）', () => {
     // src/ 前缀拒是「产品源码不随包」口径；examples/ 是刻意随包的教学例——
@@ -411,6 +442,19 @@ function greenBase(version) {
             // 溯源面（遗漏大扫 20260902 #4）：greenBase 罐头面与必在清单同步——
             // 缺行会让契约 3 检视在管线测里红（夹具随身带新锚面）
             'dist/.build-meta.json',
+            // API 面随包物（API 治理 §6.13.9，第八十七批批 2）：greenBase 罐头面与
+            // 必在清单同步——surface.json + 六键 d.ts + paths 模板 + 声明树三锚
+            'dist/api/surface.json',
+            'dist/api/berryagent.d.ts',
+            'dist/api/typebox.d.ts',
+            'dist/api/typebox-value.d.ts',
+            'dist/api/typebox-compile.d.ts',
+            'dist/api/berryagent-llm.d.ts',
+            'dist/api/berryagent-sqlite.d.ts',
+            'dist/api/tsconfig.paths.json',
+            'dist/contracts/index.d.ts',
+            'dist/llm/provider-face.d.ts',
+            'dist/persist/app-sqlite.d.ts',
             'examples/tool-echo/index.ts',
             'examples/tool-echo/README.md',
             'apps/berrycode.app.yaml',

@@ -23,6 +23,7 @@ import {
 } from '../contracts/errors.js';
 import { LIVE_EVENT_CATALOG } from '../contracts/events.js';
 import type { EventName, LiveEventDefinition } from '../contracts/events.js';
+import type { HostFace } from '../contracts/api.js';
 import { registerAppMessageRole } from '../contracts/messages.js';
 import type { MessageRoleDefinition } from '../contracts/messages.js';
 import { registerAppSessionEventType } from '../contracts/session-events.js';
@@ -132,12 +133,19 @@ class ContextRuntime {
   readonly eventStats = new Map<string, number>();
   /** 单条 effect 回卷竞速时钟（毫秒）——dispose 路径用（见 ContextScopeImpl.dispose） */
   readonly disposeTimeoutMs: number;
+  /**
+   * 宿主自省面（API 治理 §6.13.5，第八十七批）：createContext 一次性注入，
+   * 全体 fork 共享本运行时实例天然级联——不随作用域回卷（宿主事实非应用注册）。
+   * undefined = 未注入（测试根/裁剪面），ctx.host 读到 undefined。
+   */
+  readonly host: HostFace | undefined;
 
   constructor(
     rootName: string,
     logger?: Logger,
     rateLimit?: { capacity: number; perMinute: number },
     disposeTimeoutMs?: number,
+    host?: HostFace,
   ) {
     this.rootName = rootName;
     this.rootLogger = logger ?? createLogger({ module: 'context' });
@@ -145,6 +153,7 @@ class ContextRuntime {
       rateLimit ?? { capacity: DEFAULT_RATE_CAPACITY, perMinute: DEFAULT_RATE_PER_MINUTE },
     );
     this.disposeTimeoutMs = disposeTimeoutMs ?? DEFAULT_DISPOSE_TIMEOUT_MS;
+    this.host = host;
     for (const def of LIVE_EVENT_CATALOG) this.liveEvents.set(def.name, def);
   }
 
@@ -298,6 +307,14 @@ class ContextScopeImpl implements ContextScope {
 
   get config(): Readonly<Record<string, unknown>> {
     return this.configView;
+  }
+
+  /**
+   * 宿主自省面透读（API 治理 §6.13.5）：根运行时持有、fork 共享——任意深度
+   * 作用域读同一实例（天然级联，不随作用域回卷）。undefined = 根未注入。
+   */
+  get host(): HostFace | undefined {
+    return this.runtime.host;
   }
 
   get signal(): AbortSignal {
@@ -746,7 +763,7 @@ class ContextScopeImpl implements ContextScope {
  */
 export function createContext(opts: ContextOptions = {}): ContextScope {
   const name = opts.name ?? 'root';
-  const runtime = new ContextRuntime(name, opts.logger, opts.rateLimit, opts.disposeTimeoutMs);
+  const runtime = new ContextRuntime(name, opts.logger, opts.rateLimit, opts.disposeTimeoutMs, opts.host);
   // 根作用域行籍 = 官方名位（宿主 provide 单段小写名的自留地；行 fork 由
   // loader 按行籍注入覆盖——契约篇 §1.5 provide 两段式分级）
   const scope = new ContextScopeImpl(runtime, name, opts.config, runtime.rootLogger.child(name), undefined, true);

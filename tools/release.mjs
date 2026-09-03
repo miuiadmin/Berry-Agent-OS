@@ -199,7 +199,9 @@ export function parseNpmPackJson(stdout) {
  * apps/<id>.app.yaml + skills/<name>/SKILL.md（2026-09-01 全面复盘 G-1——官方应用
  * 清单与出厂技能缺席时两消费点〔loadOfficialApps/factorySkillRoot〕均走
  * 「目录缺失=静默降级」，装机后默认应用承诺无声破裂，检视面显式验收）。
- * 必不在：测试产物 / 声明 / 映射 / src/ 前缀源码（examples/ 除外）/ 构建配置。
+ * 必不在：测试产物 / 声明（API 治理三声明区例外：dist/api/ + dist/contracts/ +
+ * llm/persist 两类型锚——§6.13.9 刻意随包，第八十七批批 2）/ 映射 / src/ 前缀
+ * 源码（examples/ 除外）/ 构建配置。
  * @param {(string|{path:string})[]} files npm pack --json 的 files 列表
  *   （新旧 npm 形状兼容：字符串或 {path} 对象皆收）
  * @returns {{ok:boolean, missing:string[], violations:string[]}}
@@ -226,10 +228,36 @@ export function inspectPackEntries(files) {
   // 消费者经本文件得到版本史入口」且 files 数组显式含它——同级随包物 README/
   // LICENSE 都有 mustHave，唯独它裸奔；手滑删 files 行即静默绿发布
   mustHave('CHANGELOG.md（版本史入口）', (p) => p === 'CHANGELOG.md');
+  // API 面随包物（API 治理 §6.13.9，第八十七批批 2）：dist/api/ 是应用侧 tsc 的
+  // 六虚拟键消费面——surface.json 运行时位 + .d.ts 面（≥6：六键手稳件）+ paths
+  // 模板；六键 d.ts 的相对引用在**包内**解析到声明树（dist/contracts/** +
+  // llm/provider-face + persist/app-sqlite 三个类型锚），缺席即应用沙盒 tsc
+  // 断链。emit-api-decls 锚定核验只保构建期，检视面再保发布面（files 面漂移
+  // /构建链漏子步两路都红——.build-meta.json 先例同型）。d.ts 计数不点名单文件
+  // 而取 ≥6：api-decls/ 增第七键不需回改本清单（两真相源不立）。
+  mustHave('dist/api/surface.json（API 面快照运行时位）', (p) => p === 'dist/api/surface.json');
+  mustHave(
+    'dist/api/*.d.ts（六虚拟键声明面，≥6）',
+    () => paths.filter((q) => q.startsWith('dist/api/') && q.endsWith('.d.ts')).length >= 6,
+  );
+  mustHave('dist/api/tsconfig.paths.json（应用侧 paths 模板）', (p) => p === 'dist/api/tsconfig.paths.json');
+  mustHave('dist/contracts/index.d.ts（公开根声明树锚）', (p) => p === 'dist/contracts/index.d.ts');
+  mustHave('dist/llm/provider-face.d.ts（第五键类型锚）', (p) => p === 'dist/llm/provider-face.d.ts');
+  mustHave('dist/persist/app-sqlite.d.ts（第六键类型锚）', (p) => p === 'dist/persist/app-sqlite.d.ts');
+  // 声明豁免位（§6.13.9——零声明纪律的刻意例外，见 violations 处 DECL_OK 注记）
+  const isDeclaredApiFace = (p) =>
+    p.startsWith('dist/api/') ||
+    p.startsWith('dist/contracts/') ||
+    p === 'dist/llm/provider-face.d.ts' ||
+    p === 'dist/persist/app-sqlite.d.ts';
   const violations = paths.filter(
     (p) =>
       /\.test\.js$/.test(p) ||
-      /\.d\.ts$/.test(p) ||
+      // .d.ts 违禁 = 主构建产物零声明纪律；声明例外三区：dist/api/ 六键面 +
+      // dist/contracts/ 公开根声明树 + llm/persist 两类型锚（§6.13.9 刻意随包，
+      // tsconfig.api.json emitDeclarationOnly 子步产——主 tsconfig.build 零声明
+      // 纪律不变，例外区外声明泄漏照红）
+      (p.endsWith('.d.ts') && !isDeclaredApiFace(p)) ||
       /\.js\.map$/.test(p) ||
       p.startsWith('src/') ||
       p.startsWith('tools/') ||

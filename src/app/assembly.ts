@@ -147,6 +147,8 @@ import {
   mergeRequestForApp,
   resolveDefaultApp,
 } from './app-registry.js';
+import { buildHostFace } from './host-face.js';
+import type { FormFactor } from '../contracts/api.js';
 import type { AppManifest } from '../contracts/app.js';
 import { createBuiltinRegistry, collectBuiltinMigrations } from './builtins.js';
 import { assembleBuiltinDeps } from './builtin-deps.js';
@@ -611,7 +613,11 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   const persistEnabled = opts.persist !== false;
 
   /* ---- ① 根作用域（模块加载器/应用 fork 的锚） ---- */
-  const ctx = createContext({ name: 'app' });
+  /* 运行形态（API 治理 §6.13.10/§6.13.5）：daemon 命令族 = daemon 形态，其余
+   * 一切进程（tui/run/tick/诊断装配）= standalone 单机缺省——server 形挂账。
+   * ctx.host 自省面随根注入（根运行时持有、全体 fork 天然级联——§6.13.5）。 */
+  const formFactor: FormFactor = opts.processKind === 'daemon' ? 'daemon' : 'standalone';
+  const ctx = createContext({ name: 'app', host: buildHostFace(formFactor) });
 
   /* ---- ①b project-aliases 表装载（canonical 根重定向——context 宿主原语，
    * 记忆篇 §3 挂账随检索族纵切批兑现）：须早于任何 ownerKey/信任判定求值。
@@ -785,7 +791,12 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * 解析/校验失败 = 启动断言拒启（官方件随包，坏 = 发版事故，宁拒绝不误读）；
    * 第三方清单 glob 发现面挂账随 ctx.apps install。预算表随清单构建
    * （canAfford app 维数据源——④b llm 服务闭包读它，装载序上先行）。 */
-  const officialApps = loadOfficialApps();
+  const officialApps = loadOfficialApps(undefined, {
+    // legacy 聚合告警（§6.13.4 出口 4）：api 块缺席清单 per-boot 一次 warn——
+    // 官方件批 2 回填后常态零发；第三方形态接入后此面才真有读者
+    onLegacyApps: (ids) =>
+      ctx.logger.warn(`以下应用清单缺 api 块（legacy 容忍态——面/行为按宿主当前，批 4 收剑翻必填）：${ids.join('、')}`),
+  });
   /** 在册应用 id 集（D1 清单投影批）：组合树行 app 键取值域——loadComposition
    * 触发①执法面（boot :1213 与 /reload fresh :1688 两消费点共用；装载序上官方
    * 清单先行于组合树合成，键集就绪时点成立） */

@@ -406,6 +406,21 @@ export const APP_NOT_FOUND = registerErrorCode('APP_NOT_FOUND');
 export const APP_SHUTDOWN_QUIESCE_VIOLATED = registerErrorCode('APP_SHUTDOWN_QUIESCE_VIOLATED');
 
 /* ------------------------------------------------------------------ */
+/* API 协商码族（契约篇 §6.13 声明协商层，2026-09-03 第八十七批——与装载 */
+/* 门 APP_ 族同拒载语义、不同前缀：API_ 专司面/版本/能力协商，APP_ 专司   */
+/* 应用形状/config；§6.13.4 错误码族归属条）。                           */
+/* ------------------------------------------------------------------ */
+
+/** API 协商：宿主 apiVersion 低于应用声明 minApiVersion 硬地板——拒载（message 载 expected/actual/升级指引三段；契约篇 §6.13.4 装载门出口 1） */
+export const API_VERSION_MISMATCH = registerErrorCode('API_VERSION_MISMATCH');
+/** API 协商：import 实验键未在清单 api 块 experimental 数组声明——装载期拒（契约即知情；§6.13.4 experimental 执法点，与 transform 门禁同执法位） */
+export const API_EXPERIMENTAL_UNDECLARED = registerErrorCode('API_EXPERIMENTAL_UNDECLARED');
+/** API 协商：应用要求本构建缺席的能力——server 形装载器拒绝面（能力集是显式面非「少装几个件」；§6.13.10——现役 standalone/daemon 全能力在构建面，真实消费方随 server 形落码） */
+export const API_CAPABILITY_MISSING = registerErrorCode('API_CAPABILITY_MISSING');
+/** API 协商：apiVersion 字面格式非法（非 MAJOR.MINOR——清单校验后的执法面防御式复验；前置校验归 APP_INVALID 语境，本码 = 运行期残余逃逸的 fail-loud） */
+export const API_VERSION_MALFORMED = registerErrorCode('API_VERSION_MALFORMED');
+
+/* ------------------------------------------------------------------ */
 /* webui 码族（契约篇 §6.8 Web 通道第一刀，2026-08-30——回环三防线与     */
 /* 端口占用的装配期执法面：fail-at-startup 拒启非运行期警告）。          */
 /* ------------------------------------------------------------------ */

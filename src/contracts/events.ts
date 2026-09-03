@@ -6,6 +6,8 @@
  * - **durable 事件**：SessionEvent 信封 append 进会话事件日志，是唯一事实源。
  */
 
+import type { ApiTier } from './api.js';
+
 /**
  * 活体事件名。两种形态：宿主词（无斜线，或宿主域斜线式如 session/event、
  * approval/answer、app/activated）与应用自定义词（必含 `/` 域前缀）。
@@ -61,6 +63,12 @@ export interface LiveEventDefinition {
   readonly name: string;
   /** 分派模式——事件的公开契约部分（契约篇 §1「@mode」纪律：dsh 衍生） */
   readonly mode: 'emit' | 'waterfall' | 'parallel' | 'serial';
+  /**
+   * 稳定性 tier（API 治理 §6.13.3 逐符号载体——必填字段，TS 编译期扛零隐式；
+   * 第八十七批落码）。宿主目录 27 词现役全 stable；应用自定义事件同律必填
+   * （registerLiveEvent 装载面——第三方声明自己的事件稳定性 = 声明自己的 API）。
+   */
+  readonly tier: ApiTier;
   /** 载荷与语义一句话（含出处标注，供目录生成与应用作者查阅） */
   readonly note: string;
   /**
@@ -93,140 +101,167 @@ export interface LiveEventDefinition {
 export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'session/event',
+    tier: 'stable',
     mode: 'emit',
     hostReserved: true,
     note: 'SessionEvent 写入后的活体通知，载荷 { sessionId, event }（契约篇 §2.2；信封规则 dsh-11——多会话并存时订阅方可分辨归属）。hostReserved：旁听全会话 durable 载荷 + 伪造发射毒化官方消费者两半都在（U1 小刀，契约篇 §2.2 增补 9）——消费者 = 宿主总线桥与官方行（memory/goal/compaction/webui/obs）',
   },
   {
     name: 'session_start',
+    tier: 'stable',
     mode: 'emit',
     note: '会话建立或恢复完成（含崩溃修复结果）/ delegation fork 建子会话 / 装载收口补播（契约篇 §2.2 session 层；载荷 { sessionId, origin?, replay? }——origin 建会维度 initial/resume/delegation、replay 投递维度补播标记，二十九批增补 8①；应用初始化会话级状态；骨架篇 §6.4 落码注记）',
   },
   {
     name: 'session_shutdown',
+    tier: 'stable',
     mode: 'parallel',
     note: '优雅关闭广播，宿主 bounded 等待全部清理器（单条目 2s 上限、超时 warn 后继续——契约篇 §2.2 session 层二十九批增补 8②；载荷 { sessionId }）',
   },
   {
     name: 'tools_pre_execute',
+    tier: 'stable',
     mode: 'waterfall',
     note: '工具执行前守门瀑布（契约篇 §2.2 tool 层；入参 GateInput → 出参 GateAction）。应用扩展面不收 hostReserved（2026-08-30 U1 拍板裁决——第三方守门行/守门行传导〔第三十一批〕是已落码能力；旁听风险随第二梯队⑦ zone 谓词成对落地）',
   },
   {
     name: 'tools_execute',
+    tier: 'stable',
     mode: 'waterfall',
     hostReserved: true,
     note: '工具执行瀑布（契约篇 §2.2 tool 层；可整体替换执行体——M2 随应用加载器开放）。hostReserved：执行体替换位——今日零第三方消费者收之零损失，开放面随 M2 拍板另批重裁（U1 小刀，契约篇 §2.2 增补 9）',
   },
   {
     name: 'tools_post_execute',
+    tier: 'stable',
     mode: 'waterfall',
     note: '工具执行后审计瀑布（契约篇 §2.2 tool 层；只观察不影响结果）。应用扩展面不收 hostReserved（2026-08-30 U1 拍板裁决——改写对称性范本 + 守门行传导 post 腿是已落码能力；外带面风险随第二梯队⑦ zone 谓词成对落地）',
   },
   {
     name: 'tools_change',
+    tier: 'stable',
     mode: 'emit',
     note: '工具注册表变更通知（契约篇 §2.2 tool 层；装配层订阅刷新 loop 工具快照——骨架篇 §9.2 接线义务）',
   },
   {
     name: 'approval/answer',
+    tier: 'stable',
     mode: 'waterfall',
     hostReserved: true,
     note: '审批应答瀑布（骨架篇 §8.3 ApprovalService 决议面；无应答者 fail-closed）。hostReserved：审批决议位——第三方 on() 一条链抢答全部根路审批（治理攻击者评审最重一条，U1 小刀；宿主专属化+时点前置挂账第二梯队⑥）',
   },
   {
     name: 'app/activated',
+    tier: 'stable',
     mode: 'emit',
     note: '应用行激活成功（契约篇 §2.2 增补 1 生命周期组；载荷 { id, name }——组合树行 id + 应用声明名；加载器 boot 逐行必发）',
   },
   {
     name: 'app/failed',
+    tier: 'stable',
     mode: 'emit',
     note: '应用行失败（载荷 { id, code, message }——APP_ 码族；启动断言据此响亮列出，不静默跳过）',
   },
   {
     name: 'app/skipped',
+    tier: 'stable',
     mode: 'emit',
     note: '应用行跳过（载荷 { id, reason }——reason: disabled 静态禁用 / platform 平台门控；目录信任略过随信任门落地补）',
   },
   {
     name: 'app/uninstalled',
+    tier: 'stable',
     mode: 'emit',
     note: '应用行卸载完成（契约篇 §3.4 第二刀，2026-08-27 刀 2；载荷 { id, source, dataAction, affected? }——四段执行成功尾的总线广播与 durable 落账双落地；复数域 = 管理面词汇〔与 apps_* 工具族同源命名〕，单数 app/ 族是装载管线结果词——两族刻意分域）',
   },
   {
     name: 'composition/reloaded',
+    tier: 'stable',
     mode: 'emit',
     note: '组合树重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单 + 可选 ring1RestartRequired〔Ring 1 行变更需重启生效——行树化批〕+ 可选 app〔D3 单区 reload 目标应用——缺席 = 全量，在场 = 单区且三清单只含该区行〕+ 可选 droppedEvents〔卸词集警示——该区旧词 ∖ 新词，基准 = 运行时真值〕。2026-08-27 P1-2：boot 与 /reload 两时点同发——boot 路在装载收口重物化后派发，boot 时点应用 apply 期已订阅故能听到；观测/工作树类应用可作「组合树就绪」信号）',
   },
   {
     name: 'worker/spawned',
+    tier: 'stable',
     mode: 'emit',
     note: 'worker 域 spawn 即派发（契约篇 §1.7 观测锚⑩ 装机计数事件面，第二十七批刀三；载荷 { rowId, workerId }——每行一域，fleet 在装载锚总线派发；订阅方据此计量装机/运维面板）',
   },
   {
     name: 'worker/froze',
+    tier: 'stable',
     mode: 'emit',
     note: 'worker 域心跳冻结判定（契约篇 §1.7 观测锚⑨ 心跳超时事件面，第二十七批刀三；载荷 { rowId, workerId, missed }——watchdog kill 前派发；CPU 燃烧如实收窄不可判，本事件只覆盖事件循环冻结族）',
   },
   {
     name: 'worker/oom',
+    tier: 'stable',
     mode: 'emit',
     note: 'worker 域内存超限死亡归因（契约篇 §1.7 观测锚⑤ 内存超限事件面，第二十七批刀三；载荷 { rowId, workerId, diagnostic }——resourceLimits.maxOldGenerationSizeMb 超限死的 error 事件签名命中时随域死结算派发；diagnostic = 原始错误消息）',
   },
   {
     name: 'echo/tick',
+    tier: 'stable',
     mode: 'emit',
     reserved: true,
     note: 'Echo 金样事件词汇（契约篇 §1.7 金样应用，第二十七批刀三——测试资产：宿主/测试侧 emit、echo.ts 行内订阅；双拓扑 parity 测试的事件往返载荷。reserved 声明依据：派发点在测试面〔echo.test.ts〕非产品宿主——check-events 扫描面排除 .test.ts，产品 src 恒无派发点，豁免显式不静默）',
   },
   {
     name: 'echo/par',
+    tier: 'stable',
     mode: 'parallel',
     note: 'Echo 金样收窄面探针词·parallel（契约篇 §1.7 金样应用，第二十七批刀三——测试资产：echo.ts 收窄探针以正确模式派发，主域真跑通〔ok〕vs worker 桩 BRIDGE_SURFACE_NARROWED 的差分判据；零订阅者，载荷无语义）',
   },
   {
     name: 'echo/ser',
+    tier: 'stable',
     mode: 'serial',
     note: 'Echo 金样收窄面探针词·serial（同 echo/par——测试资产：收窄清单 v1 逐项核的差分判据；零订阅者，载荷无语义）',
   },
   {
     name: 'echo/wf',
+    tier: 'stable',
     mode: 'waterfall',
     note: 'Echo 金样收窄面探针词·waterfall（同 echo/par——测试资产：收窄清单 v1 逐项核的差分判据；零订阅者，链尾 next 原样透传）',
   },
   {
     name: 'prompts_change',
+    tier: 'stable',
     mode: 'emit',
     note: 'systemPrompt 段集合变更通知（契约篇 §2.2 增补 5 pi-4(a)；载荷 = 现行段 id 清单 id 字典序；与 tools_change 同族——装配层订阅重建提示词 + header reason=change，观测/UI 应用订阅刷新）',
   },
   {
     name: 'skills_change',
+    tier: 'stable',
     mode: 'emit',
     note: '技能提供方链变更通知（契约篇 §2.2 增补 6，2026-08-25 探矿轮六 #17；载荷 = 现行 provider id 清单注册序；registerProvider/注销即广播——与 tools_change/prompts_change 同族第 3 件：装配层订阅重建系统提示词，应用技能热可见）',
   },
   {
     name: 'context_transform',
+    tier: 'stable',
     mode: 'waterfall',
     note: 'LLM 请求组装最后关口的消息变换瀑布（契约篇 §2.2 message 层；载荷 = contracts 标准 AgentMessage[]，逐 handler 变换传播——loop transformContext 由组合根桥接到此钩子，按需检索注入走它。S1 双参：第二参 = 归属会话 id（transformContext 桥随批传入），handler 须 next(messages, sessionId) 逐参透传——waterfall 兜底仅保首参，单参调用丢键）',
   },
   {
     name: 'user_input',
+    tier: 'stable',
     mode: 'waterfall',
     note: '用户输入进模型 run 前的消息级变换瀑布（契约篇 §2.2 message 层增补 7②，2026-08-27 P1-2 兑现：斜杠展开/模板替换/技能命令扩展；载荷双参 (message, sessionId)——与 context_transform 同款多驱动归属参数，handler 须 next(message, sessionId) 逐参透传。派发点 = 全部批消费位（run 入口/followUp drain/重试 drain/turn 边界 steer 注入），凡不进 run 批的 inject 审计路不过；消费点竞速挂起钟 5s）',
   },
   {
     name: 'turn_stopping',
+    tier: 'stable',
     mode: 'serial',
     note: '模型 run 结算后逐个征询是否续跑（契约篇 §2.2 turn 层增补 7①，2026-08-27 P1-2 兑现：载荷 { sessionId, stopReason }；每次 runWithRetry 结算后、followUp 循环复查前派发，全部 stopReason 都发、dismantled 跳过；续跑 = handler 内经会话面 deliver 投递（running 走 steer 由循环消费——零新返回值）；消费点竞速挂起钟 5s）',
   },
   {
     name: 'agent_pre_step',
+    tier: 'stable',
     mode: 'waterfall',
     note: '进模型步前复验瀑布（契约篇 §2.2 message 层既有位，骨架篇 §6.8 刀三 T7-A 落码：每个模型调用前派发一次，载荷 { sessionId }——首步含开批消息落账之后。handler 短路返回 { stop: true } = run 正常收场（非 mid-run 硬断，「正在跑的轮跑完为止」不破）；未短路须 next() 透传。宿主消费点 = goal 件预算/行态复验（token 爆 → stopped budget + 停；行已非 active → 幂等让位 no-op 收场不覆写）；消费点竞速挂起钟 5s（preStepTimeoutMs）——超时/抛错走 run failed 现径）',
   },
   {
     name: 'job_settled',
+    tier: 'stable',
     mode: 'emit',
     note: '后台任务到达终态（契约篇 §2.2 应用层；载荷 {id, kind, terminal, label?, output?, error?}——结算副作用广播，订阅方据此决定三通道唤醒）',
   },

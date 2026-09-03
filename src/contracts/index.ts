@@ -5,6 +5,7 @@
  */
 
 export * from './errors.js';
+export * from './api.js';
 export * from './events.js';
 export * from './llm.js';
 export * from './messages.js';

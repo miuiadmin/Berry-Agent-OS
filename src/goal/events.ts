@@ -25,8 +25,8 @@ import type { SessionEventTypeDefinition } from '../contracts/session-events.js'
 
 /** goal 件 durable 事件类型定义（category log-only——落日志即目的，不进表面推导） */
 export const GOAL_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
-  { type: 'goal/evidence', category: 'log-only' },
-  { type: 'goal/summary', category: 'log-only' },
+  { type: 'goal/evidence', category: 'log-only', tier: 'stable' },
+  { type: 'goal/summary', category: 'log-only', tier: 'stable' },
 ];
 
 // 模块加载即注册（官方件随包代码存在、组合无关）

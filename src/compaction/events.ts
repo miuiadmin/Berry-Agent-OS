@@ -24,10 +24,10 @@ import type { SessionEventTypeDefinition } from '../contracts/session-events.js'
 
 /** compaction 四词定义（category 全 log-only——不进表面推导，落日志即目的） */
 export const COMPACTION_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
-  { type: 'compaction/start', category: 'log-only' },
-  { type: 'compaction/summary', category: 'log-only' },
-  { type: 'compaction/end', category: 'log-only' },
-  { type: 'compaction/failed', category: 'log-only' },
+  { type: 'compaction/start', category: 'log-only', tier: 'stable' },
+  { type: 'compaction/summary', category: 'log-only', tier: 'stable' },
+  { type: 'compaction/end', category: 'log-only', tier: 'stable' },
+  { type: 'compaction/failed', category: 'log-only', tier: 'stable' },
 ];
 
 // 模块加载即注册（官方件随包代码存在、组合无关）

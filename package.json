@@ -1,6 +1,7 @@
 {
   "name": "berry-agent-os",
   "version": "1.0.0-alpha.3",
+  "apiVersion": "1.0",
   "codename": "Peiligang",
   "description": "Berry Agent OS — 跑 AI 应用的操作系统",
   "license": "MIT",
@@ -36,12 +37,12 @@
   "scripts": {
     "dev": "tsx src/app/main.ts --debug",
     "dev:webui": "vite dev -c src/webui/client/vite.config.ts",
-    "build": "tsc -p tsconfig.build.json && vite build -c src/webui/client/vite.config.ts && node tools/copy-app-assets.mjs && node tools/write-build-meta.mjs",
+    "build": "tsc -p tsconfig.build.json && node tools/emit-api-decls.mjs && vite build -c src/webui/client/vite.config.ts && node tools/copy-app-assets.mjs && node tools/write-build-meta.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/webui/client",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint:topology": "node tools/check-topology.mjs && node tools/check-events.mjs && node tools/check-tense.mjs",
+    "lint:topology": "node tools/check-topology.mjs && node tools/check-events.mjs && node tools/check-tense.mjs && node tools/check-api.mjs",
     "release": "node tools/release.mjs",
     "prepare": "node tools/install-hooks.mjs",
     "format": "prettier --write \"src/**/*.ts\" \"src/webui/client/**/*.tsx\" \"tools/**/*.mjs\" \"README*.md\" \"docs/**/*.md\"",

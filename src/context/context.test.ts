@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'v
 import { AppError } from '../contracts/errors.js';
 import type { AppContext } from '../contracts/app.js';
 import { createContext, eventDispatchStats, registerLiveEvent, tryResolveService } from './context.js';
+import { materializeHostFace } from '../contracts/api.js';
 import { createLogger } from './logger.js';
 import type { Context, ContextScope } from './types.js';
 
@@ -34,7 +35,7 @@ function scopedRoot(
 ): ContextScope {
   const scope = silentRoot();
   for (const evt of events) {
-    registerLiveEvent(scope, { name: evt.name, mode: evt.mode, note: '测试词汇' });
+    registerLiveEvent(scope, { name: evt.name, mode: evt.mode, tier: 'stable', note: '测试词汇' });
   }
   return scope;
 }
@@ -435,7 +436,7 @@ describe('context 运行时三补（2026-08-23 独立重读轮 #23 落码）', (
     const { lines, sink } = captureSink();
     // 归因错列场景：root emit、应用 B 的监听器炸——日志必须指向 B
     const root = createContext({ logger: createLogger({ module: 'test', level: 'debug', sink }) });
-    registerLiveEvent(root, { name: 'evt/boom', mode: 'emit', note: '测试词汇' });
+    registerLiveEvent(root, { name: 'evt/boom', mode: 'emit', tier: 'stable', note: '测试词汇' });
     const appB = root.fork({ name: 'apps-b' });
     appB.on('evt/boom', () => {
       throw new Error('handler boom');
@@ -498,23 +499,23 @@ describe('事件词汇执法（契约篇 §1.1 落码，2026-08-23 /reload 纵�
 
   it('派发方法与声明 mode 不一致抛 EVENT_MODE_MISMATCH（mode 是事件公开契约）', async () => {
     const scope = silentRoot();
-    registerLiveEvent(scope, { name: 'emit/only', mode: 'emit', note: '测试词汇' });
+    registerLiveEvent(scope, { name: 'emit/only', mode: 'emit', tier: 'stable', note: '测试词汇' });
     await expect(async () => scope.serial('emit/only')).rejects.toMatchObject({ code: 'EVENT_MODE_MISMATCH' });
-    registerLiveEvent(scope, { name: 'wf/only', mode: 'waterfall', note: '测试词汇' });
+    registerLiveEvent(scope, { name: 'wf/only', mode: 'waterfall', tier: 'stable', note: '测试词汇' });
     await expect(async () => scope.emit('wf/only')).rejects.toMatchObject({ code: 'EVENT_MODE_MISMATCH' });
   });
 
   it('registerLiveEvent 撞名抛 EVENT_DUPLICATE——custom 互撞与撞目录名同罪', () => {
     const scope = silentRoot();
-    registerLiveEvent(scope, { name: 'dup/name', mode: 'emit', note: '测试词汇' });
+    registerLiveEvent(scope, { name: 'dup/name', mode: 'emit', tier: 'stable', note: '测试词汇' });
     try {
-      registerLiveEvent(scope, { name: 'dup/name', mode: 'emit', note: '测试词汇' });
+      registerLiveEvent(scope, { name: 'dup/name', mode: 'emit', tier: 'stable', note: '测试词汇' });
       expect.unreachable('custom 互撞应抛');
     } catch (err) {
       expect((err as AppError).code).toBe('EVENT_DUPLICATE');
     }
     try {
-      registerLiveEvent(scope, { name: 'tools_change', mode: 'emit', note: '撞目录名' });
+      registerLiveEvent(scope, { name: 'tools_change', mode: 'emit', tier: 'stable', note: '撞目录名' });
       expect.unreachable('撞目录名应抛');
     } catch (err) {
       expect((err as AppError).code).toBe('EVENT_DUPLICATE');
@@ -523,7 +524,7 @@ describe('事件词汇执法（契约篇 §1.1 落码，2026-08-23 /reload 纵�
 
   it('注销器摘词后派发回归 EVENT_UNKNOWN（词汇表成员资格实时生效）', async () => {
     const scope = silentRoot();
-    const off = registerLiveEvent(scope, { name: 'temp/evt', mode: 'emit', note: '测试词汇' });
+    const off = registerLiveEvent(scope, { name: 'temp/evt', mode: 'emit', tier: 'stable', note: '测试词汇' });
     scope.on('temp/evt', () => {}); // 词汇在册——on 不抛即通过
     off();
     await expect(async () => scope.emit('temp/evt')).rejects.toMatchObject({ code: 'EVENT_UNKNOWN' });
@@ -533,7 +534,9 @@ describe('事件词汇执法（契约篇 §1.1 落码，2026-08-23 /reload 纵�
     const anchor = silentRoot();
     const appScope = anchor.fork({ name: 'p' });
     // 加载器形态：词汇登记经 effect 挂派生作用域栈（装载阶段①的真实接线方式）
-    appScope.effect(() => registerLiveEvent(anchor, { name: 'p/done', mode: 'emit', note: '测试词汇' }));
+    appScope.effect(() =>
+      registerLiveEvent(anchor, { name: 'p/done', mode: 'emit', tier: 'stable', note: '测试词汇' }),
+    );
     anchor.emit('p/done'); // 词汇在册——派发不抛即通过（无监听器为合法 no-op）
     await anchor.dispose(); // 锚回卷 → 级联回卷子作用域 → 词汇随 effect LIFO 注销
     // 派发面无 stale 护栏（emit 不查 disposed）——词汇已摘即应响 EVENT_UNKNOWN
@@ -547,7 +550,7 @@ describe('事件词汇执法（契约篇 §1.1 落码，2026-08-23 /reload 纵�
 
   it('registerLiveEvent 拒绝仿造作用域（CONTEXT_DISPOSED——登记通道只认 createContext/fork 产物）', () => {
     try {
-      registerLiveEvent({} as ContextScope, { name: 'fake/evt', mode: 'emit', note: '测试词汇' });
+      registerLiveEvent({} as ContextScope, { name: 'fake/evt', mode: 'emit', tier: 'stable', note: '测试词汇' });
       expect.unreachable('仿造作用域应抛');
     } catch (err) {
       expect((err as AppError).code).toBe('CONTEXT_DISPOSED');
@@ -648,7 +651,7 @@ describe('目录保留词身份执法（契约篇 §1.1/§2.2 增补 9，2026-08
     off();
     third.on('tools_change', () => {});
     // 自定义登记词：第三方自有词汇照常（词汇门禁照走 EVENT_UNKNOWN 族，身份不拦）
-    registerLiveEvent(root, { name: 'third/own', mode: 'emit', note: '测试词汇' });
+    registerLiveEvent(root, { name: 'third/own', mode: 'emit', tier: 'stable', note: '测试词汇' });
     third.on('third/own', () => {});
     third.emit('third/own', {});
   });
@@ -751,7 +754,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
 
   it('桶满 fail-loud：APP_EVENT_RATE 抛错（非静默丢弃），回填后恢复可发', () => {
     const { host, scope } = tinyBucketHostAndFork();
-    registerLiveEvent(host, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    registerLiveEvent(host, { name: 'test/evt', mode: 'emit', tier: 'stable', note: '测试词汇' });
     const seen: number[] = [];
     scope.on('test/evt', (n: number) => seen.push(n));
     scope.emit('test/evt', 1);
@@ -775,7 +778,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
 
   it('四派发模式统一计费：waterfall 派发同样占桶（执法面不分模式）', async () => {
     const { host, scope } = tinyBucketHostAndFork();
-    registerLiveEvent(host, { name: 'test/chain', mode: 'waterfall', note: '测试词汇' });
+    registerLiveEvent(host, { name: 'test/chain', mode: 'waterfall', tier: 'stable', note: '测试词汇' });
     // 耗掉 3 令牌
     await scope.waterfall('test/chain', () => 'ok');
     await scope.waterfall('test/chain', () => 'ok');
@@ -788,7 +791,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
 
   it('per-scope 分桶：应用作用域打满不影响宿主根作用域（失控隔离半径 = 单作用域）', () => {
     const scope = tinyBucketRoot();
-    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', tier: 'stable', note: '测试词汇' });
     const plugin = scope.fork({ name: 'naughty' });
     // 应用作用域 3 连发打满自己的桶
     plugin.emit('test/evt', 1);
@@ -805,7 +808,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     // 全部会话流量的复用汇，合法子代理舰队即触顶且 APP_EVENT_RATE 在宿主
     // 写路径内爆炸（persistence sink → session.append）
     const scope = tinyBucketRoot(); // 容量仅 3
-    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', tier: 'stable', note: '测试词汇' });
     const seen: number[] = [];
     scope.on('test/evt', (n: number) => seen.push(n));
     // 远超容量的宿主面流量：不抛（豁免）、全送达
@@ -833,8 +836,8 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
 
   it('打点面：eventDispatchStats 按作用域累计派发数（B2 P5——只增不清零，诊断面读）', async () => {
     const scope = tinyBucketRoot();
-    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
-    registerLiveEvent(scope, { name: 'test/chain', mode: 'waterfall', note: '测试词汇' });
+    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', tier: 'stable', note: '测试词汇' });
+    registerLiveEvent(scope, { name: 'test/chain', mode: 'waterfall', tier: 'stable', note: '测试词汇' });
     const plugin = scope.fork({ name: 'p1' });
     plugin.emit('test/evt', 1);
     plugin.emit('test/evt', 2);
@@ -870,7 +873,7 @@ describe('注册计数帽（§1.6 资源护栏族 #9，2026-08-27 刀〇b）', (
 
   it('注册族同钟：on/provide/registerMessageRole 同占额度（pushEffect 单点执法）', () => {
     const scope = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
-    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', tier: 'stable', note: '测试词汇' });
     // effect 先耗 9_999 条（帽缺省钉 10^4，不可注入——按缺省帽构造边界）
     for (let i = 0; i < 9_999; i++) scope.effect(() => () => {});
     // on 内部走 effect：第 10_000 条合法占满
@@ -1089,5 +1092,50 @@ describe('服务分区表：宿主侧 tryResolveService 出口（装载器 Kahn 
     // 宿主面视角（undefined）：根→系统
     expect(tryResolveService(root, undefined, 'exec')).toBe('system-exec');
     expect(tryResolveService(root, undefined, 'acme/store')).toBeUndefined();
+  });
+});
+
+describe('ctx.host 宿主自省面（API 治理 §6.13.5，2026-09-03 第八十七批批 2）', () => {
+  /** 最小 HostFace 真形（materializeHostFace 产物——不 mock 接口，走真构造） */
+  const makeHost = () =>
+    materializeHostFace({
+      version: '0.0.0-test',
+      apiVersion: '1.0',
+      formFactor: 'standalone',
+      capabilities: ['memory.store'],
+      experimentalKeys: [],
+    });
+
+  it('根注入：createContext({ host }) → ctx.host 同一实例（根运行时持有）', () => {
+    const root = createContext({ name: 'host-root', host: makeHost() });
+    const host = root.host;
+    expect(host).toBeDefined();
+    expect(host?.version).toBe('0.0.0-test');
+    expect(host?.capabilities.has('memory.store')).toBe(true);
+  });
+
+  it('fork 天然级联：任意深度作用域读同一实例（不随作用域回卷——宿主事实非应用注册）', () => {
+    const hostFace = makeHost();
+    const root = createContext({ name: 'host-root', host: hostFace });
+    const deep = root.fork({ name: 'a' }).fork({ name: 'b' });
+    expect(deep.host).toBe(hostFace); // 同引用 = 级联共享而非拷贝
+    deep.dispose();
+  });
+
+  it('effect 回卷不带走 host：作用域 dispose 后根仍可读（对照 effect 内注册的服务）', () => {
+    const hostFace = makeHost();
+    const root = createContext({ name: 'host-root', host: hostFace });
+    const child = root.fork({ name: 'tmp' });
+    child.provide('tmpsvc', 1); // 官方名位单段——占位服务只为对照
+    child.dispose(); // 回卷 effect/服务注册物
+    expect(root.host).toBe(hostFace); // host 是运行时事实，不随子作用域回卷
+  });
+
+  it('未注入根：ctx.host 读 undefined（测试根/裁剪面——应用按缺席降级不抛错）', () => {
+    const root = createContext({ name: 'bare-root' });
+    expect(root.host).toBeUndefined();
+    const child = root.fork({ name: 'c' });
+    expect(child.host).toBeUndefined(); // 缺席同样级联（不因 fork 注入默认值）
+    child.dispose();
   });
 });

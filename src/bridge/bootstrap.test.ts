@@ -445,7 +445,7 @@ describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收�
     // 拆行前宿主侧转发器残留累积）
     expect(unsubHandler).toBeDefined();
     // 词汇入册（装载管线职责的单元形——fx/pulse 非目录内置词，直登记供行订阅）
-    registerLiveEvent(root, { name: 'fx/pulse', mode: 'emit', note: 'O-1 宿主半测试事件' });
+    registerLiveEvent(root, { name: 'fx/pulse', mode: 'emit', tier: 'stable', note: 'O-1 宿主半测试事件' });
     const scope = root.fork({ name: 'w-dedup', rowId: 'w-dedup', builtinRow: false });
     bindings.set('w-dedup', { scope, forwardedEvents: new Map() });
     // 双 sub 帧（worker 半已 0→1 单发；此处钉宿主侧幂等——重复帧不重复挂转发器。

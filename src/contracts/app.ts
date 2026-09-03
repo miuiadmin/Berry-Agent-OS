@@ -13,6 +13,7 @@
 import { AppError, APP_INVALID } from './errors.js';
 import { Type, type Static, type TSchema } from './typebox.js';
 import { Value } from 'typebox/value';
+import { compareApiVersions, isValidApiVersion, VIRTUAL_API_KEYS, type ApiTier, type HostFace } from './api.js';
 
 /**
  * 应用 id 形状：小写段（字母数字开头，可含 . _ -），可选单层 `/` 域前缀。
@@ -166,6 +167,26 @@ export const AppManifestSchema = Type.Object(
         { additionalProperties: false },
       ),
     ),
+    /**
+     * API 协商声明块（契约篇 §6.13.4 声明协商层——2026-09-03 第八十七批落码）：
+     * min/target 双字段 + experimental 实验键启用声明。**窗口内可选（容忍缺席 =
+     * legacy 态聚合 warn，批 4 收剑批一笔翻必填）**；api 块在场则 min 必在场
+     * （experimental-only 块非法）。格式/不变式执法住 validateAppManifest 后置
+     * 校验（MAJOR.MINOR 格式 / min ≤ target / experimental 键域合法）。
+     */
+    api: Type.Optional(
+      Type.Object(
+        {
+          /** 硬地板：宿主 apiVersion < min 即拒载 API_VERSION_MISMATCH */
+          minApiVersion: Type.String({ minLength: 1 }),
+          /** 行为锚（可选——缺省 = min 粘性锚：不声明恒持 min 时点面，「跟新」从不是缺省） */
+          targetApiVersion: Type.Optional(Type.String({ minLength: 1 })),
+          /** 实验键启用声明（键级——import 实验键未声明 = 装载期拒 API_EXPERIMENTAL_UNDECLARED） */
+          experimental: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+        },
+        { additionalProperties: false },
+      ),
+    ),
   },
   { additionalProperties: false },
 );
@@ -174,7 +195,28 @@ export const AppManifestSchema = Type.Object(
 export type AppManifest = Static<typeof AppManifestSchema>;
 
 /**
+ * 清单键 tier 目录（API 治理真相源 #5，契约篇 §6.13.1/6.13.3——清单键逐符号
+ * tier，载体 = 注册表目录项）。键域真相 = AppManifestSchema.properties（本目录
+ * 只记 tier 与语义，check-api 查 2 对照两域全覆盖——schema 增键不增条即红，
+ * 双源不漂移）。新增清单键时同笔增条。
+ */
+export const MANIFEST_API_KEYS: readonly { key: string; tier: ApiTier; note: string }[] = [
+  { key: 'id', tier: 'stable', note: '应用 id（裸名官方保留 / 含 / 第三方域前缀）' },
+  { key: 'label', tier: 'stable', note: '人读标签（UI 文案位）' },
+  { key: 'default', tier: 'stable', note: '默认应用声明（官方清单专属词汇）' },
+  { key: 'theme', tier: 'stable', note: '前台渲染主题（accent 强调色）' },
+  { key: 'components', tier: 'stable', note: '组件清单（装载身份串）' },
+  { key: 'agent', tier: 'stable', note: '代理装配默认位（model/persona/toolFilter/skills）' },
+  { key: 'entry', tier: 'stable', note: '启动面声明（command/delegable/background）' },
+  { key: 'grants', tier: 'stable', note: '授权申请（writableRoots/approval 预设）' },
+  { key: 'budget', tier: 'stable', note: '预算声明（dailyTokens/memoryMb）' },
+  { key: 'api', tier: 'stable', note: 'API 协商声明块（min/target/experimental）' },
+];
+
+/**
  * 校验应用清单（拒绝式——坏清单 APP_INVALID 响亮拒绝，message 载位置与首错路径）。
+ * schema 结构面之后，api 块携三道后置不变式（契约篇 §6.13.4）：格式
+ * MAJOR.MINOR / min ≤ target / experimental 键域 ∈ VIRTUAL_API_KEYS。
  * @param raw yaml 解析产物（unknown——调用方保证来自解析器）
  * @param where 诊断位置串（如 `apps/hermes.app.yaml`——错误信息锚点）
  * @returns 通过校验的清单（原对象引用——schema 无默认值填充，零拷贝）
@@ -189,7 +231,48 @@ export function validateAppManifest(raw: unknown, where: string): AppManifest {
       `${where}：应用清单校验失败（首错位置 ${loc}：${first?.message ?? '形状不符'}——拒绝式 schema，未知字段/缺字段/类型错皆拒）`,
     );
   }
-  return raw as AppManifest;
+  const manifest = raw as AppManifest;
+  if (manifest.api !== undefined) {
+    validateApiBlockInvariants(manifest.api, where);
+  }
+  return manifest;
+}
+
+/**
+ * api 块三道后置不变式（§6.13.4——schema 收不了的结构语义，同 APP_INVALID 出口）：
+ * ① min/target 格式 MAJOR.MINOR；② min ≤ target（倒挂即拍板 typo）；③
+ * experimental 数组每项 ∈ 虚拟键表键域（拼错实验键 = 拍板 typo，宁拒不静默）。
+ * 「api 块在场则 min 必在场」由 schema 必填性执法（experimental-only 块非法）。
+ */
+function validateApiBlockInvariants(api: NonNullable<AppManifest['api']>, where: string): void {
+  if (!isValidApiVersion(api.minApiVersion)) {
+    throw new AppError(
+      APP_INVALID,
+      `${where}：api.minApiVersion 格式非法（${api.minApiVersion}——应为 MAJOR.MINOR 如 "1.0"）`,
+    );
+  }
+  if (api.targetApiVersion !== undefined) {
+    if (!isValidApiVersion(api.targetApiVersion)) {
+      throw new AppError(
+        APP_INVALID,
+        `${where}：api.targetApiVersion 格式非法（${api.targetApiVersion}——应为 MAJOR.MINOR 如 "1.0"）`,
+      );
+    }
+    if (compareApiVersions(api.minApiVersion, api.targetApiVersion) > 0) {
+      throw new AppError(
+        APP_INVALID,
+        `${where}：api.minApiVersion (${api.minApiVersion}) > api.targetApiVersion (${api.targetApiVersion})——地板不得高于行为锚`,
+      );
+    }
+  }
+  for (const key of api.experimental ?? []) {
+    if (!VIRTUAL_API_KEYS.some((entry) => entry.key === key)) {
+      throw new AppError(
+        APP_INVALID,
+        `${where}：api.experimental 键 ${key} 不在虚拟键表（合法键：${VIRTUAL_API_KEYS.map((k) => `'${k.key}'`).join('、')}——契约篇 §6.13.4）`,
+      );
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -321,6 +404,13 @@ export interface AppContext {
    * 使类型面对齐文档承诺（2026-08-30 checkpoint 件首个文件域 builtin 消费）。
    */
   readonly rowId?: string;
+  /**
+   * 宿主自省面（契约篇 §6.13.5——2026-09-03 第八十七批落码）：应用问宿主，
+   * 而非探测猜（版本/apiVersion/形态/能力集/实验面探针）。装配根一次性注入
+   * （ContextRuntime 持有、fork 共享运行时天然级联）；宿主 context 模块
+   * Context 同字段结构性覆盖（与 rowId 同族纪律：手持注入非服务注册）。
+   */
+  readonly host?: HostFace;
   /** 带作用域前缀的子 logger */
   readonly logger: AppLogger;
   /** 生命周期信号：作用域销毁时 abort——长任务/定时器的取消依据 */

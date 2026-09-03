@@ -21,6 +21,7 @@ export const OBS_EVENTS: readonly LiveEventDefinition[] = [
   {
     name: 'obs/alert',
     mode: 'emit',
+    tier: 'stable',
     note: '观测告警触发面（rollup 写入内联执法：过阈 + 冷却窗外触发；载荷 { ruleId, metric, agg, value, threshold, windowHours }）',
   },
 ];

@@ -24,9 +24,11 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { AppError, APP_DUPLICATE, APP_INVALID, APP_NOT_FOUND } from '../contracts/errors.js';
 import { validateAppManifest, type AppManifest } from '../contracts/app.js';
+import { adjudicateApiGate } from '../contracts/api.js';
 import { CHAT_APP_ID } from '../chat/app.js';
 import type { SubagentStart } from '../contracts/subagent.js';
 import type { CompositionReport } from './composition.js';
+import { readHostVersionFields } from './host-face.js';
 
 /**
  * 官方清单目录（仓库根 `apps/`——与 src/ 平级）。锚定经 import.meta.url：
@@ -40,11 +42,29 @@ export const OFFICIAL_APPS_DIR = fileURLToPath(new URL('../../apps', import.meta
 const MANIFEST_SUFFIX = '.app.yaml';
 
 /**
+ * 官方清单装载选项（API 治理 §6.13.4 装载门接线，第八十七批）：
+ * - `hostApiVersion` 覆写宿主 API 面版本（缺省读包根 package.json apiVersion）——
+ *   测试注入异版本地比对的唯一注入口；
+ * - `onLegacyApps` 聚合告警接收面：api 块缺席（legacy 容忍态）的清单 id 清单
+ *   per-boot 一次聚合送出（调用方接 logger.warn——批 4 收剑翻必填后此面退役）。
+ */
+export interface LoadOfficialAppsOptions {
+  /** 宿主 API 面版本覆写（缺省 = readHostVersionFields 真读） */
+  hostApiVersion?: string;
+  /** legacy（api 块缺席）聚合告警面（缺省静默——诊断面可注入收集） */
+  onLegacyApps?: (ids: readonly string[]) => void;
+}
+
+/**
  * 装载官方应用清单（装载期一次；目录缺失 = 空表防御降级，清单坏 = 抛错拒启）。
  * @param dir 清单目录（缺省官方目录；测试注入临时目录）
+ * @param opts 装载门选项（hostApiVersion 覆写 / legacy 聚合告警面）
  * @returns id → 清单（id 重复 = APP_DUPLICATE——官方裸名是保留字，撞名即发版事故）
  */
-export function loadOfficialApps(dir: string = OFFICIAL_APPS_DIR): Map<string, AppManifest> {
+export function loadOfficialApps(
+  dir: string = OFFICIAL_APPS_DIR,
+  opts?: LoadOfficialAppsOptions,
+): Map<string, AppManifest> {
   // 目录缺失：空表（防御位——仓库布局恒有 apps/；不因布局异常炸启动面）
   let entries: string[];
   try {
@@ -53,6 +73,9 @@ export function loadOfficialApps(dir: string = OFFICIAL_APPS_DIR): Map<string, A
     return new Map();
   }
   const apps = new Map<string, AppManifest>();
+  // API 装载门输入（§6.13.4）：宿主 API 面版本——覆写优先（测试异版本注入），缺省包根真读
+  const hostApiVersion = opts?.hostApiVersion ?? readHostVersionFields().apiVersion;
+  const legacyIds: string[] = [];
   for (const name of entries.sort()) {
     if (!name.endsWith(MANIFEST_SUFFIX)) continue;
     const path = join(dir, name);
@@ -74,8 +97,16 @@ export function loadOfficialApps(dir: string = OFFICIAL_APPS_DIR): Map<string, A
         `应用 id 撞名：${manifest.id}（${path} 与既有清单重复——官方裸名是保留字，撞名即发版事故）`,
       );
     }
+    /* API 装载门裁决（§6.13.4 四出口，逐清单）：宿主 < min → API_VERSION_MISMATCH
+     * 抛出（官方件随包，版本失配 = 发版事故——boot 断言拒启优于带病放行）；
+     * admit 两出口（钳制/兼容）零动作——钳制是行为面非装载面，experimental 声明
+     * 集经装载 seam 进 loader import 门禁；legacy（api 块缺席）收集聚合告警。 */
+    const gate = adjudicateApiGate(manifest.api, hostApiVersion, manifest.id);
+    if (gate.status === 'legacy') legacyIds.push(manifest.id);
     apps.set(manifest.id, manifest);
   }
+  // legacy 聚合告警 per-boot 一次（非逐行刷屏——§6.13.4 出口 4；批 4 翻必填后消失）
+  if (legacyIds.length > 0) opts?.onLegacyApps?.(legacyIds);
   /* 默认应用键唯一性执法（组装批，契约篇 §5.4 默认应用键条款）：在册全量
    * （注册期先于缺场隔离——缺场只影响解析结果不影响执法）多于一份带标清单 =
    * APP_INVALID 拒。官方清单注册期拒 = boot 拒启（官方件随包，>1 = 发版事故，

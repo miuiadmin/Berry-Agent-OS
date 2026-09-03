@@ -1,0 +1,16 @@
+{
+  // API 面声明产物构建配置（契约篇 §6.13.9 dist/api/，第八十七批批 2）：为应用
+  // 沙盒 tsc 产六虚拟键 .d.ts 的**生成半边**——只做声明发射（emitDeclarationOnly），
+  // 产 dist/contracts/*.d.ts（公开根传递闭包）+ dist/llm/provider-face.d.ts +
+  // dist/persist/app-sqlite.d.ts（第五/六键类型锚）。六键 d.ts 本体（api-decls/
+  // 手稳件）由 tools/emit-api-decls.mjs 拷入 dist/api/ 并对相对引用锚定核验。
+  // 主构建（tsconfig.build.json 零声明纪律）不变——本配置是独立子步，非覆盖。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/contracts/**/*.ts", "src/llm/provider-face.ts", "src/persist/app-sqlite.ts"]
+}

@@ -37,6 +37,10 @@ export default defineConfig({
             'tools/check-events.test.mjs',
             'tools/check-topology.test.mjs',
             'tools/check-tense.test.mjs',
+            // check-api 机器闸回归锁（API 治理 §6.13.8，第八十七批批 2）同款收编：
+            // 净树 spawn exit 0 + CHECK_API_SNAPSHOT env 缝换片证查 1 可红 + 手写
+            // token 扫描器单测（tsgo 模板幻影陷阱回归锁）
+            'tools/check-api.test.mjs',
             'tools/gates-infra.test.mjs',
             // vitest setup 密封面锁（基建大扫 #16/#47）：双身份探针——spawn 单文件
             // vitest 执法（哨兵外层值须被 delete + 临时根随 afterAll 清）

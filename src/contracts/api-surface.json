@@ -1,0 +1,4175 @@
+{
+  "apiVersion": "1.0",
+  "exports": [
+    {
+      "symbol": "ACCENT_COLOR_NAMES",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AGENT_CONTINUE_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AGENT_DELIVER_AS_UNSUPPORTED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AGENT_ROLE_EXISTS",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AGENT_ROLE_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AGENT_SESSION_INACTIVE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AGENT_SESSION_KEY_REQUIRED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "API_CAPABILITY_MISSING",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "API_EXPERIMENTAL_UNDECLARED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "API_VERSION_MALFORMED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "API_VERSION_MISMATCH",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_APPLY_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_APPLY_TIMEOUT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_CONFIG_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_DUPLICATE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_ENTRY_UNRESOLVED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_EVENT_RATE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_IMPORT_FORBIDDEN",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_INJECT_UNRESOLVED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_INSTALL_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_LOAD_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_MAIN_DB_FORBIDDEN",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_NOT_FOUND",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_SHAPE_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "APP_SHUTDOWN_QUIESCE_VIOLATED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AgentMessage",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AgentTool",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AgentToolResult",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ApiBlock",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ApiGateResult",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ApiTier",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppActivatedPayload",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppApply",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppContext",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppError",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppEventHandler",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppFailedPayload",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppIdPattern",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppLoadResult",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppLogger",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppManifest",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppManifestSchema",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppModule",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppPlanRow",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppSkipReason",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AppSkippedPayload",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AssistantMessage",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AssistantStream",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "AssistantStreamEvent",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BRIDGE_CALL_TIMEOUT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BRIDGE_CANCELLED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BRIDGE_ENCODE_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BRIDGE_HANDLER_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BRIDGE_METHOD_NOT_FOUND",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BRIDGE_SURFACE_NARROWED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BRIDGE_WORKER_EXITED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BROWSER_CONFIG_CONFLICT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BROWSER_CONNECT_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BROWSER_ENGINE_NOT_FOUND",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BROWSER_INSTALL_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BROWSER_NODE_UNSUPPORTED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "BuiltinAppModule",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CAPABILITIES",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CHECKPOINT_BLOB_CORRUPT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "COMPOSITION_ROW_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CONTEXT_DISPOSED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CONTEXT_EFFECT_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CONTEXT_EFFECT_LIMIT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CONTEXT_FORK_LIMIT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CONTEXT_SERVICE_EXISTS",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CONTEXT_SERVICE_NAME_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CONTEXT_SERVICE_NOT_FOUND",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CONTRACT_BAD_ERROR_CODE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CONTRACT_DUPLICATE_ERROR_CODE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CORE_EVENT_TYPES",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CapabilityEntry",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CommandCompletionItem",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CommandDefinition",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CompositionReloadedPayload",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CompositionRow",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "CustomMessage",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "DAEMON_ALREADY_RUNNING",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "DAEMON_START_TIMEOUT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "DAEMON_STOP_TIMEOUT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "DATA_DESCRIPTOR_API_KEYS",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "DescriptorKeyEntry",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EVENT_DUPLICATE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EVENT_HANDLER_TIMEOUT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EVENT_HOST_RESERVED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EVENT_MODE_MISMATCH",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EVENT_UNKNOWN",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EXEC_ENV_FORBIDDEN",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EXEC_SPAWN_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EventName",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EventQueryCursor",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EventQueryOptions",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EventQueryResult",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "EventQueryRow",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ExecEnvTable",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ExecOptions",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ExecResult",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ExecService",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ExecuteInput",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "FS_DECODE_NON_UTF8",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "FS_DECODE_UNDECIDABLE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "FS_NOT_FOUND",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "FS_NOT_OBSERVED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "FS_OUTSIDE_WRITABLE_ROOTS",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "FS_PATCH_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "FS_VERSION_CONFLICT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "FS_WRITE_TARGET_DRIFTED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "FormFactor",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "GOAL_ACTIVE_EXISTS",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "GOAL_GATE_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "GOAL_NOT_FOUND",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "GOAL_TODO_SCOPE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "GOAL_TRANSITION_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "GateAction",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "GateDecisionPayload",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "GateDecisionSink",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "GateInput",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "HostFace",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "HostFaceData",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ImageContent",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JOB_CONCURRENCY_LIMIT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JOB_KIND_DUPLICATE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JOB_KIND_UNKNOWN",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JOB_NOT_FOUND",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JOB_OWNER_MISMATCH",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JobController",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JobCreateOptions",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JobHandle",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JobSettleDetail",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JobStatus",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JobTerminal",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JobView",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "JobsServiceFace",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LIVE_EVENT_CATALOG",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LLM_BUDGET_EXCEEDED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LLM_COMPLETE_API_KEY_FORBIDDEN",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LLM_COMPLETE_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LLM_COMPLETE_SCHEMA_UNSUPPORTED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LLM_INFLIGHT_LIMIT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LLM_MODEL_NOT_FOUND",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LLM_MODEL_SPEC_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LSP_CONNECT_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LiveEventDefinition",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LlmContext",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "LlmTool",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "MANIFEST_API_KEYS",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "MCP_CONNECT_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "Message",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "MessageRoleDefinition",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "MessageSource",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ModelInfo",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "PERSIST_BATCH_WRITE_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "PROMPT_SECTION_DUPLICATE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "PROMPT_SECTION_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "PostInput",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "PromptSection",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "PromptsService",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "RowAppProbe",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "RowSandbox",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SANDBOX_ESCALATION_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SANDBOX_MODE_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SANDBOX_UNAVAILABLE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SERVICE_CATALOG",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SESSION_CORE_TYPE_FORBIDDEN",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SESSION_EVENT_DATA_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SESSION_EVENT_TOO_LARGE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SESSION_FORK_BOUNDARY_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SESSION_FORMAT_UNSUPPORTED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SESSION_SURFACE_OP_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SESSION_WRITE_CONFLICT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SKILLS_PROVIDER_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SUBAGENT_CAPABILITY_UNSUPPORTED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SUBAGENT_DEPTH_EXCEEDED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SUBAGENT_PROVIDER_DUPLICATE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SUBAGENT_PROVIDER_NOT_FOUND",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SandboxMeta",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ServiceCatalogEntry",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SessionEvent",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SessionEventCategory",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SessionEventTypeDefinition",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "Skill",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SkillDiagnostic",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SkillDiagnosticCode",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SkillProvenance",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SkillSourceLevel",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SkillsProvider",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "StopReason",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "StreamFn",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "StreamFnOptions",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentCapabilities",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentExecution",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentProvider",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentProviderInfo",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentRequest",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentResult",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentRun",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentSettlement",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentStart",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentStopReason",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SubagentsServiceFace",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "SurfaceOp",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOLS_CHANGE_EVENT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_ARGUMENTS_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_BLOCKED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_DESCRIPTION_REJECTED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_DUPLICATE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_EXECUTE_EVENT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_GATE_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_NOT_STARTED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_OUTCOME_UNKNOWN",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_POST_EXECUTE_EVENT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_PRE_EXECUTE_EVENT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_REGISTRY_LIMIT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_REGISTRY_RATE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_SCHEMA_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_TIMEOUT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_TIMEOUT_FLOOR_MS",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TOOL_TIMEOUT_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "TextContent",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ThinkingContent",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ThinkingLevel",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ToolCallBlock",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ToolCallOrigin",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ToolCtx",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ToolDefinition",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ToolExecutionMode",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ToolPipelineExecutor",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ToolResultMessage",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ToolUpdateCallback",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ToolsService",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "Type",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ],
+      "forwarded": true
+    },
+    {
+      "symbol": "Usage",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "UserMessage",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "VIRTUAL_API_KEYS",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "Value",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ],
+      "forwarded": true
+    },
+    {
+      "symbol": "VirtualApiKeyEntry",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "WEBUI_BIND_FORBIDDEN",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "WEBUI_PORT_IN_USE",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "WEB_DOWNLOAD_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "WEB_FETCH_FAILED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "WEB_PRIVATE_TARGET",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "WEB_REDIRECT_LIMIT",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "WEB_URL_INVALID",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "adjudicateApiGate",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "assertExperimentalDeclared",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "compareApiVersions",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "describeError",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "exclusiveAppOf",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "findLiveEvent",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "getMessageRoleDefinition",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "getSessionEventType",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "isCoreSessionEventType",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "isStandardMessage",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "isStandardRole",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "isValidApiVersion",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "listErrorCodes",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "listMessageRoles",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "listSessionEventTypes",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "materializeHostFace",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "registerAppMessageRole",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "registerAppSessionEventType",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "registerErrorCode",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "registerHostMessageRole",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "registerSessionEventType",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "requireCapabilities",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "resolveRowCarrier",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "validateAppManifest",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "anthropicMessagesApi",
+      "module": "berryagent/llm",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "createProvider",
+      "module": "berryagent/llm",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "hasApi",
+      "module": "berryagent/llm",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "lazyApi",
+      "module": "berryagent/llm",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "openDatabase",
+      "module": "berryagent/sqlite",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "app",
+      "module": "data-keys",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "cacheSubdir",
+      "module": "data-keys",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "declaredEvents",
+      "module": "data-keys",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "agent_pre_step",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "app/activated",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "app/failed",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "app/skipped",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "app/uninstalled",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "approval/answer",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "composition/reloaded",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "context_transform",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "echo/par",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "echo/ser",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "echo/tick",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "echo/wf",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "job_settled",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "obs/alert",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "prompts_change",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "session/event",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "session_shutdown",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "session_start",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "skills_change",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "tools_change",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "tools_execute",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "tools_post_execute",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "tools_pre_execute",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "turn_stopping",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "user_input",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "worker/froze",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "worker/oom",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "worker/spawned",
+      "module": "live-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "agent",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "api",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "budget",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "components",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "default",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "entry",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "grants",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "id",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "label",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "theme",
+      "module": "manifest",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "agent",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "approval",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "apps",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "browser",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "channels",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "compaction",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "exec",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "fetch",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "jobs",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "llm",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "paths",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "prompts",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "sandbox",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "sessions",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "skills",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "subagents",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "tools",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "ui",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "app/uninstalled",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "approval/asked",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "approval/decided",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "assistant/message",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "checkpoint/rewind",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "checkpoint/snapshot",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "compaction/end",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "compaction/failed",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "compaction/start",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "compaction/summary",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "gate/decision",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "git/range",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "goal/evidence",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "goal/summary",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "llm/retry",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "llm/usage",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "memory/diff",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "request/header",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "sandbox/mode",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "session/end-seed",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "todo/write",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "tool/call",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "tool/result",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "turn/end",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "turn/start",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "user/message",
+      "module": "session-events",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
+      "symbol": "Static",
+      "module": "typebox",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ],
+      "forwarded": true
+    },
+    {
+      "symbol": "TSchema",
+      "module": "typebox",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ],
+      "forwarded": true
+    },
+    {
+      "symbol": "Type",
+      "module": "typebox",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ],
+      "forwarded": true
+    },
+    {
+      "symbol": "Code",
+      "module": "typebox/compile",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ],
+      "forwarded": true
+    },
+    {
+      "symbol": "Compile",
+      "module": "typebox/compile",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ],
+      "forwarded": true
+    },
+    {
+      "symbol": "Value",
+      "module": "typebox/value",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ],
+      "forwarded": true
+    }
+  ],
+  "capabilities": [
+    {
+      "name": "admin.apps",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:admin"
+    },
+    {
+      "name": "browser.automation",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:browser"
+    },
+    {
+      "name": "channels.multi",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:channels"
+    },
+    {
+      "name": "checkpoint.rewind",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:checkpoint"
+    },
+    {
+      "name": "compaction.longSession",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:compaction"
+    },
+    {
+      "name": "goal.autopilot",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:goal"
+    },
+    {
+      "name": "lsp.bridge",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:lsp"
+    },
+    {
+      "name": "mcp.bridge",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:mcp"
+    },
+    {
+      "name": "memory.store",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:memory"
+    },
+    {
+      "name": "obs.metrics",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:obs"
+    },
+    {
+      "name": "scheduler.tick",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:scheduler"
+    },
+    {
+      "name": "subagent.delegate",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:subagent"
+    },
+    {
+      "name": "web.channel",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:webui"
+    },
+    {
+      "name": "web.fetch",
+      "formFactors": [
+        "standalone",
+        "daemon"
+      ],
+      "providedBy": "builtin:web"
+    }
+  ]
+}

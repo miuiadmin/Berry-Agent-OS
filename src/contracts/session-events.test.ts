@@ -21,13 +21,13 @@ import {
 
 describe('会话事件词汇注册表（双入口）', () => {
   it('装载面：注册 / 查询 / 注销（二次注销无害、注销后名称可复用）', () => {
-    const unregister = registerAppSessionEventType({ type: 't-evt/note', category: 'surface' });
+    const unregister = registerAppSessionEventType({ type: 't-evt/note', tier: 'stable', category: 'surface' });
     expect(getSessionEventType('t-evt/note')?.category).toBe('surface');
     expect(listSessionEventTypes().map((d) => d.type)).toContain('t-evt/note');
     unregister();
     expect(getSessionEventType('t-evt/note')).toBeUndefined();
     unregister(); // 二次注销无害（防误注销后来者）
-    const again = registerAppSessionEventType({ type: 't-evt/note', category: 'log-only' });
+    const again = registerAppSessionEventType({ type: 't-evt/note', tier: 'stable', category: 'log-only' });
     expect(getSessionEventType('t-evt/note')?.category).toBe('log-only');
     again();
   });
@@ -36,7 +36,7 @@ describe('会话事件词汇注册表（双入口）', () => {
     for (const type of ['user/message', 'llm/usage', 'turn/end', 'gate/decision']) {
       let error: unknown;
       try {
-        registerAppSessionEventType({ type, category: 'surface' });
+        registerAppSessionEventType({ type, category: 'surface', tier: 'stable' });
       } catch (reason) {
         error = reason;
       }
@@ -46,17 +46,23 @@ describe('会话事件词汇注册表（双入口）', () => {
   });
 
   it('宿主面：模块级直调可注册（回注销器）；重复注册拒绝（SESSION_FORMAT_UNSUPPORTED）', () => {
-    const unregister = registerSessionEventType({ type: 't-host/note', category: 'log-only' });
-    expect(() => registerSessionEventType({ type: 't-host/note', category: 'log-only' })).toThrowError(AppError);
-    const unregisterDup = registerSessionEventType({ type: 't-host/dup', category: 'log-only' });
+    const unregister = registerSessionEventType({ type: 't-host/note', tier: 'stable', category: 'log-only' });
+    expect(() => registerSessionEventType({ type: 't-host/note', tier: 'stable', category: 'log-only' })).toThrowError(
+      AppError,
+    );
+    const unregisterDup = registerSessionEventType({ type: 't-host/dup', tier: 'stable', category: 'log-only' });
     unregister();
     unregisterDup();
   });
 
   it('格式非法拒绝：非小写斜线式词汇（两个入口同闸）', () => {
     for (const bad of ['Plain/Name', 'noslash', 'a//b', '/lead']) {
-      expect(() => registerSessionEventType({ type: bad, category: 'log-only' })).toThrowError(AppError);
-      expect(() => registerAppSessionEventType({ type: bad, category: 'log-only' })).toThrowError(AppError);
+      expect(() => registerSessionEventType({ type: bad, tier: 'stable', category: 'log-only' })).toThrowError(
+        AppError,
+      );
+      expect(() => registerAppSessionEventType({ type: bad, tier: 'stable', category: 'log-only' })).toThrowError(
+        AppError,
+      );
     }
   });
 
@@ -67,7 +73,7 @@ describe('会话事件词汇注册表（双入口）', () => {
     // todo/write 是 reserved 词——在场但不许装载面重注册（核心族一体保护）
     let error: unknown;
     try {
-      registerAppSessionEventType({ type: 'todo/write', category: 'surface' });
+      registerAppSessionEventType({ type: 'todo/write', tier: 'stable', category: 'surface' });
     } catch (reason) {
       error = reason;
     }
@@ -75,7 +81,12 @@ describe('会话事件词汇注册表（双入口）', () => {
   });
 
   it('双入口同一注册表：定义互通（session 模块写侧/读侧消费不分入口）', () => {
-    const unregister = registerAppSessionEventType({ type: 't-shared/evt', category: 'surface', ignorable: true });
+    const unregister = registerAppSessionEventType({
+      type: 't-shared/evt',
+      category: 'surface',
+      tier: 'stable',
+      ignorable: true,
+    });
     expect(getSessionEventType('t-shared/evt')?.ignorable).toBe(true);
     unregister();
     expect(getSessionEventType('t-shared/evt')).toBeUndefined();

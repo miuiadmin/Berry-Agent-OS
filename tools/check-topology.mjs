@@ -224,6 +224,7 @@ const LEGACY_DEEP_FACES = new Set([
   'context/logger.ts',
   'context/rate-limit.ts',
   'context/workspace.ts',
+  'contracts/api.ts',
   'contracts/app.ts',
   'contracts/bridge.ts',
   'contracts/channels.ts',

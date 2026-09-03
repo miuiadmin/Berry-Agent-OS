@@ -14,3 +14,5 @@ components:
   - builtin:memory
   - builtin:subagent
   - builtin:goal
+api:
+  minApiVersion: "1.0"

@@ -264,10 +264,10 @@ describe('createRuntime 装配面', () => {
     // 写任何自有词汇必撞「未知事件类型」——有门没钥匙）；核心词在注册侧先拦；
     // 作用域 dispose → 词汇随应用卸载回卷（/reload 重装重注册语义），写侧恢复拒绝
     const scope = runtime.ctx.fork({ name: 't-plugin' });
-    expect(() => scope.registerSessionEventType({ type: 'user/message', category: 'surface' })).toThrowError(
-      /核心事件类型/,
-    );
-    scope.registerSessionEventType({ type: 't-probe/note', category: 'log-only' });
+    expect(() =>
+      scope.registerSessionEventType({ type: 'user/message', tier: 'stable', category: 'surface' }),
+    ).toThrowError(/核心事件类型/);
+    scope.registerSessionEventType({ type: 't-probe/note', category: 'log-only', tier: 'stable' });
     const noted = sessions.appendEvent('t-probe/note', { text: '探针' })!;
     expect(noted.type).toBe('t-probe/note');
     await scope.dispose();

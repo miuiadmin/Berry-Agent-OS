@@ -31,9 +31,9 @@ import type { SessionEventTypeDefinition } from '../contracts/session-events.js'
  * log-only（不进投影）：消费面是 SKILL 沉淀证据链与审计，非模型上下文。
  */
 export const CHECKPOINT_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
-  { type: 'checkpoint/snapshot', category: 'log-only' },
-  { type: 'checkpoint/rewind', category: 'surface' },
-  { type: 'git/range', category: 'log-only' },
+  { type: 'checkpoint/snapshot', category: 'log-only', tier: 'stable' },
+  { type: 'checkpoint/rewind', category: 'surface', tier: 'stable' },
+  { type: 'git/range', category: 'log-only', tier: 'stable' },
 ];
 
 // 模块加载即注册（官方件随包代码存在、组合无关）

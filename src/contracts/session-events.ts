@@ -19,6 +19,7 @@
  */
 
 import { AppError, SESSION_CORE_TYPE_FORBIDDEN, SESSION_FORMAT_UNSUPPORTED } from './errors.js';
+import type { ApiTier } from './api.js';
 
 /** 事件类别三分法（会话篇 §1.1）：决定事件在投影/存储分层中的处理方式 */
 export type SessionEventCategory =
@@ -35,6 +36,13 @@ export interface SessionEventTypeDefinition {
   readonly type: string;
   /** 类别三分法归属 */
   readonly category: SessionEventCategory;
+  /**
+   * 稳定性 tier（API 治理 §6.13.3 逐符号载体——必填字段，TS 编译期扛零隐式；
+   * 第八十七批落码）。核心清单与官方件目录词现役全 stable；第三方
+   * registerAppSessionEventType 自定义词同律必填（词汇即 API 面——
+   * 声明自己的事件稳定性 = 声明自己的 API）。
+   */
+  readonly tier: ApiTier;
   /** true = 读侧可以不认识此类型（向前兼容）；缺省 false = 未知即整体拒绝 */
   readonly ignorable?: boolean;
   /**
@@ -111,28 +119,28 @@ export function listSessionEventTypes(): SessionEventTypeDefinition[] {
  * session/end-seed 属结构标记（不进表面推导），归 log-only。
  */
 export const CORE_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
-  { type: 'turn/start', category: 'log-only' },
-  { type: 'turn/end', category: 'log-only' },
-  { type: 'user/message', category: 'surface' },
-  { type: 'assistant/message', category: 'surface' },
-  { type: 'tool/call', category: 'surface' },
-  { type: 'tool/result', category: 'surface' },
+  { type: 'turn/start', category: 'log-only', tier: 'stable' },
+  { type: 'turn/end', category: 'log-only', tier: 'stable' },
+  { type: 'user/message', category: 'surface', tier: 'stable' },
+  { type: 'assistant/message', category: 'surface', tier: 'stable' },
+  { type: 'tool/call', category: 'surface', tier: 'stable' },
+  { type: 'tool/result', category: 'surface', tier: 'stable' },
   // todo/write 宿主写点已落（chat 件 todo 工具，骨架篇 §6.7 落码形态定稿
   // 2026-08-30）——reserved 豁免同笔翻转，写点受族 3 门禁约束
-  { type: 'todo/write', category: 'surface' },
-  { type: 'request/header', category: 'snapshot' },
-  { type: 'session/end-seed', category: 'log-only' },
-  { type: 'approval/asked', category: 'log-only' },
-  { type: 'approval/decided', category: 'log-only' },
-  { type: 'gate/decision', category: 'log-only' },
-  { type: 'sandbox/mode', category: 'log-only' },
-  { type: 'llm/usage', category: 'log-only' },
-  { type: 'llm/retry', category: 'log-only' },
+  { type: 'todo/write', category: 'surface', tier: 'stable' },
+  { type: 'request/header', category: 'snapshot', tier: 'stable' },
+  { type: 'session/end-seed', category: 'log-only', tier: 'stable' },
+  { type: 'approval/asked', category: 'log-only', tier: 'stable' },
+  { type: 'approval/decided', category: 'log-only', tier: 'stable' },
+  { type: 'gate/decision', category: 'log-only', tier: 'stable' },
+  { type: 'sandbox/mode', category: 'log-only', tier: 'stable' },
+  { type: 'llm/usage', category: 'log-only', tier: 'stable' },
+  { type: 'llm/retry', category: 'log-only', tier: 'stable' },
   // 卸载落账（契约篇 §3.4 第二刀，2026-08-27 刀 2）：宿主写点（组合根
   // emitUninstalled——uninstall 真身住 Ring 0「装」职能），核心词身份自动拒
   // 装载面注册/伪造（SESSION_CORE_TYPE_FORBIDDEN 双闸同判据）；复数域 = 管理面
   // 词汇，与活体目录 app/uninstalled 同词双落地（总线 + 会话流）
-  { type: 'app/uninstalled', category: 'log-only' },
+  { type: 'app/uninstalled', category: 'log-only', tier: 'stable' },
 ];
 
 /** 核心词集合（装载面拒注册的判据——含 reserved 预留词，核心族一体保护） */

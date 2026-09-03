@@ -56,6 +56,7 @@ import type {
   AppSkippedPayload,
 } from '../contracts/app.js';
 import { resolveRowCarrier } from '../contracts/app.js';
+import { VIRTUAL_API_KEYS, assertExperimentalDeclared } from '../contracts/api.js';
 import type { LiveEventDefinition } from '../contracts/events.js';
 import type { Context, ContextScope } from './types.js';
 
@@ -80,22 +81,17 @@ export type ValidatedModule = Omit<AppModule, 'default'> & {
  * + typebox 三入口（宿主实例注入——双实例防线，pi 生态 Static 双实例实证反例）。
  */
 /**
- * 虚拟模块面键集（单一来源）：装载期 jiti 注入的宿主实例模块名。
- * 用途有二——virtualModules 构造 + import 失败错误的可用面提示（探针 #12：
- * 第三方按 npm 子路径直觉写 `berryagent/typebox` 撞错时，错误必须自带合法路）。
+ * 虚拟模块面键集（单一来源 = contracts/api.ts VIRTUAL_API_KEYS 键表——API 治理
+ * §6.13.1 真相源 #1，第八十七批派生收编）：装载期 jiti 注入的宿主实例模块名。
+ * 用途有三——virtualModules 构造 + import 失败错误的可用面提示（探针 #12：
+ * 第三方按 npm 子路径直觉写 `berryagent/typebox` 撞错时，错误必须自带合法路）
+ * + experimental import 门禁判据（§6.13.4——键表 tier 列单源，本模块不再另持）。
  * 2026-08-26 挖矿批 P0-2 扩六键：+`berryagent/llm`（pi-ai provider 工厂族背书，
  * llm 模块 provider-face 注入）+`berryagent/sqlite`（宿主同实例 better-sqlite3
  * 包装，persist 模块 app-sqlite 注入——主库路径 fail-loud 拒开）。注入物由
  * 组合根参数传入（本模块不 import llm/persist——拓扑边 context→contracts 不变）。
  */
-const VIRTUAL_MODULE_KEYS = [
-  'berryagent',
-  'typebox',
-  'typebox/value',
-  'typebox/compile',
-  'berryagent/llm',
-  'berryagent/sqlite',
-] as const;
+const VIRTUAL_MODULE_KEYS: readonly string[] = VIRTUAL_API_KEYS.map((entry) => entry.key);
 
 /**
  * import 失败错误的虚拟面提示：消息形如「Cannot find module …」时附可用面清单。
@@ -116,6 +112,26 @@ function virtualModuleHint(err: unknown): string {
  * 扫描据此裁决树内外。builtin 行不经 jiti，期间恒 undefined（不拦）。
  */
 let currentTreeRoot: string | undefined;
+
+/**
+ * 当前装载窗的 API 装载门上下文（API 治理 §6.13.4 执法点①，第八十七批）：
+ * 与 currentTreeRoot 同生命周期（装载排队链窗内设置/finally 清空）——装载行的
+ * 清单 api 块裁决产物（应用 id + 已声明实验键集）。undefined = 无声明可达
+ * （builtin 行/防御路径）——实验键 import 恒拒（fail-closed；现役六键全 stable，
+ * 空集与缺席同效）。模块实例级（worker realm 自持实例同律）。
+ */
+let gateWindow: ImportGateContext | undefined;
+
+/**
+ * API 装载门上下文（装载门裁决结果在装载窗内的形态）：loadApps 经
+ * experimentalByRow seam 自组合根取得（组合根闭包读 app-registry 裁决产物）。
+ */
+export interface ImportGateContext {
+  /** 行属应用 id（错误消息归因用） */
+  readonly appId: string;
+  /** 清单 api.experimental 声明集（空集 = 未声明任何实验键） */
+  readonly experimental: ReadonlySet<string>;
+}
 
 /**
  * 活动树根集（**行寿命**，2026-09-02 勘正〔遗漏大扫 20260902-c #3〕）：镜像
@@ -235,6 +251,12 @@ function guardTransform(opts: TransformOptions): TransformResult {
   const treeRoot = currentTreeRoot;
   if (treeRoot !== undefined && opts.filename !== undefined) {
     for (const specifier of extractSpecifiers(opts.source ?? '')) {
+      // 实验键门禁（API 治理 §6.13.4 执法点①，第八十七批）：说明符属虚拟键且
+      // 键表 tier = experimental 而装载行未声明 → API_EXPERIMENTAL_UNDECLARED
+      // 拒载（契约即知情）。现役六键全 stable 故恒放行——门禁先行、键随后到。
+      if (gateWindow !== undefined && (VIRTUAL_MODULE_KEYS as readonly string[]).includes(specifier)) {
+        assertExperimentalDeclared(specifier, gateWindow.experimental, gateWindow.appId);
+      }
       const violation = adjudicateImport(specifier, dirname(opts.filename), treeRoot);
       if (violation !== undefined) {
         throw importForbiddenError(specifier, violation, `文件 ${opts.filename}`);
@@ -411,10 +433,14 @@ export function createAppJiti(faces?: LoadAppsOptions['virtualFaces']) {
 export async function importAppEntry(
   jiti: ReturnType<typeof createAppJiti>,
   entry: string,
+  gate?: ImportGateContext,
 ): Promise<Record<string, unknown>> {
   const run = loadChain.then(async () => {
     const treeRoot = realpathIfPossible(dirname(entry));
     currentTreeRoot = treeRoot;
+    // API 装载门上下文随窗设置（与 currentTreeRoot 同窗——guardTransform 实验键
+    // 门禁读此面；finally 同清防跨行串染）
+    gateWindow = gate;
     // 运行期兜底第二腿（S-1 + 20260902-c #3 行寿命）：CJS 面 native require
     // 直载不经 transform——Module._load 补丁首个活动树根安装后常驻
     // （ensureNodeLoadGate），树根入活动集（装载窗后不还原；集合由 loadApps
@@ -425,6 +451,7 @@ export async function importAppEntry(
       return (await jiti.import(entry)) as Record<string, unknown>;
     } finally {
       currentTreeRoot = undefined;
+      gateWindow = undefined;
     }
   });
   // 链尾推进吞错（两向）——run 自身照常把装载错误抛给调用方
@@ -658,6 +685,14 @@ export interface LoadAppsOptions {
    * 装载管线对载体差异零感知）。缺注入时 external 行 fail-closed 拒载同语义。
    */
   workerLoader?: WorkerRowLoader;
+  /**
+   * 行级 API 装载门上下文 seam（API 治理 §6.13.4 执法点①，第八十七批）：
+   * 组合根闭包回查（装载门裁决产物按行 id 取——官方件随包无 api 块声明，现役
+   * 恒 undefined；第三方 npm 应用装机态经 install 管线绑定行后填）。undefined =
+   * 无声明可达——实验键 import 恒拒（fail-closed；现役六键全 stable 空档零差）。
+   * 回调契约与 registerSkills 同律：不得抛错（查无行返回 undefined 即可）。
+   */
+  importGateByRow?: (rowId: string) => ImportGateContext | undefined;
 }
 
 /**
@@ -776,8 +811,9 @@ export async function loadApps(
       let mod: Record<string, unknown>;
       if (row.builtin === undefined) {
         // import 门禁树根 = 入口所在目录（realpath 归一）——设置/求值/清空三步
-        // 收口在 importAppEntry（第二十七批刀二：worker 半同用此件）
-        mod = await importAppEntry(jiti, row.entry!);
+        // 收口在 importAppEntry（第二十七批刀二：worker 半同用此件）；API 装载门
+        // 上下文（实验键声明集）随第三参同窗传入
+        mod = await importAppEntry(jiti, row.entry!, opts?.importGateByRow?.(row.id));
       } else {
         // 官方件（契约篇 §6.1 `builtin:` 前缀）：宿主随包函数引用，不经 jiti、
         // 不受应用零 import 约束——包成模块记录后与文件应用走**完全同轨**的形状

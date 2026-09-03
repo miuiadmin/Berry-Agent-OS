@@ -5,6 +5,7 @@
  * （ctx.tools / ctx.sessions / …）由对应模块落地时挂到本接口的扩展视图上。
  */
 import type { EventName } from '../contracts/events.js';
+import type { HostFace } from '../contracts/api.js';
 import type { MessageRoleDefinition } from '../contracts/messages.js';
 import type { SessionEventTypeDefinition } from '../contracts/session-events.js';
 import type { Logger } from './logger.js';
@@ -45,6 +46,14 @@ export interface Context {
   waterfall<T>(event: EventName, ...argsWithNext: unknown[]): Promise<T>;
   /** 取服务实现；未注册抛 AppError CONTEXT_SERVICE_NOT_FOUND */
   get<T = unknown>(name: string): T;
+  /**
+   * 宿主自省面（API 治理 §6.13.5，第八十七批）：应用问宿主，而非探测猜——
+   * version / apiVersion / formFactor / capabilities.has / experimental.enabled。
+   * 根运行时持有、全体 fork 共享（createContext 注入；测试根未注入时 undefined——
+   * 应用按缺席降级，不抛错）。能力语义 = 本构建面（编译进包即有），组合树挂载
+   * 态问 ctx.apps.list——两问不混。
+   */
+  readonly host: HostFace | undefined;
   /**
    * 软依赖探测取服务（2026-08-23 生态读码补钉 dsh-4）：未注册返回 undefined、不抛错。
    * 与 get 的分工：必需依赖用 get（缺了 = 装配错误，响亮失败）；可选依赖用 tryGet。
@@ -148,6 +157,12 @@ export interface ContextOptions {
   config?: Record<string, unknown>;
   /** 注入 logger（缺省自建，级别走 APP_LOG_LEVEL / dev=debug） */
   logger?: Logger;
+  /**
+   * 宿主自省面注入（API 治理 §6.13.5，第八十七批）：组合根装配期一次性传入
+   * （materializeHostFace 产物或宿主侧同构面）。根运行时持有、全体 fork 共享
+   * 天然级联——缺省 undefined（测试根/裁剪面，ctx.host 读到 undefined）。
+   */
+  host?: HostFace;
   /**
    * 事件派发频率护栏（契约篇 §1.6 时钟族，2026-08-27 刀〇a）：per-scope 令牌桶，
    * 缺省 { capacity: 1000, perMinute: 1000 }——桶满（连续 1000 次无间隔）即抛

@@ -62,7 +62,12 @@ export default async function apply(ctx: AppContext, config?: Readonly<Record<st
         waterfall: () => ctx.waterfall('echo/wf', 'w', (v: unknown) => v),
         registerMessageRole: () => ctx.registerMessageRole(`echo/role-${slot}`, {}),
         registerSessionEventType: () =>
-          ctx.registerSessionEventType({ type: `echo/evt-${slot}`, category: 'log-only', ignorable: true }),
+          ctx.registerSessionEventType({
+            type: `echo/evt-${slot}`,
+            category: 'log-only',
+            tier: 'stable',
+            ignorable: true,
+          }),
       };
       const out: Record<string, string> = {};
       for (const [surface, probe] of Object.entries(probes)) {
