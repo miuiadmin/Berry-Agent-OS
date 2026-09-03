@@ -75,6 +75,27 @@ function sleepCancellable(ms: number, signal: AbortSignal): Promise<boolean> {
 }
 
 /**
+ * 批消费位变换失败信封（全面复盘 20260903 #14——契约篇 §2.2 增补 7② 审计保输入
+ * 补裁）：transformInput 抛错时携带**变换前原批**上抛。runTurns catch 凭信封在
+ * 合成 error 终值前把原批逐条经 inject 落账（durable user/message + 展示回显）
+ * ——正常路 user/message 事件由 startRun 发，变换先于 startRun 抛错则整批蒸发，
+ * 用户敲了什么必须留在会话日志（审计保输入）。驱动内部控制流信封，不入
+ * contracts 错误码注册表（对外呈现仍是 catch 合成的 run failed——信封只在
+ * 驱动内传递原批载荷）。
+ */
+class TransformBatchFailure extends Error {
+  /** 变换前原批（用户实际投递的消息——未过 user_input waterfall 的原始形态；
+   *  已变换成功的消息同样未达 durable，审计面统一回到原始形态） */
+  readonly batch: readonly AgentMessage[];
+
+  constructor(batch: readonly AgentMessage[], cause: unknown) {
+    super(`user_input 批变换失败：${describeError(cause)}`, { cause });
+    this.name = 'TransformBatchFailure';
+    this.batch = batch;
+  }
+}
+
+/**
  * run 结算载荷（骨架篇 §9.3 ctx.agent.onRunSettled）：sessionId = 结算 run 的
  * 归属会话（S1 增维——订阅是全局单份、run 是多驱动各自的，消费方按 sessionId
  * 路由，goal 直查该会话 goals 表不再依赖装配闭包单值）。
@@ -567,13 +588,21 @@ export class ConversationDriver {
    * consumeMeta 已清元数据，迁移自然为空操作）。
    * **元数据迁移硬规则**：变换替换消息引用时 deliverMeta 随迁 re-key
    * （backgroundWake 预算计道、toolFilter 收窄跟随新引用——否则断线）。
-   * 变换失败/挂起超时直接上抛 → runTurns catch 合成 error 收尾。
+   * 变换失败/挂起超时上抛 TransformBatchFailure（携变换前原批——全面复盘
+   * 20260903 #14 审计保输入）→ runTurns catch 落账原批后合成 error 收尾。
    */
   private async transformBatch(batch: readonly AgentMessage[]): Promise<AgentMessage[]> {
     if (this.transformInput === undefined || batch.length === 0) return [...batch];
     const out: AgentMessage[] = [];
     for (const message of batch) {
-      const transformed = await this.transformInput(message);
+      let transformed: AgentMessage;
+      try {
+        transformed = await this.transformInput(message);
+      } catch (err) {
+        // 变换失败信封（全面复盘 20260903 #14）：携变换前**整批**原样上抛——
+        // runTurns catch 凭信封先把原批落账（审计保输入）再合成 error 终值
+        throw new TransformBatchFailure(batch, err);
+      }
       // 引用替换 → 元数据迁移（引用不变 = 原键有效，无操作）
       if (transformed !== message) {
         const meta = this.deliverMeta.get(message);
@@ -795,6 +824,13 @@ export class ConversationDriver {
         await this.notifyStopping(result); // followUp 轮结算同样派发（回到循环复查）
       }
     } catch (error) {
+      // 审计保输入（全面复盘 20260903 #14——契约篇 §2.2 增补 7② 补裁）：批消费位
+      // 变换失败时原批尚未落 durable（user/message 事件本由 startRun 发，变换先于
+      // startRun 抛错即整批蒸发）——凭信封先逐条 inject 落账（durable + 展示回显，
+      // 时间线 = 用户先敲、后失败），元数据同笔清（deliverMeta 键不悬空跨批泄漏）
+      if (error instanceof TransformBatchFailure) {
+        for (const message of this.consumeMeta([...error.batch])) this.inject(message);
+      }
       // 回调违约（loop 零 try/catch 的对价）：合成 error 消息补齐事件序列
       const message: AssistantMessage = {
         role: 'assistant',

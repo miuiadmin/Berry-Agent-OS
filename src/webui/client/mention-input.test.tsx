@@ -126,3 +126,52 @@ describe('MentionInput 第二段：@path# 符号补全', () => {
     expect(screen.queryByText(/:6/)).toBeNull(); // 无行号徽标（零符号列表）
   });
 });
+
+describe('MentionInput 候选来源键（全面复盘 20260903 #13——陈旧候选双竞速守门）', () => {
+  it('符号档换代竞速：@a.ts#x 取数落定后改打 @b.ts#y，防抖窗内 Enter 不接受陈旧符号（修前必红）', async () => {
+    api.fetchSymbols.mockResolvedValue(symbolsOf([['alphaA', 10]]));
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@a.ts#x'); // a.ts 取数落定（symbols=[alphaA]）
+    // 换代：只过 change 触发重解析（弹层按新查询开）+ microtask flush（effect 落定）
+    // ——不过防抖，Enter 在新查询的取数落定前按下
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '@b.ts#y' } });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    // 修前红：files/symbols state 未随查询重置——symbols[0]=alphaA 被当作 b.ts 的
+    // 候选接受，value 变 '@b.ts#alphaA '（陈旧候选劫持换代后的接受键）
+    expect(input.value).toBe('@b.ts#y'); // 键门挡下 → Enter 落回原文提交路径
+  });
+
+  it('文件档换代竞速：@sr 取数落定后改打 @pkg，防抖窗内 Enter 不接受陈旧文件（修前必红）', async () => {
+    api.fetchFiles.mockResolvedValue(['src/app.ts']);
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@sr'); // sr 取数落定（files=['src/app.ts']）
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '@pkg' } });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    expect(input.value).toBe('@pkg'); // 修前红：'@src/app.ts '（陈旧文件候选劫持）
+  });
+
+  it('弹层渲染门：@a.ts#x 落定后改打 @b.ts#，防抖窗内列表不渲染陈旧符号（修前必红）', async () => {
+    api.fetchSymbols.mockResolvedValue(symbolsOf([['alphaA', 10]]));
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@a.ts#x');
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '@b.ts#' } });
+      await vi.advanceTimersByTimeAsync(0); // effect + 重渲染落定（防抖计时器未到）
+    });
+    expect(screen.getByText('b.ts 的符号…')).toBeTruthy(); // 新档头如实（loading 期）
+    expect(screen.queryByText('alphaA')).toBeNull(); // 修前红：陈旧符号仍在列表
+  });
+});

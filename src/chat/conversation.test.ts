@@ -1374,7 +1374,7 @@ describe('ConversationDriver user_input 批消费位变换（P1-2 增补 7②）
 
   it('失败语义（响亮不吞）：transformInput 抛错 → run 按失败收尾、错误进 errorMessage', async () => {
     const boom = new Error('user_input 变换炸了');
-    const { driver } = makeRetryDriver([okAssistant('到不了的回答')], {
+    const { driver, session } = makeRetryDriver([okAssistant('到不了的回答')], {
       transformInput: async () => {
         throw boom;
       },
@@ -1383,6 +1383,13 @@ describe('ConversationDriver user_input 批消费位变换（P1-2 增补 7②）
 
     expect(result?.status).toBe('failed'); // 钩子失败 = run 无法进行——上抛走 runTurns 统一 catch
     expect(result?.errorMessage).toContain('user_input 变换炸了');
+    // 审计保输入（全面复盘 20260903 #14，修前必红）：变换失败 ≠ 输入蒸发——原批
+    // 先落 durable（user/message；正常路本由 startRun 发，修前变换先炸整批蒸发）
+    const userEvents = session.events.filter((e) => e.type === 'user/message');
+    expect(userEvents).toHaveLength(1);
+    // 落账序：user 先于合成 error assistant（审计时间线 = 用户先敲、后失败）
+    const errorSeq = session.events.find((e) => e.type === 'assistant/message')?.seq;
+    expect(userEvents[0]!.seq).toBeLessThan(errorSeq!);
   });
 });
 
