@@ -213,7 +213,12 @@ export function createBashTool(opts: BashToolOptions): ToolDefinition {
       // buildChildEnv；undefined 注入装配 = 不传 env 走 spawn 缺省，行为不变）
       const hostInject = opts.hostEnv?.();
       const run = await runArgv(argv, {
-        cwd,
+        // cwd 缺省 = workspaceRoot（§7.3「workspaceRoot = 会话不可变 cwd」的工具面
+        // 兑现，2026-09-03 勘正〔遗漏大扫 20260903 #29② 组合锁发现〕：修前 undefined
+        // 直透 → spawn 继承宿主进程 cwd——宿主 cwd ≠ workspaceRoot 形态〔--cwd/
+        // attach/daemon〕下相对路径命令错位落区外 + 沙箱误拒；spawn 原语契约不变
+        // 〔原语缺省宿主 cwd〕，缺省裁决收在工具层——工具面语义 = 会话不可变 cwd）
+        cwd: cwd ?? workspaceRoot,
         timeoutMs: clamped,
         signal: tctx.signal,
         ...(hostInject !== undefined ? { env: buildChildEnv(process.env, undefined, hostInject) } : {}),

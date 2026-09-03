@@ -23,6 +23,9 @@ const describeGit = hasGit ? describe : describe.skip;
 /** 临时仓根（afterAll 整树清理） */
 let repoRoot: string | undefined;
 
+/** 非 git 仓裸目录（负例夹具——afterAll 清理） */
+let plainDir: string | undefined;
+
 /** execFile promise 化（测试侧脚手架——失败响亮抛） */
 function run(cwd: string, args: readonly string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -35,6 +38,7 @@ function run(cwd: string, args: readonly string[]): Promise<string> {
 
 afterAll(() => {
   if (repoRoot !== undefined) rmSync(repoRoot, { recursive: true, force: true });
+  if (plainDir !== undefined) rmSync(plainDir, { recursive: true, force: true });
 });
 
 describeGit('git 探测闭包', () => {
@@ -79,5 +83,38 @@ describeGit('git 探测闭包', () => {
     expect(state).toBeDefined();
     expect(state!.head).toMatch(/^[0-9a-f]{7,12}$/);
     expect(state!.dirtyCount).toBe(1); // 未跟踪文件计入
+  });
+
+  // ---- 畸形负例三锁（遗漏大扫 20260903 #29①）----
+  // maxBuffer 溢出 / 超时两腿与下列失败腿共享 run() 单一 catch 出口
+  //（探针件全失败归一 undefined——负例锁住出口即同锁两腿，不造 5 万文件重夹具）
+
+  it('干净仓 state()：dirtyCount 0（porcelain 空输出——上一测 untracked 已收编）', async () => {
+    if (repoRoot === undefined) return; // 上一测已建仓（skip 场景防御）
+    // 把上一测落下的 untracked.txt commit 掉 → 工作区干净 = porcelain 零行
+    await run(repoRoot, ['add', '.']);
+    await run(repoRoot, ['commit', '-q', '-m', 'clean baseline']);
+    const probe = createGitProbe();
+    const state = await probe.state(repoRoot);
+    expect(state).toBeDefined();
+    expect(state!.head).toMatch(/^[0-9a-f]{7,12}$/); // head 照常可解析
+    expect(state!.dirtyCount).toBe(0); // porcelain 空输出 → 行计数 0（非 undefined）
+  });
+
+  it('delta() 伪 ref：git 报错归一 undefined（不抛出、不落半截账）', async () => {
+    if (repoRoot === undefined) return; // 已建仓（skip 场景防御）
+    const head = (await run(repoRoot, ['rev-parse', '--short=12', 'HEAD'])).trim();
+    const probe = createGitProbe();
+    // deadbeefdead 非本仓对象 → rev-list exit 128 → run() catch → undefined
+    const delta = await probe.delta(repoRoot, 'deadbeefdead', head);
+    expect(delta).toBeUndefined();
+  });
+
+  it('非 git 仓 state()：归一 undefined（探测缺席不是错误——上游不落 git/range）', async () => {
+    // 独立裸目录（不 init）——rev-parse exit 128 → catch → undefined
+    plainDir = mkdtempSync(join(tmpdir(), 'git-probe-plain-'));
+    const probe = createGitProbe();
+    const state = await probe.state(plainDir);
+    expect(state).toBeUndefined();
   });
 });

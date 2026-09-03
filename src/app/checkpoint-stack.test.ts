@@ -13,6 +13,7 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions, Usage } from '../contracts/llm.js';
 import type { UiBackend } from '../channels/types.js';
@@ -457,6 +458,70 @@ describe('行 config exclude 追加语义（接线级——全面复盘 20260902
     expect(rels).toContain('a.txt'); // 普通文件照入
     expect(rels).not.toContain('.env.local'); // 变体不随字面放开联动（修前在——整组替换裸奔）
     expect(rels).not.toContain('id_rsa'); // 未点名秘密缺省排除（修前在——整组替换裸奔）
+  });
+});
+
+/* ---------------- ⑥ git/range Output 锚组合接线（遗漏大扫 20260903 D8-1 #29②） ---------------- */
+
+/** git 可执行缺席（最小容器环境）时整段跳过——git 锚以 git 在场为前提 */
+const hasGit = await new Promise<boolean>((resolve) => {
+  execFile('git', ['--version'], (err) => resolve(err === null));
+});
+const describeGit = hasGit ? describe : describe.skip;
+
+/** execFile promise 化（测试侧脚手架——建仓/基线提交用，失败响亮抛） */
+function gitRun(cwd: string, args: readonly string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('git', [...args], { cwd }, (err, stdout) => {
+      if (err === null) resolve(stdout);
+      else reject(err);
+    });
+  });
+}
+
+describeGit('git/range Output 锚组合接线（真临时 git 仓端到端）', () => {
+  it('bash 首次 mutation → run 收场后 events 含 git/range（dirty 变化即记：before==after、commits 0、files 空）', async () => {
+    // 真临时 git 仓（无 mock——execFile/git/整条锚链全真）：init + 本地身份 +
+    // 基线 commit（首探测时点 dirtyCount=0——pre-mutation 语义的 before 锚）。
+    // 修锁语义：本测为 D8-1 测试盲区补面（现状接线正确、纯回归保护）——
+    // 快照监听（checkpoint/snapshot）与 git 锚（git/range）同 pre-mutation 锚点、
+    // 不同落账事件；本测锁后者整段：监听器触发 → onFirstMutation await →
+    // 工具执行 → RunSettled → onRunSettled 复探（fire-and-forget）→ appendEvent。
+    const ws = makeTempDir('app-cpk-git-ws-');
+    await gitRun(ws, ['init', '-q']);
+    await gitRun(ws, ['config', 'user.email', 'cpk@test.local']);
+    await gitRun(ws, ['config', 'user.name', 'cpk-stack']);
+    writeFileSync(join(ws, 'readme.md'), 'baseline\n');
+    await gitRun(ws, ['add', '.']);
+    await gitRun(ws, ['commit', '-q', '-m', 'baseline']);
+    const { streamFn } = scriptedStream([
+      toolCallMessage('bash', { command: 'printf git-anchor-v1 > out.txt' }),
+      textMessage('写完'),
+    ]);
+    const { runtime } = await assemble({ streamFn, workspace: ws });
+    const answer = await runtime.conversation!.submitOnce('请用 bash 写 out.txt');
+    expect(answer?.status).toBe('completed');
+    // bash 真执行（out.txt 落工作区——untracked，dirty 0→1）
+    expect(readFileSync(join(ws, 'out.txt'), 'utf8')).toBe('git-anchor-v1');
+    // run 收场 → 复探 fire-and-forget（execFile 异步）→ waitFor 兜落账迟滞
+    await vi.waitFor(() => expect(sessionsFace(runtime).eventsOfType('git/range')).toHaveLength(1), {
+      timeout: 5000,
+    });
+    // 头未动、dirty 动 = 有产出即记（§5.3 无产出不记的对侧）：commits 0、files 空
+    const data = sessionsFace(runtime).eventsOfType('git/range')[0]!.data as {
+      before: string;
+      after: string;
+      commits: number;
+      files: string[];
+      dirtyBefore: number;
+      dirtyAfter: number;
+    };
+    expect(data.before).toMatch(/^[0-9a-f]{7,12}$/);
+    expect(data.after).toBe(data.before); // 无 commit——head 不动
+    expect(data.commits).toBe(0);
+    expect(data.files).toEqual([]);
+    expect(data.dirtyBefore).toBe(0); // 基线干净（pre-mutation before 锚）
+    expect(data.dirtyAfter).toBe(1); // out.txt 未跟踪
   });
 });
 

@@ -825,6 +825,46 @@ describe('loadApps import 来源门禁', () => {
     expect(result.failed[0]!.message).toContain('secret.cjs');
     expect(result.failed[0]!.message).toContain('运行期兜底'); // 兜底层标注可分辨
   });
+
+  it('运行期兜底·无父模块 _load(spec, null)：直呼内部入口绕父门即拒（遗漏大扫 20260903 fix-code #18，修前装载成功且逃逸）', async () => {
+    const outsideDir = makeFixtureDir();
+    writeFileSync(join(outsideDir, 'secret2.cjs'), "module.exports = { secret: 'host-secret-2' };\n");
+    const dir = makeFixtureDir();
+    // 逃逸形态 = 直呼 Module._load 内部入口 + parent=null（探针转正）：绕过
+    // Module.prototype.require 的父归因——修前 gated 对 parentFile null 形整体
+    // 跳过裁决、origLoad 直载区外文件成功读宿主秘密。合法树内/内建面对全体
+    // 活动树逐一裁决恒放行（fail-closed 拦逃逸不拦装载——零误伤面）。
+    writeFileSync(
+      join(dir, 'mid-null.cjs'),
+      [
+        "const nodeModule = require('module');",
+        `const OUTSIDE = ${JSON.stringify(join(outsideDir, 'secret2.cjs'))};`,
+        'exports.lateLoad = function lateLoad() {',
+        '  // parent=null 直呼：不走 Module.prototype.require——父门归因缺席',
+        '  const mod = nodeModule._load(OUTSIDE, null, false);',
+        '  return mod.secret;',
+        '};',
+      ].join('\n'),
+    );
+    const entry = writeApp(
+      dir,
+      'cjs-null-parent.ts',
+      [
+        'const { lateLoad } = require("./mid-null.cjs");',
+        'export const name = "cjs-null-parent";',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("fx/cjs-null-escaped", lateLoad() === "host-secret-2");',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadApps(root, [{ id: 'cjs-null-parent', entry }]);
+
+    expect(result.activated).toEqual([]); // 修前：逃逸成功、行照常激活
+    expect(result.failed[0]!.code).toBe(APP_APPLY_FAILED); // apply 内抛错族（门禁 AppError 被 activateOne 包装）
+    expect(result.failed[0]!.message).toContain('secret2.cjs');
+    expect(result.failed[0]!.message).toContain('无父模块'); // fail-closed 腿标注可分辨
+  });
 });
 
 /* ---------------- apply 抛错回卷与生命周期事件 ---------------- */

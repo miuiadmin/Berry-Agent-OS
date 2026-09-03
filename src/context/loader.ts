@@ -361,6 +361,11 @@ type NodeModuleLoadFn = (request: string, parent: { filename?: string | null } |
  * 补丁按 activeTreeRoots 集合裁决——**请求父模块（require 发起文件）落在任一
  * 活动树内**才过三道裁决（树根互斥：各自行目录，首个包含即裁决树）；父在树外
  * （宿主自身/测试框架的 require）恒放行；集合空（无活动行）纯透传，零行为面。
+ * **无父模块 fail-closed**（2026-09-03 勘正〔遗漏大扫 20260903 fix-code #18〕）：
+ * parent 为 null/undefined（直呼 `Module._load` 内部入口——树内 CJS 中间模块
+ * `require('module')._load(区外路径, null)` 即此逃逸面）归因缺席不放行：对
+ * 全体活动树逐一裁决（fromDir 归因树根 = 最保守归因位），任一不容即拒。宿主/
+ * 框架合法装载全走父门面（jiti/vitest/自身码面直呼实测零调用——零误伤）。
  * 集合镜像当前组合树：装载即入、loadApps 每轮剪枝——「常驻」不等于「无界」。
  * worker realm 自持 Module 实例与 loader 模块实例——补丁按 realm 天然隔离，
  * 其行寿命 = realm 寿命，无需剪枝。
@@ -373,7 +378,23 @@ function ensureNodeLoadGate(): void {
   const gated: NodeModuleLoadFn = (request, parent, isMain) => {
     if (activeTreeRoots.size > 0) {
       const parentFile = parent?.filename;
-      if (parentFile !== undefined && parentFile !== null) {
+      if (parentFile === undefined || parentFile === null) {
+        // 无父模块（直呼 Module._load / parent=null 迟发形态——遗漏大扫 20260903
+        // fix-code #18）：归因面缺席不放行，fail-closed 对全体活动树逐一裁决
+        //（fromDir 归因树根 = 最保守归因位），任一不容即拒。相对/绝对树内路径与
+        // node: 内建对每棵树都放行——合法面零误伤；区外绝对路径/逃逸裸包名对
+        // 每棵树都拒——拦的是逃逸，不是装载。
+        for (const treeRoot of activeTreeRoots) {
+          const violation = adjudicateImport(request, treeRoot, treeRoot);
+          if (violation !== undefined) {
+            throw importForbiddenError(
+              request,
+              violation,
+              '运行期兜底：require 无父模块（直呼 Module._load / parent=null 迟发形态），按全体活动树 fail-closed 裁决',
+            );
+          }
+        }
+      } else {
         const realParent = realpathIfPossible(parentFile);
         for (const treeRoot of activeTreeRoots) {
           if (insideTree(realParent, treeRoot)) {

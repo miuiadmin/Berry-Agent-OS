@@ -121,6 +121,17 @@ describe('cwd 前缀判定（canonical 化后须落 workspaceRoot 内）', () =>
   });
 });
 
+describe('cwd 缺省 = workspaceRoot（§7.3 会话不可变 cwd 的工具面兑现）', () => {
+  // 遗漏大扫 20260903 #29② 组合锁发现的同源单元锁：修前缺省直透 undefined →
+  // spawn 继承宿主进程 cwd（vitest 下 = 仓根），pwd 不命中 mkdtemp 工作区即红
+  it('不给 cwd 时 pwd 命中工作区根（不继承宿主进程 cwd）', async () => {
+    const { tool } = makeTool();
+    const result = await run(tool, { command: 'pwd' });
+    expect(result.details.exitCode).toBe(0);
+    expect(result.content[0]!.text).toContain(workspace);
+  });
+});
+
 describe('超时钳制（缺省 120s / 上限 600s）', () => {
   it('超上限请求被钳到 600000ms 且结果开头标注', async () => {
     const { tool } = makeTool();
@@ -179,7 +190,11 @@ describe('升权 × allowlist 免问（§8.4 增补 2——bash 族唯一消费�
       allowlist: [{ tool: 'bash', pattern: 'git' }],
     });
     const result = await run(tool, {
-      command: 'git status',
+      // git --version 词干 = 'git'（--version 属无害 flag 三件）仍命中条目，且
+      // 不依赖 cwd 是否 git 仓——曾用 `git status` 隐性依赖宿主 cwd（仓根）是
+      // git 仓（修前缺省继承宿主 cwd）；cwd 缺省 = workspaceRoot 后测试工作区
+      // （mkdtemp）非 git 仓，status 会 exit 128（遗漏大扫 20260903 #29② 同源）
+      command: 'git --version',
       sandbox_permissions: 'workspace-write',
       justification: '测试词干授权',
     });
