@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { createDesktopShell, type DesktopAdminFace, type DesktopShellDeps } from './desktop-shell.js';
 import { createDesktopService } from './desktop-service.js';
 import type { DesktopAppEntry, DesktopStatusService } from './desktop-service.js';
+import type { AssistantAnswer, AssistantService } from './assistant-app.js';
 import type { DesktopStatusSnapshot } from './desktop-status.js';
 import { POWER_KILL_FAMILY_TEXT } from './host-power.js';
 import type { TerminalIO } from '../desktop/index.js';
@@ -269,6 +270,19 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
+/** 系统助手假面（批 E 默认应答替身：问句记账 + 可脚本应答——引导面带序物证标记） */
+function fakeAssistant(opts: { answer?: (question: string) => Promise<AssistantAnswer> } = {}) {
+  const calls: string[] = [];
+  const face: AssistantService = {
+    answer(question) {
+      calls.push(question);
+      return opts.answer ? opts.answer(question) : Promise.resolve({ kind: 'model', lines: ['答：命令面清单如下…'] });
+    },
+    guide: () => ['⟦助手引导面⟧ 首启引导——凭证指引', 'export ANTHROPIC_API_KEY=…'],
+  };
+  return { face, calls };
+}
+
 /* ---------------- 起屏与视图 ---------------- */
 
 describe('desktop-shell：起屏与首帧', () => {
@@ -453,7 +467,9 @@ describe('desktop-shell：键路由（desktop 视图）', () => {
       expect(io.output).toContain('未知命令：/frobnicate');
       for (const ch of 'hello') press(io, clock, ch);
       press(io, clock, KEY.enter);
-      expect(io.output).toContain('未知输入');
+      // 批 E：无前缀文本默认问系统助手；本测未接助手面 → 缺席帮助卡（carve-out ④ 回落）
+      expect(io.output).toContain('系统助手不在场');
+      expect(io.output).toContain('/apps-toggle assistant');
     } finally {
       void shell.dispose();
     }
@@ -671,13 +687,13 @@ describe('desktop-shell：凭证警示槽与首启引导', () => {
     } finally {
       void shell1.dispose();
     }
-    // 无警示：g 当打字入框（提交后走未知输入面——非引导）
+    // 无警示：g 当打字入框——批 E 起无前缀提交问助手（本测未接助手面 → 缺席帮助卡，非引导）
     const clean = fakeStatus(SNAP);
     const { io, clock, shell } = started({ status: clean.service });
     try {
       press(io, clock, KEY.g);
       press(io, clock, KEY.enter);
-      expect(io.output).toContain('未知输入');
+      expect(io.output).toContain('系统助手不在场');
       expect(io.output).not.toContain('首启引导——模型凭证未配置');
     } finally {
       void shell.dispose();
@@ -692,6 +708,101 @@ describe('desktop-shell：凭证警示槽与首启引导', () => {
       press(io, clock, KEY.enter);
       expect(io.output).toContain('模型凭证已配置');
       expect(io.output).toContain('使用指南');
+      press(io, clock, KEY.escape, 50);
+    } finally {
+      void shell.dispose();
+    }
+  });
+});
+
+/* ---------------- 系统助手默认应答（批 E，价值主张篇/核心命题篇 §3.5） ---------------- */
+
+describe('desktop-shell：无前缀文本默认应答（批 E 系统助手）', () => {
+  it('助手在场：占位「询问中…」→ 异步应答换装 → Esc 回桌面续问', async () => {
+    const assistant = fakeAssistant();
+    const { io, clock, shell } = started({ assistant: () => assistant.face });
+    try {
+      for (const ch of 'how to use') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      expect(assistant.calls).toEqual(['how to use']); // 问句原样进服务面
+      expect(io.output).toContain('问：how to use');
+      expect(io.output).toContain('询问系统助手中…'); // 占位先上屏（异步未决不空白）
+      await flushMicrotasks();
+      clock.advance(17); // 冲应答换装帧
+      expect(io.output).toContain('答：命令面清单如下…');
+      press(io, clock, KEY.escape, 50); // 回桌面（继续提问：无前缀再输即问）
+      expect(io.output).toContain('[全部]');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('助手缺席（carve-out ④ 默认应答者）：帮助文案卡——命令面照常 + 装回指引（非死路）', () => {
+    const { io, clock, shell } = started(); // 未接 assistant dep = 行缺席形态
+    try {
+      for (const ch of 'hello') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('系统助手不在场（行已禁用或未装载）');
+      expect(io.output).toContain('/apps-toggle assistant'); // 装回指引在场
+      expect(io.output).toContain('/guide'); // 其他命令面照常披露
+      press(io, clock, KEY.escape, 50);
+      expect(io.output).toContain('[全部]'); // 回桌面可继续用命令
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('迟到应答不串卡：用户已离卡 → 令牌拦下换装、提示行告知（不抢当前视图）', async () => {
+    let release!: (v: AssistantAnswer) => void;
+    const assistant = fakeAssistant({
+      answer: () =>
+        new Promise((resolve) => {
+          release = resolve; // 手动闸：先离卡再放行应答
+        }),
+    });
+    const { io, clock, shell } = started({ assistant: () => assistant.face });
+    try {
+      for (const ch of 'q1') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('询问系统助手中…');
+      press(io, clock, KEY.escape, 50); // 应答未决先回桌面
+      expect(io.output).toContain('[全部]');
+      release({ kind: 'model', lines: ['LATE-ANSWER'] });
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(io.output).toContain('系统助手已应答（重发问题即可再看）'); // 提示行告知
+      expect(io.output).not.toContain('LATE-ANSWER'); // 不串卡不抢视图
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('服务面异常：诚实转述提示行 + 回桌面（三路判定之外的意外兜底）', async () => {
+    const assistant = fakeAssistant({ answer: () => Promise.reject(new Error('face blew up')) });
+    const { io, clock, shell } = started({ assistant: () => assistant.face });
+    try {
+      for (const ch of 'boom') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(io.output).toContain('系统助手异常：face blew up');
+      expect(io.output).toContain('[全部]'); // 异常态回桌面不留死卡
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('g 热键与 /guide 在助手在场时走助手引导面（与应答同源——委托取值非抄写）', () => {
+    const assistant = fakeAssistant();
+    const withIssue = fakeStatus({ ...SNAP, credentialIssue: { provider: 'anthropic', guidance: 'g' } });
+    const { io, clock, shell } = started({ status: withIssue.service, assistant: () => assistant.face });
+    try {
+      press(io, clock, KEY.g); // 热键直达（警示在场形态）
+      expect(io.output).toContain('⟦助手引导面⟧'); // 假面标记物证：行取自助手面
+      press(io, clock, KEY.escape, 50);
+      for (const ch of '/guide') press(io, clock, ch);
+      press(io, clock, KEY.enter); // 命令面同走助手面（同源两入口）
+      expect(io.output).toContain('⟦助手引导面⟧');
       press(io, clock, KEY.escape, 50);
     } finally {
       void shell.dispose();

@@ -124,14 +124,15 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
   it('默认层第二行激活 + 清单段物化：agent 工具进面、subagent/list 段含 provider 名', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ streamFn });
-    // 默认层十七行全激活（官方全家桶：chat 首行 + memory 次行 + subagent 第三行 +
+    // 默认层十八行全激活（官方全家桶：chat 首行 + memory 次行 + subagent 第三行 +
     // goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化〕+
     // web 第八行〔fetch 刀〕+ compaction 第九行〔压缩刀〕+ admin 第十行〔管理刀〕+
     // checkpoint 第十一行〔快照回退刀——会话篇 §5.3〕+ lsp 第十二行〔语言服务器刀
     // ——契约篇 §6.7〕+ channels 第十三行〔Ring 1 第二行树化——契约篇 §6.8〕+
     // webui 第十四行〔Web 通道刀——enabled 缺省 false 惰性零监听〕+
     // obs 第十五行〔观测刀〕+ browser 第十六行〔浏览器刀〕+
-    // desktop 第十七行〔系统桌面——Ring 1 第三行树化，契约篇 §6.11 批 C〕）
+    // desktop 第十七行〔系统桌面——Ring 1 第三行树化，契约篇 §6.11 批 C〕+
+    // assistant 第十八行〔系统助手——Ring 2，批 E 桌面默认应答者〕）
     expect(runtime.appsService.list().map((r) => [r.id, r.status])).toEqual([
       ['chat', 'activated'],
       ['memory', 'activated'],
@@ -150,6 +151,7 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
       ['obs', 'activated'],
       ['browser', 'activated'],
       ['desktop', 'activated'],
+      ['assistant', 'activated'],
     ]);
     // 委派工具已进工具面（fs 四件 + memory 五件之后）
     expect(runtime.tools.list().map((t) => t.name)).toContain('agent');

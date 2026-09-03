@@ -110,6 +110,11 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 编舞，两连崩熔断回锁期行仍装载——服务面与 /desktop 重试动词可达）。
   // **Ring 1 必备行**非可卸
   { id: 'desktop', pkg: 'builtin:desktop' },
+  // 第十八行 = assistant 行（第八十五批批 E「系统助手」，价值主张篇/核心命题篇
+  // §3.5 助手条款——Ring 2 真·可卸轻件）：桌面输入框无前缀文本的默认应答者 +
+  // 首启引导真身（凭证配置分步指引）。无自有会话域零新表族；卸掉即无前缀文本
+  // 回落帮助文案（carve-out 第四条——桌面不是死路），核心循环不破
+  { id: 'assistant', pkg: 'builtin:assistant' },
 ];
 
 /**

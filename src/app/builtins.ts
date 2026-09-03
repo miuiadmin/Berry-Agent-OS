@@ -36,6 +36,7 @@ import { createWebuiApp, type WebuiAppDeps } from '../webui/index.js';
 import { createObsApp } from '../obs/index.js';
 import { createSubagentApp } from './subagent-app.js';
 import { createDesktopApp } from './desktop-service.js';
+import { createAssistantApp } from './assistant-app.js';
 import type { AgentLocation } from './agents-md.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import type { DatabaseConnection, MigrationSpec } from '../persist/index.js';
@@ -240,6 +241,12 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     // deps 形态；壳后端不入行，宿主入口起屏后 attach 真身）。恒注册（Ring 1
     // 必备行——overlay 禁用即启动断言拒启；熔断回锁锁的是起屏不是装载）
     'builtin:desktop': createDesktopApp(),
+    // assistant 官方件（默认层第十八行，第八十五批批 E「系统助手」——Ring 2 真·
+    // 可卸轻件）：桌面输入框无前缀文本的默认应答者 + 首启引导真身。零闭包依赖
+    // （llm/desktop-status 全经 ctx 取——obs/desktop 之后第三个零 deps 官方行）；
+    // 恒注册（卸行靠 overlay 禁用——缺席时桌面回落帮助文案〔carve-out 第四条〕，
+    // 核心循环不破）
+    'builtin:assistant': createAssistantApp(),
   };
 }
 

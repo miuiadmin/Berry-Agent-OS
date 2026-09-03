@@ -1527,9 +1527,10 @@ describe('应用前台入口（第三纵切：boot 打标 / 应用进入 / deleg
     const { backend, notifies } = recordingBackend();
     runtime.ui.attach(backend);
     runtime.channels.commands.lookup('app')!.handler('');
-    // 可用应用披露行（在册且组件齐备——chat/berrycode/hermes 默认树全在场；缺场应用
-    // 不披露；组装批默认应用带标——berrycode 行缀「(默认)」）
-    expect(notifies.join('\n')).toContain('可用应用：berrycode(默认)、chat、hermes');
+    // 可用应用披露行（在册且组件齐备——assistant/berrycode/chat/hermes 默认树全在场；
+    // 缺场应用不披露；组装批默认应用带标——berrycode 行缀「(默认)」；批 E 起
+    // assistant 纯清单应用进 /app 切换面〔id 字母序在前〕）
+    expect(notifies.join('\n')).toContain('可用应用：assistant、berrycode(默认)、chat、hermes');
     // delegable 自动注册（boot 组合根）：hermes 声明 entry.delegable → 双面
     const subagents = runtime.ctx.get<SubagentsServiceFace>('subagents');
     expect(subagents.list().map((info) => info.name)).toContain('hermes');
@@ -1793,6 +1794,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       { id: 'obs', status: 'activated', name: 'obs' },
       { id: 'browser', status: 'activated', name: 'browser' },
       { id: 'desktop', status: 'activated', name: 'desktop' },
+      { id: 'assistant', status: 'activated', name: 'assistant' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('apps')).toBeTruthy();
@@ -1815,6 +1817,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       'obs',
       'browser',
       'desktop',
+      'assistant',
       'tool-plugin',
     ]);
     // 应用工具已进注册表（域键升级批：全局层在前 + fs 驱动层在后——本会话组成面）
@@ -2353,10 +2356,10 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       // 树行标记：装载序视角下挂应用行显式标注归属（系统行缺省零标记零噪声）
       expect(out).toContain('app-tool-plugin：activated');
       expect(out).toContain('→ chat');
-      // 分组分两类（F13）：官方默认层十七行全挂系统 + 应用合成按在册应用逐组打印
+      // 分组分两类（F13）：官方默认层十八行全挂系统 + 应用合成按在册应用逐组打印
       expect(out).toContain('挂载分组（系统合成 + 各在册应用合成，契约篇 §5.1 两档）：');
       expect(out).toContain(
-        '系统合成（17 行）：chat、memory、subagent、goal、scheduler、mcp、tools、web、compaction、admin、checkpoint、lsp、channels、webui、obs、browser、desktop',
+        '系统合成（18 行）：chat、memory、subagent、goal、scheduler、mcp、tools、web、compaction、admin、checkpoint、lsp、channels、webui、obs、browser、desktop、assistant',
       );
       expect(out).toContain('应用合成 chat（1 行）：app-tool-plugin');
       expect(out).toContain('应用合成 hermes（0 行）：（空——纯系统合成）');
@@ -2727,6 +2730,7 @@ describe('/reload 组合树重载', () => {
         'webui',
         'obs',
         'browser',
+        'assistant',
         'tool-plugin',
       ],
       failed: [],
@@ -2749,6 +2753,7 @@ describe('/reload 组合树重载', () => {
           'webui',
           'obs',
           'browser',
+          'assistant',
           'tool-plugin',
         ],
         failed: [],
@@ -2799,6 +2804,7 @@ describe('/reload 组合树重载', () => {
         'webui',
         'obs',
         'browser',
+        'assistant',
       ],
       failed: [],
       skipped: ['tool-plugin'],
@@ -2874,6 +2880,7 @@ describe('/reload 组合树重载', () => {
       ['obs', 'activated'],
       ['browser', 'activated'],
       ['desktop', 'activated'],
+      ['assistant', 'activated'],
       ['tool-plugin', 'skipped'],
     ]);
 
@@ -2925,6 +2932,7 @@ describe('/reload 组合树重载', () => {
       'webui',
       'obs',
       'browser',
+      'assistant',
       'tool-plugin',
     ]);
     expect(result.payload?.failed).toEqual(['bad']);
@@ -3015,6 +3023,7 @@ describe('/reload 组合树重载', () => {
         'webui',
         'obs',
         'browser',
+        'assistant',
         'tool-plugin',
       ],
       failed: [],
@@ -3262,6 +3271,7 @@ describe('/reload 组合树重载', () => {
       ['obs', 'activated'],
       ['browser', 'activated'],
       ['desktop', 'activated'],
+      ['assistant', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);
@@ -3327,6 +3337,7 @@ describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义'
           'webui',
           'obs',
           'browser',
+          'assistant',
         ],
         failed: [],
         skipped: [],

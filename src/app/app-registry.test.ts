@@ -156,6 +156,18 @@ describe('loadOfficialApps：官方目录装载', () => {
     expect(apps.get('berrycode')?.agent?.persona).toContain('软件工程');
   });
 
+  it('批 E：assistant 系统助手清单在册（label/双组件/persona 诚实纪律——不带 default 键）', () => {
+    const apps = loadOfficialApps();
+    const assistant = apps.get('assistant');
+    expect(assistant?.label).toBe('系统助手');
+    // 纯清单应用双声明：服务面行 builtin:assistant + 进入形态复用对话机器 builtin:chat
+    expect(assistant?.components).toEqual(['builtin:assistant', 'builtin:chat']);
+    // persona 诚实纪律锚（不编造 + 指路 docs——助手应答的人格约束与件内手册同源）
+    expect(assistant?.agent?.persona).toContain('不编造');
+    // 默认应用键唯一性半边：assistant 不带标（默认 = berrycode，回落锚 = chat）
+    expect(assistant?.default).toBeUndefined();
+  });
+
   it('恰一执法：>1 份 default: true = APP_INVALID 拒启（全局唯一属性，发版事故级）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'app-reg-test-'));
     try {

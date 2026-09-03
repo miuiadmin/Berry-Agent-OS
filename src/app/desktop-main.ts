@@ -26,6 +26,7 @@ import { dataDir } from './paths.js';
 import { QUICK_START_ENTRY } from './guide-text.js';
 import { createDesktopShell, type DesktopShell, type DesktopAdminFace } from './desktop-shell.js';
 import type { DesktopAppEntry, DesktopService, DesktopStatusService } from './desktop-service.js';
+import type { AssistantService } from './assistant-app.js';
 import { createDesktopStatusAggregator, type DesktopCredentialIssue } from './desktop-status.js';
 import { runPowerAction, POWER_KILL_FAMILY_TEXT, type PowerResult } from './host-power.js';
 import { formatReloadResult, formatUninstallExec, formatUninstallReport } from './commands.js';
@@ -429,6 +430,10 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
       ...(statusService !== undefined ? { status: statusService } : {}),
       requestPower, // 恒杀全家动词（批 D——host-power 单源编舞的桌面入口）
       admin: adminFace, // 管理面薄壳（批 D——AppsService 同源投影）
+      // 系统助手服务面（批 E 默认应答者）：getter 活取——行被 overlay 禁用 +
+      // /apps-toggle 后 tryGet 即时 undefined，无前缀文本回落帮助文案
+      // （carve-out 第四条），不随 boot 时点固化
+      assistant: () => runtime.ctx.tryGet<AssistantService>('assistant'),
     });
 
   /* ---------------- 内核 shell deps（兜底面的动词接线） ---------------- */

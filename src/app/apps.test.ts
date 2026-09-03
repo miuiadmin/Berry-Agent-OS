@@ -94,7 +94,8 @@ function userRows(dataDir: string): unknown[] {
       row.id !== 'webui' &&
       row.id !== 'obs' &&
       row.id !== 'browser' &&
-      row.id !== 'desktop',
+      row.id !== 'desktop' &&
+      row.id !== 'assistant',
   );
 }
 
@@ -913,7 +914,8 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
           row.id !== 'webui' &&
           row.id !== 'obs' &&
           row.id !== 'browser' &&
-          row.id !== 'desktop',
+          row.id !== 'desktop' &&
+          row.id !== 'assistant',
       ),
     };
 
@@ -984,7 +986,8 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
           row.id !== 'webui' &&
           row.id !== 'obs' &&
           row.id !== 'browser' &&
-          row.id !== 'desktop',
+          row.id !== 'desktop' &&
+          row.id !== 'assistant',
       ),
     };
     // 混合前态：一 activated + 一 skipped——域死不挑前态，任一在册行可转

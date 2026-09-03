@@ -49,7 +49,7 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行 + admin 第十行 + checkpoint 第十一行 + lsp 第十二行 + channels 第十三行〔Ring 1 第二行树化〕 + webui 第十四行 + obs 第十五行 + browser 第十六行 + desktop 第十七行〔Ring 1 第三行树化——契约篇 §6.11 批 C〕——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20/§3.4/会话篇 §5.3/契约篇 §6.7/§6.8） */
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行 + admin 第十行 + checkpoint 第十一行 + lsp 第十二行 + channels 第十三行〔Ring 1 第二行树化〕 + webui 第十四行 + obs 第十五行 + browser 第十六行 + desktop 第十七行〔Ring 1 第三行树化——契约篇 §6.11 批 C〕 + assistant 第十八行〔系统助手 Ring 2——批 E 默认应答者〕——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20/§3.4/会话篇 §5.3/契约篇 §6.7/§6.8/价值主张篇） */
 const DEFAULT_LAYER_IDS = new Set([
   'chat',
   'memory',
@@ -68,6 +68,7 @@ const DEFAULT_LAYER_IDS = new Set([
   'obs',
   'browser',
   'desktop',
+  'assistant',
 ]);
 
 /**
@@ -111,6 +112,7 @@ describe('overlay 装载与拒绝式校验', () => {
     // + obs 第十五行（观测件——契约篇 §6.9）
     // + browser 第十六行（浏览器自动化件——契约篇 §6.10）
     // + desktop 第十七行（系统桌面服务面——Ring 1 第三行树化，契约篇 §6.11 批 C）
+    // + assistant 第十八行（系统助手——Ring 2 纯清单行，批 E 桌面默认应答者）
     // ——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -130,8 +132,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'obs', pkg: 'builtin:obs' },
       { id: 'browser', pkg: 'builtin:browser' },
       { id: 'desktop', pkg: 'builtin:desktop' },
+      { id: 'assistant', pkg: 'builtin:assistant' },
     ]);
-    expect(report.plan).toHaveLength(17);
+    expect(report.plan).toHaveLength(18);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -603,6 +606,7 @@ describe('builtin: 保留前缀解析', () => {
     const stubObs = { name: 'obs-stub', apply: async () => {} };
     const stubBrowser = { name: 'browser-stub', apply: async () => {} };
     const stubDesktop = { name: 'desktop-stub', apply: async () => {} };
+    const stubAssistant = { name: 'assistant-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -621,6 +625,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:obs': stubObs,
       'builtin:browser': stubBrowser,
       'builtin:desktop': stubDesktop,
+      'builtin:assistant': stubAssistant,
     });
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -640,6 +645,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'obs', pkg: 'builtin:obs' },
       { id: 'browser', pkg: 'builtin:browser' },
       { id: 'desktop', pkg: 'builtin:desktop' },
+      { id: 'assistant', pkg: 'builtin:assistant' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', pkg: 'builtin:chat', builtin: stubChat },
@@ -659,6 +665,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'obs', pkg: 'builtin:obs', builtin: stubObs },
       { id: 'browser', pkg: 'builtin:browser', builtin: stubBrowser },
       { id: 'desktop', pkg: 'builtin:desktop', builtin: stubDesktop },
+      { id: 'assistant', pkg: 'builtin:assistant', builtin: stubAssistant },
     ]);
   });
 

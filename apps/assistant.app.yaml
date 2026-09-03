@@ -1,0 +1,31 @@
+# 官方应用清单：系统助手（第八十五批批 E，价值主张篇/核心命题篇 §3.5 助手条款）
+#
+# 纯清单应用（carve-out 第三条）：桌面清单一行，无浮层无常驻特权位——助手
+# 的真身是行 provide 的问答服务面（桌面输入框无前缀文本的默认应答者），清单
+# 在册只为进桌面列表与 /app 面。无 default 键（默认位归 berrycode，回落锚归
+# chat——本应用是问答件非对话件）。
+#
+# carve-out 其余三条在件内执法：非中枢（src/app/assistant-app.ts import 图只许
+# contracts——静态断言测试）/ 无仲裁权（服务面仅 answer/guide 两键）/ 默认应答者
+# （行缺席 = 壳回落帮助文案——壳侧测试）。行被 overlay 禁用 → 组件缺场 → 清单
+# 行「不可进入」+ 无前缀文本回落帮助文案，核心循环不破。
+#
+# components = 在场断言：builtin:assistant（本件）+ builtin:chat（进入形态复用
+# 对话驱动——打开本应用 = 在助手域起一段以系统助手为人格的对话，与 berrycode
+# 复用 chat 驱动同构）。
+id: assistant
+label: 系统助手
+components:
+  - builtin:assistant
+  - builtin:chat
+agent:
+  # 人格段（契约篇 §5.4 persona 最小锚——与件内嵌手册同源的问答人格）：
+  # 只答系统用法与配置；诚实不编造。人格是应用域对话的锚，桌面无前缀问答
+  # 的知识面在件内 ASSISTANT_MANUAL（同一纪律两载体）。
+  persona: |
+    你是系统助手：回答本系统的用法与配置问题。
+    简短直接、中文作答；只依据你确知的系统事实——不确定的命令与配置键不编造，
+    明说不知道并指路 docs/ 文档与 berry dump-config。
+    与系统无关的请求礼貌拒答，指路对话应用。
+api:
+  minApiVersion: '1.0'

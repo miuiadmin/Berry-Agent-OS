@@ -14,12 +14,15 @@
  * 凭证警示槽 + 分组页签 + 应用清单 + 提示行 + 命令输入框）/ menu（应用菜单：
  * 打开/配置/卸载/卸挂载/挂载/详情——管理四项批 D 起接 admin 服务面薄壳，壳零
  * 管理逻辑）/ detail（详情）/ confirm（二次确认与回执——恒杀全家确认 + 管理
- * 回执/两段式共用原语）/ guide（首启凭证引导）/ prompt（管理补参输入）。
+ * 回执/两段式共用原语）/ guide（首启凭证引导——批 E 起助手在场走助手指路面）/
+ * prompt（管理补参输入）/ answer（系统助手应答卡——批 E 无前缀文本默认应答）。
  *
  * 命令前缀（底部 SingleLineInput）：/exit（真退）/shutdown /reboot（恒杀全家
  * ——过 confirm 原语后走宿主 requestPower 单源编舞）/desktop（回桌面视图）
- * /guide（首启引导）。Ctrl+D = /exit。键位：↑↓ 移动光标、←→/Tab 切分组
- * （全部/官方/第三方）、Enter 打开或提交、m 菜单、g 引导（警示在场时）、Esc 返回。
+ * /guide（首启引导）。**无 / 前缀文本 = 询问系统助手**（批 E 默认应答者——
+ * 应答进 answer 卡；助手行缺席回落帮助文案〔carve-out 第四条〕）。Ctrl+D =
+ * /exit。键位：↑↓ 移动光标、←→/Tab 切分组（全部/官方/第三方）、Enter 打开
+ * 或提交、m 菜单、g 引导（警示在场时）、Esc 返回。
  */
 
 import {
@@ -34,6 +37,7 @@ import {
   type TerminalIO,
 } from '../desktop/index.js';
 import type { DesktopAppEntry, DesktopFace, DesktopService, DesktopStatusService } from './desktop-service.js';
+import type { AssistantService } from './assistant-app.js';
 import { POWER_KILL_FAMILY_TEXT, type PowerAction, type PowerResult } from './host-power.js';
 
 /** 时序三件注入面（缺省 Date.now/setTimeout/clearTimeout——测试假钟缝合位；与引擎注入面同构） */
@@ -107,6 +111,13 @@ export interface DesktopShellDeps {
   readonly requestPower?: (action: PowerAction) => Promise<PowerResult>;
   /** 管理面（宿主接 AppsService 薄壳；缺席 = 管理菜单项诚实拒） */
   readonly admin?: DesktopAdminFace;
+  /**
+   * 系统助手服务面（Ring 2 assistant 行 provide 的 `assistant` 键——批 E
+   * 默认应答者）。**getter 活取值**（与 service/status 的直引用不同）：每次
+   * 提问/引导现场解析——行被 overlay 禁用 + /apps-toggle 后 tryGet 即时
+   * undefined，无前缀文本回落帮助文案（carve-out 第四条），不用重启。
+   */
+  readonly assistant?: () => AssistantService | undefined;
 }
 
 /** 桌面壳面（宿主入口持有） */
@@ -134,6 +145,18 @@ const GROUP_LABELS: Record<GroupFilter, string> = {
 
 /** 菜单项（打开/详情壳内直实现；配置/卸载/卸挂载/挂载批 D 起接 admin 服务面薄壳） */
 const MENU_ITEMS = ['打开', '配置', '卸载', '卸挂载', '挂载', '详情'] as const;
+
+/**
+ * 助手缺席回落文案（carve-out 第四条执法面：无前缀文本默认问助手，助手不在场
+ * 也不是死路——命令面照常 + 装回指引 + 文档/诊断指路，进 answer 卡呈现）。
+ */
+const ASSISTANT_ABSENT_HELP: readonly string[] = [
+  '桌面输入框的无前缀文本默认由系统助手应答——该行当前不在场（被禁用或未装载）。',
+  '',
+  '命令面照常可用：/guide 引导 · /shutdown /reboot 关停重启 · /desktop 回桌面 · /exit 退出',
+  '装回助手：/apps-toggle assistant（overlay 禁用行翻转即复装；行 id 见 /apps）',
+  '更多用法与配置见 docs/使用指南.md；装配诊断：berry dump-config',
+];
 
 /** 顶栏时钟回落刷新间隔（毫秒——status 缺席时的占位时钟；聚合器在场则停用） */
 const CLOCK_REFRESH_MS = 30_000;
@@ -171,8 +194,8 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
   });
 
   /* ---------------- 视图状态（单根渲染树整树换装，状态全在壳） ---------------- */
-  /** 当前视图（desktop 主面 / menu 应用菜单 / detail 应用详情 / confirm 确认与回执 / guide 引导 / prompt 补参输入） */
-  let view: 'desktop' | 'menu' | 'detail' | 'confirm' | 'guide' | 'prompt' = 'desktop';
+  /** 当前视图（desktop 主面 / menu 应用菜单 / detail 应用详情 / confirm 确认与回执 / guide 引导 / prompt 补参输入 / answer 助手应答卡） */
+  let view: 'desktop' | 'menu' | 'detail' | 'confirm' | 'guide' | 'prompt' | 'answer' = 'desktop';
   /** 分组过滤（desktop 视图） */
   let groupFilter: GroupFilter = 'all';
   /** 清单光标（过滤后投影的下标） */
@@ -191,8 +214,12 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
         readonly run?: () => void | Promise<void>;
       }
     | undefined;
-  /** 引导视图载荷（首启凭证引导——真文案来自状态快照的 guidance） */
+  /** 引导视图载荷（首启凭证引导——批 E 起助手在场走助手指路面，真文案与应答同源） */
   let guidePane: { readonly lines: readonly string[] } | undefined;
+  /** 应答卡载荷（无前缀文本默认应答——问句标题 + 应答行；异步应答到位即换装） */
+  let answerPane: { readonly title: string; readonly lines: readonly string[] } | undefined;
+  /** 应答异步令牌（递增序——迟到的旧应答不覆盖新问的占位卡，竞速防串卡） */
+  let answerToken = 0;
   /** 补参输入视图载荷（配置 patch / 挂载目标——桌面内嵌输入，非命令行） */
   let promptPane:
     { readonly title: string; readonly hint: string; readonly onSubmit: (text: string) => void } | undefined;
@@ -387,6 +414,21 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     });
   }
 
+  /** answer 视图主体（系统助手应答卡：问句标题 + 应答行——占位/缺席帮助同卡呈现） */
+  function buildAnswerTree(): Renderable {
+    const lines: Renderable[] = (answerPane?.lines ?? [' （无应答内容——异常态，Esc 返回）']).map(
+      (line) => new Text({ content: ` ${line}` }),
+    );
+    return new Column({
+      children: [
+        new Text({ content: ` ${answerPane?.title ?? '系统助手'}`, style: { bold: true } }),
+        new Flex({ child: new Column({ children: lines }) }),
+        ...(notice !== undefined ? [new Text({ content: ` ${notice}`, style: { dim: true } })] : []),
+        new Text({ content: ' Esc 返回桌面（继续提问：回桌面再输，无前缀即问）', style: { dim: true } }),
+      ],
+    });
+  }
+
   /** 按当前视图建树并请求重绘（挂起态 requestRender 静默短路——回桌面后 resume 补帧） */
   function rerender(): void {
     const tree =
@@ -400,7 +442,9 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
               ? buildGuideTree()
               : view === 'prompt'
                 ? buildPromptTree()
-                : buildDesktopTree();
+                : view === 'answer'
+                  ? buildAnswerTree()
+                  : buildDesktopTree();
     engine.setRoot(tree);
   }
 
@@ -494,7 +538,8 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     input.setPreedit(null);
     if (text === '') return;
     if (!text.startsWith('/')) {
-      setNotice('未知输入（桌面只认 / 命令：/exit /shutdown /reboot /guide /desktop）');
+      // 无 / 前缀文本 = 询问系统助手（批 E 默认应答者——取代批 C「未知输入」占位提示）
+      askAssistant(text);
       return;
     }
     const head = text.split(/\s+/)[0]!;
@@ -554,8 +599,54 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     }
   }
 
-  /** 开引导视图（首启凭证引导——文案取状态快照 guidance 同源，禁抄第二份） */
+  /**
+   * 无前缀文本默认应答（carve-out 第四条「默认应答者」的壳侧执法点）：
+   * - 助手在场：进 answer 卡（占位「询问中…」→ 异步应答到位换装；迟到旧应答
+   *   被令牌拦下不串卡，用户已离开则提示行告知不打断）。
+   * - 助手缺席（行被 overlay 禁用 / 未装载）：回落帮助文案——命令面照常可用 +
+   *   装回指引（无前缀文本不是死路，桌面也不是）。
+   */
+  function askAssistant(question: string): void {
+    const face = deps.assistant?.();
+    if (face === undefined) {
+      answerPane = { title: '系统助手不在场（行已禁用或未装载）', lines: ASSISTANT_ABSENT_HELP };
+      view = 'answer';
+      return;
+    }
+    const token = ++answerToken;
+    answerPane = { title: `问：${question}`, lines: ['询问系统助手中…'] };
+    view = 'answer';
+    void Promise.resolve(face.answer(question)).then(
+      (res) => {
+        // 令牌匹配 + 仍在本问的应答卡 → 换上应答行；否则提示行告知（不抢当前视图）
+        if (token === answerToken && view === 'answer') {
+          answerPane = { title: `问：${question}`, lines: res.lines };
+        } else if (token === answerToken) {
+          setNotice('系统助手已应答（重发问题即可再看）');
+        }
+        rerender();
+      },
+      (err: unknown) => {
+        // 服务面自身异常（三路判定之外的意外）——诚实转述回桌面
+        if (token === answerToken && view === 'answer') {
+          answerPane = undefined;
+          view = 'desktop';
+        }
+        setNotice(`系统助手异常：${err instanceof Error ? err.message : String(err)}`);
+        rerender();
+      },
+    );
+  }
+
+  /** 开引导视图（首启凭证引导——批 E 起助手在场走助手 guide 面〔与应答同源的
+   * 知识面〕；助手缺席回落批 D 形态：文案取状态快照 guidance 同源，禁抄第二份） */
   function openGuide(): void {
+    const face = deps.assistant?.();
+    if (face !== undefined) {
+      guidePane = { lines: [...face.guide()] };
+      view = 'guide';
+      return;
+    }
     const issue = deps.status?.snapshot()?.credentialIssue;
     guidePane =
       issue === undefined
@@ -793,6 +884,14 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     if (view === 'guide') {
       if (key === 'escape' || key === 'enter' || key === 'g') {
         guidePane = undefined;
+        view = 'desktop';
+      }
+      return;
+    }
+    if (view === 'answer') {
+      // 应答卡是只读呈现面：Esc/Enter 回桌面继续提问（打字不落框——视图无框）
+      if (key === 'escape' || key === 'enter') {
+        answerPane = undefined;
         view = 'desktop';
       }
       return;
