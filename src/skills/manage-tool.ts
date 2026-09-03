@@ -14,7 +14,7 @@
  * skills.refresh() + 系统提示词重物化（组合根接线——skills_change 事件路同款）。
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Type } from '../contracts/typebox.js';
 import { AppError, TOOL_ARGUMENTS_INVALID } from '../contracts/errors.js';
@@ -46,11 +46,29 @@ function validateName(name: string): string[] {
 function renderFrontmatter(name: string, description: string, provenance?: readonly string[]): string {
   const lines = ['---', `name: ${name}`, `description: ${JSON.stringify(description)}`];
   if (provenance !== undefined && provenance.length > 0) {
-    lines.push('provenance:');
-    for (const id of provenance) lines.push(`  - ${id}`);
+    // 形状 = { memories: [...] }（skill-md parseProvenance 同形——修前渲染序列形
+    // 〔`provenance:\n  - id`〕与解析对象形不匹配：真解析器把序列判形状非法丢弃，
+    // 溯源字段从未真实往返〔既有测试的 provider 用正则假造对象形遮蔽了这一点〕）
+    lines.push('provenance:', '  memories:');
+    // id 字符串化转义（遗漏大扫 20260903 skills D3-3）：与 description 同款
+    // JSON 字符串——含换行/冒号/引号的 id 原样拼接会注入换行级字段断 YAML
+    // （create 回执成功但装载即弃，且坏文件对 skills.get 隐身接通覆写链）
+    for (const id of provenance) lines.push(`    - ${JSON.stringify(id)}`);
   }
   lines.push('---', '');
   return lines.join('\n');
+}
+
+/**
+ * 归一化文本中正文区起点（遗漏大扫 20260903 skills D3-2a）：frontmatter 闭合
+ * `---` 行之后；无 frontmatter / 未闭合 = 0（整文为正文——边界规则与 skill-md.ts
+ * splitFrontmatter 同律）。patch 的查找与替换都限此区间——frontmatter 元数据段
+ * 不参与（改元数据 = 重建，不走 patch）。
+ */
+function bodyStartIndex(text: string): number {
+  if (!text.startsWith('---')) return 0;
+  const endIndex = text.indexOf('\n---', 3);
+  return endIndex === -1 ? 0 : endIndex + 4; // 跳过收尾 '\n---'（其后是正文）
 }
 
 /** 结果文本助手（工具回执统一纯文本面） */
@@ -149,6 +167,9 @@ export function createSkillManageTool(opts: SkillManageToolOptions): ToolDefinit
         if (req.content === undefined || req.content.trim() === '') {
           throw new AppError(TOOL_ARGUMENTS_INVALID, 'skill_manage：create 动作必填 content（非空正文）');
         }
+        // 目录名 = name（§4.2 同名规则——构造保证，validateName 已限字符集无路径穿越面）
+        const skillDir = join(projectSkillsDir, req.name);
+        const filePath = join(skillDir, 'SKILL.md');
         // 同名拒写（任一层——first-wins 语义下同名新建只会制造 collision 诊断，不如拒在写前）
         const existing = skills.get(req.name);
         if (existing !== undefined) {
@@ -158,9 +179,16 @@ export function createSkillManageTool(opts: SkillManageToolOptions): ToolDefinit
             true,
           );
         }
-        // 目录名 = name（§4.2 同名规则——构造保证，validateName 已限字符集无路径穿越面）
-        const skillDir = join(projectSkillsDir, req.name);
-        const filePath = join(skillDir, 'SKILL.md');
+        // 盘上判据兜底（遗漏大扫 20260903 skills D3-1）：坏 YAML/缺 description/
+        // frontmatter 名不符的盘上文件对注册表 get() 隐身（不入册或以 frontmatter
+        // 名入册）——只查在册名会静默覆写毁用户文件且回执成功；盘上在场同样响亮拒
+        if (existsSync(filePath)) {
+          return textResult(
+            `${filePath} 在磁盘上已存在但不在技能注册表（文件可能无法解析或 name 与目录名不符）——不覆写。` +
+              '请核对该文件：修复 frontmatter 或删除/改名后重试 create。',
+            true,
+          );
+        }
         const frontmatter = renderFrontmatter(req.name, req.description, req.provenance);
         mkdirSync(skillDir, { recursive: true });
         writeFileSync(filePath, `${frontmatter}${req.content}\n`, 'utf-8');
@@ -191,18 +219,31 @@ export function createSkillManageTool(opts: SkillManageToolOptions): ToolDefinit
           'skill_manage：patch 动作必填 replace（替换为空串 = 删除该段，合法）',
         );
       }
+      // 校验域与替换域统一（遗漏大扫 20260903 skills D3-2a）：归一化整文件上校验 +
+      // 替换，区间限 frontmatter 闭合 --- 之后——旧实现校验跑解析产物 body、替换跑
+      // 原始整文件：find 串同时在 frontmatter 与正文出现时 raw.replace 命中更靠前
+      // 的 frontmatter 位（name 被改→孤儿化 / description 命中→断 YAML）；CRLF
+      // 文件解析侧已归一而 raw 未归一 → 多行 find 永不命中（合法 patch 误诊拒）。
+      // 归一回写 = 本工具写面统一 LF（create 同款输出形态）
+      const text = readFileSync(skill.filePath, 'utf-8').replace(/\r\n/g, '\n');
+      const start = bodyStartIndex(text);
+      const body = text.slice(start);
       // 单点校验：零匹配/多匹配均拒（多点替换的静默歧义不可接受——补上下文重试）
-      const first = skill.content.indexOf(req.find);
+      const first = body.indexOf(req.find);
       if (first === -1) {
         return textResult('find 文本在技能正文中零匹配——核对原文（skill_manage list 后直接 read 该 SKILL.md）。', true);
       }
-      if (skill.content.indexOf(req.find, first + 1) !== -1) {
+      if (body.indexOf(req.find, first + 1) !== -1) {
         return textResult('find 文本在正文中多处命中（须恰好一处）——扩大 find 上下文使其唯一。', true);
       }
-      // 原文件 = frontmatter + 正文；frontmatter 原样保留（改元数据 = 重建，不走 patch）
-      const raw = readFileSync(skill.filePath, 'utf-8');
-      const next = raw.replace(req.find, req.replace);
-      if (next === raw) {
+      // 函数替换形态（遗漏大扫 20260903 skills D3-2b）：replacer 返回值不做
+      // $&/$`/$'/$$ 模式展开——技能正文是知识载体，字面 $ 家族不罕见（实测 $`
+      // 一次即把 frontmatter+正文前缀整段复制进替换点）；frontmatter 段原样保留。
+      // （replaceText 先行捕获：闭包内属性访问失窄化——string|undefined 不匹配
+      // replacer 签名）
+      const replaceText = req.replace;
+      const next = text.slice(0, start) + body.replace(req.find, () => replaceText);
+      if (next === text) {
         return textResult('替换后内容与原文相同（find 与 replace 一致？）——未写入。', true);
       }
       writeFileSync(skill.filePath, next, 'utf-8');
