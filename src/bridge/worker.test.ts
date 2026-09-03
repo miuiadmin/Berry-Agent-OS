@@ -27,6 +27,7 @@ vi.mock('../contracts/api.js', async (importOriginal) => {
 import {
   AppError,
   BRIDGE_CANCELLED,
+  BRIDGE_CALL_TIMEOUT,
   BRIDGE_HANDLER_FAILED,
   BRIDGE_METHOD_NOT_FOUND,
   BRIDGE_SURFACE_NARROWED,
@@ -124,6 +125,18 @@ export default async function apply(ctx) {
 }
 `;
 
+/** 宿主服务代理腿预算 fixture（A19 腿二，第十一轮遗漏大扫 20260904-b）：default
+ *  直取未声明宿主服务（缺省宿主代理面）并 await——hangSvcInvoke 桩下永不结算，
+ *  修后由 svcCallTimeoutMs 到点以 BRIDGE_CALL_TIMEOUT 结算；码经 tap 服务回读 */
+const FX_SVC_TIMEOUT = `
+export const name = 'fx-svc-timeout';
+export default async function apply(ctx) {
+  const codes = [];
+  ctx.provide('fx/svc-timeout-taps', { codes: () => codes });
+  try { await ctx.get('fx-hang-host').hang(); } catch (err) { codes.push(err.code); }
+}
+`;
+
 /** 侧门双封 fixture（R1 复盘批二）：声明 optionalInject:['tools'] 后 tryGet——
  * 修复前拿到宿主服务代理（register 走 svc-invoke('tools',...) → 测试桩抛
  * METHOD_NOT_FOUND）；修复后拿到本地桩（register 走 tools-register 帧成功） */
@@ -168,7 +181,12 @@ export default async function apply(ctx) {
 }
 `;
 
-/** 直连域：MessageChannel 两端各挂一个端点（worker 端 = 被测件；宿主端 = 记录型桩） */
+/** 直连域：MessageChannel 两端各挂一个端点（worker 端 = 被测件；宿主端 = 记录型桩）
+ * host = 宿主端点（测试驱动面）；registered/subs/unsubs/toolRegs/logs/dropped =
+ * 宿主侧记录面；close() = dispose 双端 + 关端口。opts = 注入面：
+ * rejectSvcRegister（svc-register 桩改抛）/ hangSvcInvoke（svc-invoke 桩永不
+ * 结算——A19 腿二红锁的域侧真实现挂死形态）/ svcCallTimeoutMs（域半宿主服务
+ * 代理预算覆写——60s 缺省在测试形态不可观察，测试专用面）。 */
 interface TestChannel {
   /** 宿主端点（测试驱动面） */
   host: BridgeEndpoint;
@@ -189,8 +207,14 @@ interface TestChannel {
 }
 
 /** 建直连域 + 记录型宿主桩（svc-invoke 故意抛保码 AppError——信封链路断言用）。
- * rejectSvcRegister = svc-register 桩改抛（L-7 迟到注册失败形态的注入面） */
-function makeChannel(opts?: { rejectSvcRegister?: boolean }): TestChannel {
+ * rejectSvcRegister = svc-register 桩改抛（L-7 迟到注册失败形态的注入面）；
+ * hangSvcInvoke = svc-invoke 桩永不结算（A19 腿二注入面）；svcCallTimeoutMs =
+ * 域半宿主服务代理预算覆写（透传 startWorkerRealm） */
+function makeChannel(opts?: {
+  rejectSvcRegister?: boolean;
+  hangSvcInvoke?: boolean;
+  svcCallTimeoutMs?: number;
+}): TestChannel {
   const { port1, port2 } = new MessageChannel();
   const registered: Array<[string, string]> = [];
   const subs: Array<[string, string]> = [];
@@ -222,14 +246,19 @@ function makeChannel(opts?: { rejectSvcRegister?: boolean }): TestChannel {
     .handle('host', 'tools-register', (args) => {
       toolRegs.push(args);
     })
-    /* 宿主服务桩：一律保码抛 METHOD_NOT_FOUND——worker 侧桩的错误信封回卷链路借此可断言 */
+    /* 宿主服务桩：缺省保码抛 METHOD_NOT_FOUND——worker 侧桩的错误信封回卷链路借此可断言；
+     * hangSvcInvoke = 永不结算（A19 腿二——域侧 svc-invoke 真实现挂死的对端形态） */
     .handle('host', 'svc-invoke', ([name, method]) => {
+      if (opts?.hangSvcInvoke) return new Promise<never>(() => {});
       throw new AppError(BRIDGE_METHOD_NOT_FOUND, `宿主测试桩无此服务方法：${String(name)}.${String(method)}`);
     })
     .handle('host', 'tool-run', () => {
       throw new AppError(BRIDGE_METHOD_NOT_FOUND, '宿主测试桩不提供 tool-run');
     });
-  const worker = startWorkerRealm(port2, 'test-worker');
+  const worker = startWorkerRealm(port2, 'test-worker', {
+    // 域半宿主服务代理预算覆写（A19 腿二测试专用面——缺省 60s 不可观察）
+    svcCallTimeoutMs: opts?.svcCallTimeoutMs,
+  });
   return {
     host,
     registered,
@@ -414,6 +443,19 @@ describe('startWorkerRealm — svc.invoke（服务分派与错误信封）', () 
     const codes = (await ch.host.call('svc', 'invoke', ['fx', 'fx/env-taps', 'codes', []])) as string[];
     expect(codes).toEqual([BRIDGE_METHOD_NOT_FOUND]);
   });
+
+  it('宿主服务代理腿预算：域内调宿主 svc 永不结算 → svcCallTimeoutMs 到点 BRIDGE_CALL_TIMEOUT（A19 腿二，修前红：代理调用无预算 apply 永挂）', async () => {
+    const ch = makeChannel({ hangSvcInvoke: true, svcCallTimeoutMs: 300 });
+    channels.push(ch);
+    const dir = makeFixtureDir();
+    dirs.push(dir);
+    const entry = writeApp(dir, 'fx-svc-timeout.ts', FX_SVC_TIMEOUT);
+    await ch.host.call('svc', 'load', [{ id: 'fx', entry, sandbox: { carrier: 'worker' } }]);
+    // apply 内 await 挂死调用：修后 300ms 到点结算 BRIDGE_CALL_TIMEOUT → apply 收束
+    await ch.host.call('svc', 'apply', ['fx', {}, {}]);
+    const codes = (await ch.host.call('svc', 'invoke', ['fx', 'fx/svc-timeout-taps', 'codes', []])) as string[];
+    expect(codes).toEqual([BRIDGE_CALL_TIMEOUT]);
+  }, 10_000);
 });
 
 /* ---------------- 事件回投与工具执行 ---------------- */

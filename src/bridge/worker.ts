@@ -42,7 +42,7 @@ import {
   type ValidatedModule,
   type WorkerModuleMeta,
 } from '../context/loader.js';
-import { BridgeEndpoint, type BridgePort } from './session.js';
+import { BridgeEndpoint, SVC_PROXY_TIMEOUT_MS, type BridgePort } from './session.js';
 
 /* ------------------------------------------------------------------ */
 /* 行状态（worker 域侧的行注册面——宿主作用域回卷经 svc.unload 联动到这里） */
@@ -75,6 +75,15 @@ const modules = new Map<string, ValidatedModule>();
  * 缺省同构——注入物是宿主 realm 函数不可过界，worker 域按需开面另批）。
  */
 let realmJiti: ReturnType<typeof createAppJiti> | undefined;
+
+/**
+ * 域半宿主服务代理腿的到点预算（毫秒，模块级单值——每进程一域的既定形态，
+ * rows/modules 注册簿同款先例）。startWorkerRealm 时点定值（workerData 过河
+ * 覆写或测试直连注入，缺省 60s）；get/tryGet 物化 makeHostServiceProxy 时
+ * 读取。契约篇 §1.7 第十一轮遗漏大扫 20260904-b 增补第 1 条——挂死的宿主
+ * 真实现到点 BRIDGE_CALL_TIMEOUT 本地结算（心跳辖不到的形态）。
+ */
+let realmSvcCallTimeoutMs = SVC_PROXY_TIMEOUT_MS;
 
 /** 日志单向上行（fire-and-forget——tell 无回应面；宿主 onTell 分派到行 logger） */
 function logUp(
@@ -211,13 +220,15 @@ function makeHostServiceProxy(
   endpoint: BridgeEndpoint,
   rowId: string,
   name: string,
+  /** 每方法调用的到点预算（毫秒）——恒在场（缺省 60s，域启动参数可覆写；宿主真实现挂死到点 BRIDGE_CALL_TIMEOUT 本地结算） */
+  timeoutMs: number,
 ): Record<string, (...args: unknown[]) => Promise<unknown>> {
   return new Proxy(
     {},
     {
       get(_target, prop) {
         if (typeof prop !== 'string' || prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
-        return (...args: unknown[]) => endpoint.call('host', 'svc-invoke', [rowId, name, prop, args]);
+        return (...args: unknown[]) => endpoint.call('host', 'svc-invoke', [rowId, name, prop, args], { timeoutMs });
       },
     },
   );
@@ -326,7 +337,7 @@ function makeStubCtx(
     get(name: string) {
       // 'tools' 特例拦截：本地桩（register/run 两面）；其余服务走宿主代理
       if (name === 'tools') return makeToolsStub(endpoint, state, rowId, registrations);
-      return makeHostServiceProxy(endpoint, rowId, name);
+      return makeHostServiceProxy(endpoint, rowId, name, realmSvcCallTimeoutMs);
     },
     tryGet(name: string) {
       // 'tools' 特例拦截（R1 复盘批二侧门双封）：与 get 同款返回本地桩——原
@@ -338,7 +349,7 @@ function makeStubCtx(
       // optionalInject 在场快照（宿主激活时探测随 apply 载荷过界）——名单外
       // 词汇（未声明 optionalInject 的名字）一律 undefined（同步探测不可过界，
       // 收窄语义：要探测就先声明 optionalInject——声明面零变化下唯一合理口径）
-      return presence[name] === true ? makeHostServiceProxy(endpoint, rowId, name) : undefined;
+      return presence[name] === true ? makeHostServiceProxy(endpoint, rowId, name, realmSvcCallTimeoutMs) : undefined;
     },
     provide(name: string, impl: unknown) {
       assertAlive(state, `provide(${name})`);
@@ -371,9 +382,19 @@ function makeStubCtx(
 /**
  * 启动 worker 域桥接端：注册 svc.load/apply/unload/invoke/tool-invoke 五处理方
  * + tell 分派（evt 事件回投）。导出供单测用 MessageChannel 直连（不必真起
- * worker_threads 子进程）。
+ * worker_threads 子进程）。opts.svcCallTimeoutMs = 域半宿主服务代理腿的预算
+ * 覆写（缺省 60s；契约篇 §1.7 第十一轮遗漏大扫 20260904-b 增补第 1 条——
+ * 测试专用面，随 workerData 过河或直连注入）。
  */
-export function startWorkerRealm(port: BridgePort, workerId: string): BridgeEndpoint {
+export function startWorkerRealm(
+  port: BridgePort,
+  workerId: string,
+  opts?: { svcCallTimeoutMs?: number },
+): BridgeEndpoint {
+  // 域级预算配置（模块级单值——每进程一域的既定形态，rows/modules 注册簿同款
+  // 先例）：真 worker 进程入口先于任意 svc 调用执行；直连测试在 startWorkerRealm
+  // 时点注入。get/tryGet 物化代理时读取。
+  realmSvcCallTimeoutMs = opts?.svcCallTimeoutMs ?? SVC_PROXY_TIMEOUT_MS;
   // 先声明后构造：onTell 闭包需要 endpoint 引用（回卷失败日志上行用）
   let endpoint!: BridgeEndpoint;
   const dispatchTell = (event: string, payload: unknown): void => {
@@ -516,7 +537,10 @@ export function startWorkerRealm(port: BridgePort, workerId: string): BridgeEndp
 
 /* ----------------------- 真 worker 进程入口（测试直 import 时 no-op） ----------------------- */
 if (parentPort !== null) {
-  const data = workerData as { workerId?: string } | undefined;
+  const data = workerData as { workerId?: string; svcCallTimeoutMs?: number } | undefined;
   const workerId = typeof data?.workerId === 'string' ? data.workerId : 'worker';
-  startWorkerRealm(parentPort, workerId);
+  // 代理腿预算覆写随 workerData 过河（spawnWorkerDomain 注入；缺省 undefined = 60s）
+  startWorkerRealm(parentPort, workerId, {
+    ...(data?.svcCallTimeoutMs === undefined ? {} : { svcCallTimeoutMs: data.svcCallTimeoutMs }),
+  });
 }

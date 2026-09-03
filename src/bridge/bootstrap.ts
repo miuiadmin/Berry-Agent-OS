@@ -39,7 +39,7 @@ import type { HostFaceData } from '../contracts/api.js';
 import type { ContextScope } from '../context/types.js';
 import { runInCallerChain } from '../context/chain.js';
 import type { WorkerModuleMeta, WorkerRowLoader } from '../context/loader.js';
-import { BridgeEndpoint } from './session.js';
+import { BridgeEndpoint, SVC_PROXY_TIMEOUT_MS } from './session.js';
 
 /** 宿主侧行绑定（worker 行激活期间的宿主侧锚点——onTell/emit 后期消费） */
 export interface RowBinding {
@@ -76,6 +76,12 @@ export interface HostHandlersTarget {
   readonly root: ContextScope;
   /** 工具服务（缺省懒解析 root 的 'tools'——装载序晚期行友好） */
   readonly tools?: ToolsService;
+  /**
+   * 宿主调域内服务的代理腿预算覆写（毫秒，缺省 SVC_PROXY_TIMEOUT_MS 60s——
+   * 契约篇 §1.7 第十一轮遗漏大扫 20260904-b 增补第 1 条）。测试专用面：60s
+   * 缺省在测试形态不可观察，短预算注入后挂死真实现可到点观察 BRIDGE_CALL_TIMEOUT。
+   */
+  readonly svcCallTimeoutMs?: number;
 }
 
 /**
@@ -105,7 +111,13 @@ export function registerHostHandlers(t: HostHandlersTarget): void {
     .handle('host', 'svc-register', ([rowIdArg, nameArg]) => {
       const rowId = String(rowIdArg);
       const binding = requireBinding(rowId, 'svc-register');
-      binding.scope.provide(String(nameArg), makeWorkerServiceProxy(t.endpoint, rowId, String(nameArg)));
+      // 代理腿恒携预算（契约篇 §1.7 第十一轮遗漏大扫 20260904-b 增补第 1 条）：
+      // 域侧真实现挂死（不冻结域事件循环——心跳辖不到）即对端 Promise 永挂，
+      // 缺省 60s 到点 BRIDGE_CALL_TIMEOUT 本地结算 + cancel 帧通知对端停工
+      binding.scope.provide(
+        String(nameArg),
+        makeWorkerServiceProxy(t.endpoint, rowId, String(nameArg), t.svcCallTimeoutMs ?? SVC_PROXY_TIMEOUT_MS),
+      );
     })
     /* 域行订阅：行作用域 on + 转发器（args 过界 tell 回投域分派）。
      * sub 帧幂等（遗漏大扫 20260901 O-1）：同 (行,事件) 已挂转发器则直接
@@ -274,6 +286,12 @@ export interface WorkerDomainOptions {
   readonly hostFaceData?: HostFaceData;
   /** svc.load 在途超时（毫秒，缺省 60s——jiti 全图转译 + import 的合理上限） */
   readonly loadTimeoutMs?: number;
+  /**
+   * 宿主调域内服务的代理腿预算覆写（毫秒，缺省 SVC_PROXY_TIMEOUT_MS 60s——
+   * 契约篇 §1.7 第十一轮遗漏大扫 20260904-b 增补第 1 条）。测试专用面：60s
+   * 缺省在测试形态不可观察。
+   */
+  readonly svcCallTimeoutMs?: number;
   /** 心跳节律（毫秒；**首次 svc.load 成功后起表**——boot 窗〔tsx 编译/模块装载〕ping 无应答属正常不计拍，该窗由 loadTimeoutMs 监督；运行期冻结由本探针执法，K3-c 监督编舞的配置面，端点机制见 session.ts） */
   readonly heartbeatMs?: number;
   /** 连续丢拍阈值（缺省沿用端点 3） */
@@ -367,7 +385,11 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   const isTs = workerUrl.pathname.endsWith('.ts');
   const launchUrl = new URL('./carrier-launch.mjs', import.meta.url);
   const worker = new Worker(isTs ? launchUrl : workerUrl, {
-    ...(isTs ? { workerData: { workerId, realmEntry: workerUrl.href } } : { workerData: { workerId } }),
+    // svcCallTimeoutMs 随 workerData 过河（域半宿主服务代理腿的预算覆写——
+    // 两代理腿同批立法，契约篇 §1.7 第十一轮遗漏大扫 20260904-b 增补第 1 条）
+    ...(isTs
+      ? { workerData: { workerId, realmEntry: workerUrl.href, svcCallTimeoutMs: opts.svcCallTimeoutMs } }
+      : { workerData: { workerId, svcCallTimeoutMs: opts.svcCallTimeoutMs } }),
     ...(opts.execArgv === undefined ? {} : { execArgv: [...opts.execArgv] }),
     ...(opts.resourceLimits === undefined ? {} : { resourceLimits: { ...opts.resourceLimits } }),
     ...(opts.env === undefined ? {} : { env: { ...opts.env } }),
@@ -464,6 +486,8 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
     toolRunSeq: 0,
     root: opts.root,
     ...(opts.tools === undefined ? {} : { tools: opts.tools }),
+    // 宿主调域内服务的代理腿预算覆写（A19 腿一——缺省 60s 由 svc-register 物化点兜底）
+    ...(opts.svcCallTimeoutMs === undefined ? {} : { svcCallTimeoutMs: opts.svcCallTimeoutMs }),
   });
 
   const domain: WorkerDomain = {
@@ -541,13 +565,15 @@ function makeWorkerServiceProxy(
   endpoint: BridgeEndpoint,
   rowId: string,
   name: string,
+  /** 每方法调用的到点预算（毫秒）——恒在场（缺省 60s，测试可注入覆写；挂死真实现到点 BRIDGE_CALL_TIMEOUT 本地结算） */
+  timeoutMs: number,
 ): Record<string, (...args: unknown[]) => Promise<unknown>> {
   return new Proxy(
     {},
     {
       get(_target, prop) {
         if (typeof prop !== 'string' || prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
-        return (...args: unknown[]) => endpoint.call('svc', 'invoke', [rowId, name, prop, args]);
+        return (...args: unknown[]) => endpoint.call('svc', 'invoke', [rowId, name, prop, args], { timeoutMs });
       },
     },
   );

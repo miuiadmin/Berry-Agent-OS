@@ -19,6 +19,14 @@ import type { ExecResult, ExecService } from '../contracts/exec.js';
 import type { AgentToolResult, ToolDefinition } from '../contracts/tools.js';
 import type { Context } from '../context/types.js';
 import { chainCallers } from '../context/chain.js';
+
+/**
+ * 行代执行强制预算缺省（毫秒）——契约篇 §1.7 第十一轮遗漏大扫 20260904-b
+ * 增补第 2 条。exec 不能 import bridge（拓扑白名单），故本地常量与
+ * bridge/session.ts 的 SVC_PROXY_TIMEOUT_MS 同值同族（60s）——两处同批立法，
+ * 改值须同步（同族缺省注记，非引用关系）。
+ */
+const ROW_EXEC_TIMEOUT_DEFAULT_MS = 60_000;
 import type { ToolPipelineExecutor } from '../tools/pipeline.js';
 import { intersectRoots } from '../safety/roots.js';
 import type { SandboxMode, SandboxService } from '../safety/index.js';
@@ -57,6 +65,13 @@ export interface ExecServiceOptions {
    * mcp ChildRegistry 适配器（exec 结构上不见 mcp，killTree 闭包同款先例）。
    */
   readonly commandLog?: CommandProcessLog;
+  /**
+   * 行代执行强制预算覆写（毫秒，缺省 60s——契约篇 §1.7 第十一轮遗漏大扫
+   * 20260904-b 增补第 2 条）：caller 链有行帧（svc-invoke/tool-run 过桥的代
+   * 执行）且调用方未显式给 timeoutMs 时，内部合成 def 的管道预算上限。测试
+   * 专用注入面（60s 缺省在测试形态不可观察）。
+   */
+  readonly rowExecTimeoutMs?: number;
 }
 
 /**
@@ -123,13 +138,26 @@ export function registerExecService(ctx: Context, opts: ExecServiceOptions): Exe
       // 服务面返回值以本闭包捕获为准（details 面不依赖 post 段不重写）
       let captured: ExecResult | undefined;
 
+      // 行代执行强制预算（契约篇 §1.7 第十一轮遗漏大扫 20260904-b 增补第 2
+      // 条）：caller 链有行帧（chainCallers() 非空——svc-invoke/tool-run 过桥
+      // 的代执行，含 worker-threads 行：confinementFor 对其返回 undefined 不可
+      // 作行判据，行帧在场性本身才是判据）且调用方未显式给 timeoutMs 时，合成
+      // def 由 0（不设限）改强制行预算——域侧真实现挂死即宿主侧进程永活的对
+      // 端形态，无预算 = 敌意应用可借 exec 腿 spawn 永活进程。宿主 origin（链
+      // 无行帧）维持原语侧超时自治不变（「timeoutMs 由调用方显式给」的宿主
+      // 信任前提不外溢到分域行）；调用方显式给 timeoutMs 的行帧调用照旧走
+      // req.timeoutMs 自治（显式值优先于强制缺省——下方 execute 内 req 路不变）。
+      const rowOriginated = chainCallers().length > 0;
+      const forcedTimeoutMs =
+        rowOriginated && callOpts.timeoutMs === undefined ? (opts.rowExecTimeoutMs ?? ROW_EXEC_TIMEOUT_DEFAULT_MS) : 0;
       // 内部合成 def：内部名 exec 不注册（模型词汇表不可见）；预算 0 = 管道
-      // 不设限（原语侧超时自治——timeoutMs 由调用方显式给，runArgv 自计时）
+      // 不设限（原语侧超时自治——timeoutMs 由调用方显式给，runArgv 自计时）；
+      // 行帧且未显式给 = 强制行预算（上段）
       const def: ToolDefinition = {
         name: 'exec',
         label: '（内部）子进程执行',
         effect: 'write',
-        timeoutMs: 0,
+        timeoutMs: forcedTimeoutMs,
         description: '内部合成：ctx.exec 服务原语（不进模型词汇表）',
         parameters: INTERNAL_EXEC_PARAMETERS,
         execute: async (input, tctx): Promise<AgentToolResult> => {

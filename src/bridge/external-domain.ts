@@ -115,6 +115,13 @@ export interface ExternalDomainOptions {
   }) => void;
   /** terminate 的 SIGTERM→SIGKILL 组杀宽限（毫秒，缺省 5000——域告别窗） */
   readonly killGraceMs?: number;
+  /**
+   * 宿主调域内服务的代理腿预算覆写（毫秒，缺省 60s——契约篇 §1.7 第十一轮
+   * 遗漏大扫 20260904-b 增补第 1 条）。只穿宿主半（registerHostHandlers——
+   * 与 worker 载体同一份处理方）；域半（域内调宿主服务）复用 startWorkerRealm
+   * 同码、维持 60s 缺省不另开 argv 协议位（external 测试形态无需短预算注入）。
+   */
+  readonly svcCallTimeoutMs?: number;
 }
 
 /** external 域句柄（宿主侧唯一操作面——与 WorkerDomain 同形，worker 字段换 child） */
@@ -257,6 +264,8 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
     toolRunSeq: 0,
     root: opts.root,
     ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
+    // 宿主调域内服务的代理腿预算覆写（A19 腿一——缺省 60s 由 svc-register 物化点兜底）
+    ...(opts.svcCallTimeoutMs === undefined ? {} : { svcCallTimeoutMs: opts.svcCallTimeoutMs }),
   });
 
   // 主动收尾标记（terminate 置位——exit 处理据此区分编舞终点与意外死亡）

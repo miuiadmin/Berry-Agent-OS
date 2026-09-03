@@ -22,7 +22,12 @@ import { createContext, registerLiveEvent } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
 import { chainCaller } from '../context/chain.js';
 import { loadApps } from '../context/loader.js';
-import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED, APP_LOAD_FAILED } from '../contracts/errors.js';
+import {
+  BRIDGE_CALL_TIMEOUT,
+  BRIDGE_METHOD_NOT_FOUND,
+  BRIDGE_WORKER_EXITED,
+  APP_LOAD_FAILED,
+} from '../contracts/errors.js';
 import {
   spawnWorkerDomain,
   makeRowLoader,
@@ -286,6 +291,40 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
     await domain.worker.terminate();
     expect(unexpectedExits).toEqual([]);
   });
+
+  it('svc 代理腿预算：宿主调域内服务永不结算 → svcCallTimeoutMs 到点 BRIDGE_CALL_TIMEOUT 本地结算（A19 腿一，修前红：代理调用无预算永挂）', async () => {
+    // 独立域注入短预算（svcCallTimeoutMs 是测试专用覆写面——60s 缺省在测试
+    // 形态不可观察；修后宿主半 makeWorkerServiceProxy 的调用恒携 timeoutMs，
+    // 挂死真实现到点本地结算 + cancel 帧通知对端停工）
+    const domainT = spawnWorkerDomain({
+      root,
+      tools: tools as unknown as ToolsService,
+      workerUrl: WORKER_URL,
+      workerId: 'svc-timeout-e2e',
+      svcCallTimeoutMs: 400,
+    });
+    try {
+      // 等域就绪（svc.load 探活——tsx worker 冷启 ~1s）
+      await until(
+        () =>
+          domainT.endpoint.call('svc', 'load', [{ id: '__probe__', entry: workerEntry }]).then(
+            () => true,
+            () => false,
+          ),
+        20_000,
+      );
+      await domainT.load({ id: 'w-tmo', entry: workerEntry, sandbox: { carrier: 'worker' } });
+      const scope = root.fork({ name: 'w-tmo', rowId: 'w-tmo', builtinRow: false });
+      await domainT.applyRow({ id: 'w-tmo', sandbox: { carrier: 'worker' }, config: { slot: 't' } }, scope);
+      // FX_WORKER slot-t：hang 服务真实现永不结算——修前红位（调用永挂测试超时）
+      const err = await rejection(
+        root.get<Record<string, (...args: unknown[]) => Promise<unknown>>>('fx/taps-t')!['hang']!(),
+      );
+      expect(err.code).toBe(BRIDGE_CALL_TIMEOUT);
+    } finally {
+      domainT.terminate('测试收尾');
+    }
+  }, 30_000);
 
   it('意外死亡（绕过 terminate 直杀 worker）：行作用域回卷 + onExit 归因（rows 带行 id）', async () => {
     // 独立第二域：共享域已在上一用例 terminate——域死回卷语义需要活域观测

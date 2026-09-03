@@ -35,11 +35,19 @@ const fakeSandbox: SandboxService = {
   listBackends: () => [],
 };
 
-/** 组装真管道 + 被测服务（每用例独立 context） */
-function makeService(mode: () => SandboxMode = () => 'workspace-write') {
+/** 组装真管道 + 被测服务（每用例独立 context）。extra = 按用例注入的
+ *  ExecServiceOptions 扩展面（行代执行强制预算注入位 rowExecTimeoutMs——
+ *  60s 缺省在测试形态不可观察，测试专用覆写面） */
+function makeService(mode: () => SandboxMode = () => 'workspace-write', extra?: { rowExecTimeoutMs?: number }) {
   const ctx = createContext({ name: 'test-exec-service' });
   const pipeline = createToolPipeline(ctx);
-  const service = registerExecService(ctx, { pipeline, sandbox: fakeSandbox, mode, workspaceRoot: workspace });
+  const service = registerExecService(ctx, {
+    pipeline,
+    sandbox: fakeSandbox,
+    mode,
+    workspaceRoot: workspace,
+    ...extra,
+  });
   return { ctx, service };
 }
 
@@ -104,6 +112,27 @@ describe('ctx.exec 选项面（原语侧宽——与 bash 工具侧刻意不对�
       expect((err as AppError).code).toBe(TOOL_TIMEOUT);
     }
   });
+});
+
+describe('行代执行强制预算（契约篇 §1.7 第十一轮遗漏大扫 20260904-b 增补第 2 条——A19 腿三）', () => {
+  it('caller 链有行帧且未显式给 timeoutMs → 强制行预算截停永挂 sleep（修前红：内部 def 预算 0 不设限，行帧代执行可永挂宿主侧进程）', async () => {
+    const { service } = makeService(() => 'workspace-write', { rowExecTimeoutMs: 400 });
+    try {
+      // runInCallerChain 注入行帧（svc-invoke/tool-run 过桥的代执行形态——
+      // chainCallers() 非空即行帧在场；worker-threads 行 confinementFor 返回
+      // undefined 不可作行判据，行帧在场性本身才是判据）
+      await runInCallerChain('apps-hostile', () => service.exec('bash', ['-c', 'sleep 30']));
+      expect.unreachable('应当抛错');
+    } catch (err) {
+      expect((err as AppError).code).toBe(TOOL_TIMEOUT);
+    }
+  }, 15_000);
+  it('宿主 origin（链无行帧）不受强制预算——1.2s 命令跑过 800ms 注入面（锁修复射界：预算只对行帧调用生效，宿主 origin 维持原语侧超时自治）', async () => {
+    const { service } = makeService(() => 'workspace-write', { rowExecTimeoutMs: 800 });
+    const result = await service.exec('bash', ['-c', 'sleep 1.2; echo done']);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('done');
+  }, 15_000);
 });
 
 describe('同一条三段管道（服务调用不旁路守门）', () => {
