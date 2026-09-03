@@ -9,8 +9,9 @@
  * - **换防收口面**（律 8 / 契约篇 §6.11，引擎侧机制单源）：
  *   - suspend 三件套：onInput(null) → pause() → setRawMode(先验态)；leaveModes
  *     出屏（kitty pop/粘贴关/光标显/备屏出）；requestRender 挂起静默短路。
- *   - resume 四步：enterModes 清屏进（备屏/模式重开/kitty 重推）→ setRawMode(true)
- *     → onInput 重装 → front 失真标脏 + 全量首帧重绘。
+ *   - resume 五步：enterModes 清屏进（备屏/模式重开/kitty 重推）→ setRawMode(true)
+ *     → onInput 重装 → io.resume 放流（对家栈停屏显式 pause 过 stdin）→
+ *     front 失真标脏 + 全量首帧重绘。
  *   - drainInput：退回 shell 前排空 stdin 缓冲（临时吞处理器 + 闲窗轮询）。
  *   - decoder.discardPending：换防瞬间在途转义一窗全丢。
  * - **输入接线**：decoder.feed → 事件队列排空 → emitter 'input'；lone-ESC 判定
@@ -303,14 +304,20 @@ export class DesktopEngine {
   }
 
   /**
-   * 复位（换防接收方）：模式串清屏进 → raw 重设 → 监听重装 → 全量首帧重绘。
-   * front 基线在挂起期已失真（对方栈写过屏）——forceFull 全量重绘。
+   * 复位（换防接收方）：模式串清屏进 → raw 重设 → 监听重装 → 放流 → 全量首帧
+   * 重绘。front 基线在挂起期已失真（对方栈写过屏）——forceFull 全量重绘。
+   *
+   * 放流步（io.resume）不可省：对家栈（pi-tui）停屏时显式 pause 了 stdin——
+   * Node 语义下「已被显式 pause 的流」再挂 data 监听不会自动回 flowing，
+   * 缺放流则复位后引擎永久失聪（真终端可复现；假 IO 的 push 直调处理器
+   * 遮蔽了这一位——pty 审计抓出）。
    */
   resume(): void {
     if (this.state !== 'suspended') return;
     this.io.write(ENTER_MODES);
     this.io.setRawMode(true);
     this.io.onInput(this.handleInput);
+    this.io.resume();
     this.state = 'running';
     this.forceFull = true;
     this.front.clear(); // 基线重置（全量差分起点）

@@ -20,6 +20,7 @@ import {
   Text,
   TuiMainScreen,
   VStack,
+  matchesKey,
   parseKey,
   type AutocompleteProvider,
   type Component,
@@ -70,6 +71,13 @@ export interface TuiChannelOptions {
   readonly themeFor?: (sessionId?: string) => string | undefined;
   /** 退出键提示文案（S6 形态⑦：宿主按起屏时点驱动数分档——多驱动「Ctrl+C 打断 / Ctrl+D·/quit 退出」、单驱动缺省「Ctrl+D·Ctrl+C 退出」） */
   readonly quitHint?: string;
+  /**
+   * Esc 拦截钩子（批 C 桌面换防，契约篇 §6.11）：应用视图态下 Esc 优先给宿主
+   * 路由（桌面态 → 回桌面换防；内核 shell 态 → 出视图回 REPL）。返回 true =
+   * 已消费（不进编辑器）；false/未注入 = 维持 Esc 编辑语义（默认不拦截——
+   * tui-main 纯对话形态零变化）
+   */
+  readonly escapeHook?: () => boolean;
   /**
    * 工作区根（M4 命令/文件补全接线，2026-08-27 第三十三批）：传入即武装
    * editor autocomplete（命令名补全 + 参数补全 + `@` 文件补全，经 pi-tui
@@ -123,10 +131,14 @@ export interface TuiChannel {
   renderHistory(messages: readonly AgentMessage[]): void;
   /** 本通道的 UI 后端（接 ctx.ui 聚合器 attach） */
   ui(): UiBackend;
-  /** 起屏（装配完再调；接管终端输入） */
+  /** 起屏（装配完再调；接管终端输入）。停屏后复起（批 C 桌面换防）不重拉历史——组件树保连续，强制全量重画 */
   start(): void;
-  /** 停屏（恢复终端；不 resolve 在身提问——退出序列由宿主编排） */
-  stop(): void;
+  /**
+   * 停屏（恢复终端；不 resolve 在身提问——退出序列由宿主编排）。批 C 换防：
+   * preserveScreen:true = 保留屏面不写尾部换行（桌面引擎在其上重绘）——停屏
+   * 期间 requestRender 自然短路（pi-tui 原生 stopped 早退），事件仍进组件树
+   */
+  stop(options?: { readonly preserveScreen?: boolean }): void;
   /**
    * 退出兜底（interrupt 小刀）：收场全部在身/排队提问（prompts.cancelAll）
    * ——quit 后 settle 前调用，覆盖无 run 属主的 ask（服务路）与任何漏网，
@@ -159,6 +171,8 @@ const NOTIFY_PREFIX: Record<NotifyLevel, string> = { info: 'ℹ', success: '✔'
 export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const terminal = opts.terminal ?? new ProcessTerminal();
   const tui: TUI = new TuiMainScreen(terminal);
+  /** 起屏旗标（批 C 桌面换防）：首起拉历史投影，停屏后复起只全量重画不重拉 */
+  let screenStarted = false;
 
   /* ---- 组件树：消息流（滚动跟随）/ 状态行 / 输入框 / 提示行 ---- */
   /** 消息流内容（逐条 append Text；ScrollView 跟随末端） */
@@ -350,9 +364,13 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   // Ctrl+D / Ctrl+C 全局拦截面（pi-tui Editor 无专用回调；经原始输入监听 + 键解析识别）。
   // raw mode 下两键不产生信号而是输入字节——在此拦下分流（S6 形态④）：Ctrl+C 走
   // 宿主 interrupt（多驱动 = 打断聚焦 run 不退 OS，分档单点在 FrontHost）、
-  // Ctrl+D 恒 requestQuit（退出命令键位不变）
+  // Ctrl+D 恒 requestQuit（退出命令键位不变）。Esc 拦截在最前（批 C 桌面换防：
+  // escapeHook 消费即吞——编辑器 Esc 语义仅在纯对话形态保留）
   const quitKeys = new Set(['ctrl+d', 'ctrl+c']);
   tui.addInputListener((data) => {
+    if (opts.escapeHook !== undefined && matchesKey(data, 'escape')) {
+      if (opts.escapeHook()) return { consume: true };
+    }
     const key = parseKey(data);
     if (key !== undefined && quitKeys.has(key)) {
       if (key === 'ctrl+c') opts.host.interrupt();
@@ -520,6 +538,16 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       return backend;
     },
     start() {
+      // 复起路（批 C 桌面换防——stop 后再 start）：组件树跨停屏保连续，不重拉
+      // 历史（重拉即重复行）；桌面引擎曾在屏上绘过，差分基线（previousLines）
+      // 已失真——force 复位渲染状态强制全帧重画
+      if (screenStarted) {
+        tui.setFocus(editor);
+        tui.start();
+        tui.requestRender(true);
+        return;
+      }
+      screenStarted = true;
       // 起屏历史：undefined = 当前聚焦（壳闭包解析——boot 路 focus 通知早于订阅，
       // 初始渲染不走 repaint 而走本路；此后 focus 变化全走 repaint 显式键）
       // D4 theme：起屏换装同路（B1 冷读裁决——起屏聚焦会话的主题不经 repaint，
@@ -529,8 +557,8 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       tui.setFocus(editor);
       tui.start();
     },
-    stop() {
-      tui.stop();
+    stop(options) {
+      tui.stop(options);
     },
     /**
      * 退出兜底（interrupt 小刀：cancelAll 生产调用者从无到有）：收场无 run

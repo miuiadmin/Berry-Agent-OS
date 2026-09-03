@@ -25,6 +25,8 @@ import type { AppsService, UninstallExecReport, UninstallReport } from './apps.j
 import type { AllowlistStore } from './allowlist-store.js';
 import type { ReloadResult } from './assembly.js';
 import type { AppStatusRow } from './composition.js';
+// 批 C 系统桌面：/desktop 命令路由面类型（/desktop 动词缺席即不注册）
+import type { DesktopService } from './desktop-service.js';
 
 /** 诊断 → 通知文本行（2026-08-23 生态读码补钉 ref-3：「没生效」必须有可见出口） */
 /**
@@ -262,6 +264,12 @@ export interface BuiltinCommandsOptions {
   readonly reload: (app?: string) => Promise<ReloadResult>;
   /** 用量面板取数（/usage——投影本体在 usage.ts，组合根闭包绑库连接；壳只转述） */
   readonly usage: () => string;
+  /**
+   * 桌面服务面（批 C 系统桌面 /desktop 命令——契约篇 §6.11）：Ring 1 desktop
+   * 行 provide 的 holder（组合根 tryGet 注入）。可选——行装载恒在场（Ring 1
+   * 必备行），仅纯测试形态可省（省即命令面不注册）
+   */
+  readonly desktop?: DesktopService;
 }
 
 /**
@@ -695,6 +703,26 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
       },
     }),
   );
+
+  // /desktop（批 C 系统桌面换防动词——契约篇 §6.11）：应用视图内请求回桌面。
+  // 路由全在桌面服务 holder（壳 attach 的 face 持引擎 resume 编舞）；命令壳
+  // 只转述结果。仅在桌面服务面在场时注册（纯测试形态可省——语义不降级为
+  // no-op，缺席即命令不存在）
+  if (opts.desktop !== undefined) {
+    const desktop = opts.desktop;
+    disposers.push(
+      commands.register({
+        name: 'desktop',
+        description: '回到系统桌面（从应用视图换防回桌面——桌面形态专属动词）',
+        handler: () => {
+          const result = desktop.backToDesktop();
+          if (!result.ok) {
+            ui.notify(`回桌面失败：${result.error}（未在桌面形态或桌面壳不在场——/exit 退出）`);
+          }
+        },
+      }),
+    );
+  }
 
   // 技能命令：装配期快照逐个注册（/skill:<名> 剩余参数为附加指令）
   for (const skill of skills.list()) {

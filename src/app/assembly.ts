@@ -96,6 +96,8 @@ import type { WebuiApprovalMount, WebuiEphemeralAuthFace } from '../webui/index.
 // daemon 刀一：heldSessions 租约闭包读 daemon.json 判活（assembly↔daemon 零环
 // ——命令半边 daemon.ts 引 createRuntime，状态半边 daemon-state.ts 不引）
 import { isDaemonAlive, readDaemonState } from './daemon-state.js';
+// 批 C 系统桌面：/desktop 命令路由面类型（Ring 1 desktop 行 provide 的服务 holder）
+import type { DesktopService } from './desktop-service.js';
 import type { Session } from '../session/session.js';
 import {
   getSessionEventType,
@@ -523,6 +525,14 @@ export interface AppRuntime {
   readonly front: FrontHost;
   /** 开新会话（/new）：registry.open 一条龙 + 旧聚焦条目退役；无持久层或聚焦驱动 run 进行中返回 undefined */
   newSession(): Session | undefined;
+  /**
+   * 进入应用（批 C 桌面壳上提的 ⑨a 单源闭包直通）：解析 → 缺场拒 →
+   * open({app}) 一条龙，与 /app 命令同一进入语义（桌面壳/内核 shell /start
+   * 消费）。未知 id / 组件缺场 / 无持久层三面 error 回执
+   */
+  enterApp(
+    appId: string,
+  ): { readonly ok: true; readonly sessionId: string } | { readonly ok: false; readonly error: string };
   /**
    * documentSymbol 查询面活取值（channels 批刀 B——TUI @-mention 符号段）：
    * 刀三行面晚绑桥第二消费点。恒可调——lsp 行 apply 期挂真身、回卷摘除，
@@ -2702,6 +2712,33 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   // boot ⑨ 收口武装结算钩子（chat 件已装载则一次成功；装载失败留待 busy 分支再试）
   armRunSettledHook();
 
+  /* ---- ⑨a 应用进入单源（批 C 桌面壳上提）：解析 → 缺场拒 → open({app}) 一条龙。
+   * 原 ⑨b 命令面内闭包上提为组合根实体——/app 命令与桌面壳（desktop-main 经
+   * AppRuntime.enterApp）消费同一闭包，进入语义零分叉。闭包捕获 officialApps/
+   * appGaps（let，/reload 后活值）/registry 三个实体，时点无关恒活。 */
+  const enterApp = (appId: string): { ok: true; sessionId: string } | { ok: false; error: string } => {
+    const manifest = officialApps.get(appId);
+    if (manifest === undefined) {
+      const ids = [...officialApps.keys()].join('、');
+      return {
+        ok: false,
+        error: `未知应用：${appId}${ids === '' ? '（在册应用：无）' : `（在册应用：${ids}）`}`,
+      };
+    }
+    const missing = appGaps.get(appId);
+    if (missing !== undefined) {
+      return {
+        ok: false,
+        error: `应用 ${appId} 组件缺场（${missing.join('、')}）——应用级隔离，不可进入；dump-config 查诊断`,
+      };
+    }
+    const entry = registry.open({ app: manifest });
+    if (entry === undefined) {
+      return { ok: false, error: '现在不能进入（无持久层），稍后再试' };
+    }
+    return { ok: true, sessionId: entry.session.header.sessionId };
+  };
+
   /* ---- ⑨b 内置命令（help/quit/new/skills/skill:<名> + 应用管理五件/reload） ----
    * 依赖 ⑨ 的 appsService 服务与 reload 闭包——必须在其后注册（引用先声明）。
    * quit/submit 经驱动活句柄（chat 件未装载时 no-op——命令面仍在，对话循环不在）。 */
@@ -2759,31 +2796,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
             .filter((manifest) => !appGaps.has(manifest.id))
             .map((manifest) => ({ id: manifest.id, label: manifest.label, isDefault: manifest.id === defaultId }));
         },
-        enter: (appId: string): { ok: true; sessionId: string } | { ok: false; error: string } => {
-          const manifest = officialApps.get(appId);
-          if (manifest === undefined) {
-            const ids = [...officialApps.keys()].join('、');
-            return {
-              ok: false,
-              error: `未知应用：${appId}${ids === '' ? '（在册应用：无）' : `（在册应用：${ids}）`}`,
-            };
-          }
-          const missing = appGaps.get(appId);
-          if (missing !== undefined) {
-            return {
-              ok: false,
-              error: `应用 ${appId} 组件缺场（${missing.join('、')}）——应用级隔离，不可进入；dump-config 查诊断`,
-            };
-          }
-          const entry = registry.open({ app: manifest });
-          if (entry === undefined) {
-            return { ok: false, error: '现在不能进入（无持久层），稍后再试' };
-          }
-          return { ok: true, sessionId: entry.session.header.sessionId };
-        },
+        // 进入面 = ⑨a 单源闭包直通（批 C 桌面壳与 /app 同一进入语义）
+        enter: enterApp,
       },
       appsService, // ctx.apps 服务（⑨ provide——命令壳与宿主同源）
       reload, // 组合根 reload 闭包（⑨ 定义——busy/error/payload 三面）
+      // /desktop 命令路由面（批 C 系统桌面）：Ring 1 desktop 行 provide 的服务
+      // holder——熔断回锁期行仍装载（tryGet 可达），/desktop 动词不随壳起停漂移
+      desktop: ctx.tryGet<DesktopService>('desktop'),
       // /usage 取数闭包：绑持久层活连接（诊断面无库时给说明行——面板零写入，
       // 库连接在关停序列中先于命令面注销而 close，通道壳兜底为通知）
       usage: persistence
@@ -2994,6 +3014,8 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     drivers: registry,
     front: chatBundle.front,
     newSession: startNewSession,
+    // 批 C 桌面壳：应用进入单源直通（⑨a 闭包——/app 命令与桌面/内核壳同一语义）
+    enterApp,
     // 刀 B：documentSymbol 面活取值（读 holder——与 webui deps symbolsFor 同源
     // 第二消费点；lsp 行缺席 = undefined，TUI 补全退化委托腿）
     symbolsFor: (path: string) => symbolsFace?.(path) ?? Promise.resolve(undefined),

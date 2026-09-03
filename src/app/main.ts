@@ -3,8 +3,9 @@
  * L5 app — CLI 入口（技术栈篇 §5：极简三命令，手写 argv——第九批拍板 #15
  * 不引 commander；解析本体见 parseArgs，本文件含帮助文案与入口分派）。
  *
- *   berry                  无参 = TUI 进入对话（默认命令，产品主入口；起屏前
- *                          裸检测：daemon 正跑时提示 attach/standalone 退非零）
+ *   berry                  无参 = 桌面首启（默认命令，产品主入口；批 C——起屏前
+ *                          熔断判据先行，两连崩回锁内核最小 shell；裸检测：
+ *                          daemon 正跑时提示 attach/standalone 退非零）
  *   berry run "<message>"  单次执行：一轮对话 → stdout 输出结果
  *   berry run --tick <名>  tick 到点编排（OS 调度器唤起形态——读行→due→
  *                          闸→抢占→跑→归属回写；tick-main 主流程）
@@ -19,6 +20,7 @@
  *           下 = webui 常开端口，缺省 7860；attach 下 = 覆盖 daemon.json 记录值）
  *         / --foreground（daemon 限定：前台常驻——start spawn 的目标形态）
  *         / --standalone（裸 berry 限定：跳过 daemon 检测显式单开进程内形态）
+ *         / --no-desktop（裸 berry 限定：跳过桌面直进内核最小 shell——批 C）
  *
  * 命令面即产品契约（输出保持稳定）；三命令分别接 tui-main / run-main /
  * dump-config 的真实主流程。顶层异常统一 stderr 一行 + 退出码 1。
@@ -26,7 +28,7 @@
 import { VERSION_WITH_CODENAME as VERSION } from './version.js';
 import { describeError } from '../contracts/errors.js';
 import { upgradeMain } from './upgrade.js';
-import { tuiMain } from './tui-main.js';
+import { desktopMain } from './desktop-main.js';
 import { runOnceMain } from './run-main.js';
 import { tickMain } from './tick-main.js';
 import { dumpConfigMain } from './dump-config.js';
@@ -40,7 +42,8 @@ import { DEFAULT_WEBUI_PORT } from '../webui/index.js';
 const HELP = `Berry ${VERSION} — 应用式智能体运行时
 
 用法：
-  berry                  进入 TUI 对话（默认命令；daemon 正跑时提示改道退非零）
+  berry                  桌面首启（默认命令；两连崩熔断回锁内核 shell；daemon
+                         正跑时提示改道退非零；应用视图 = 对话 TUI）
   berry run "<message>"  单次执行：一轮对话 → stdout
   berry run --tick <名>  tick 到点编排（OS 调度唤起：读任务行→due 判定→闸→跑）
   berry daemon <start|stop|status|doctor>
@@ -72,6 +75,8 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
                监视直接子进程的唯一正确形态，自 fork 会双实例循环）
   --standalone 裸 berry 限定：跳过 daemon 检测显式单开进程内形态（attach 的
                反义面——工作区会话归本进程，不与 daemon 抢写）
+  --no-desktop 裸 berry 限定：跳过系统桌面直进内核最小 shell（零引擎兜底面；
+               命令 /apps /start <id> /shutdown /exit /desktop——批 C 换防批）
   --no-apps 安全模式：boot 组合树空装（默认层与 overlay 全跳过，只保 Ring 1 硬装配行
                ——坏应用锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）
   --app-file <path> 快速试件（开发指南 §8）：入口文件路径直接跑一次——组合树注入
@@ -112,6 +117,7 @@ const KNOWN_FLAG_WORDS: ReadonlySet<string> = new Set([
   '--foreground',
   '--app-file',
   '--standalone',
+  '--no-desktop',
 ]);
 /** 命令位词（合法落在位置参数首位、由分派 switch 匹配——不算未识别旗标；
  * 越位形态〔出现在子命令位之后〕由解析层记录、分派层统一短路——执法四律⑥） */
@@ -140,6 +146,8 @@ interface ParsedArgs {
   foreground: boolean;
   /** 裸 berry 显式单开（--standalone，契约篇 §6.8 刀二）：跳过 daemon 检测——其余入口无害忽略 */
   standalone: boolean;
+  /** 跳过系统桌面（--no-desktop，契约篇 §6.11 批 C）：裸 berry 限定直进内核最小 shell——其余入口无害忽略（同 --standalone 律） */
+  noDesktop: boolean;
   /** 快速试件路径（--app-file <path>，开发指南 §8）：berry/run 两入口收——组合树注入临时行，零装机零挂载零落盘 */
   appFile: string | undefined;
   /** 未识别 `--` 词（终结符之前收到的——分派层统一用法错退 2，20260901-c #1） */
@@ -163,6 +171,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let sandboxHost = false;
   let foreground = false;
   let standalone = false;
+  let noDesktop = false;
   let appFile: string | undefined;
   let terminated = false; // `--` 终结符已见——其后 argv 全字面（旗标解析停摆）
   for (let i = 0; i < argv.length; i++) {
@@ -219,6 +228,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       // 裸 berry 显式单开（契约篇 §6.8 刀二）：跳过 daemon 检测——其余入口收到
       // 时无害忽略（同律：语义只在裸 berry case 执法）
       standalone = true;
+    } else if (arg === '--no-desktop') {
+      // 跳过系统桌面（契约篇 §6.11 批 C）：裸 berry 限定直进内核最小 shell
+      //（桌面起屏失败两连崩的显式绕行位）——其余入口收到时无害忽略（同律）
+      noDesktop = true;
     } else if (arg.startsWith('--') && !KNOWN_FLAG_WORDS.has(arg) && !COMMAND_WORDS.has(arg)) {
       // 未识别 `--` 词（含 = 取值形/拼写错写）：收进名单交分派层统一用法错——
       // 旧形落位置参数被静默并进消息（#1：`berry run --app=chat "hi"` 送进 LLM）
@@ -247,6 +260,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     sandboxHost,
     foreground,
     standalone,
+    noDesktop,
     appFile,
     unknownFlags,
     strayCommandWord,
@@ -309,6 +323,7 @@ function main(argv: string[]): number {
     sandboxHost,
     foreground,
     standalone,
+    noDesktop,
     appFile,
     unknownFlags,
     strayCommandWord,
@@ -373,10 +388,11 @@ function main(argv: string[]): number {
             return 1;
           }
         }
-        return tuiMain({
+        return desktopMain({
           ...(noApps ? { noApps: true } : {}),
           ...(webuiPort === undefined ? {} : { webuiPort }),
           ...(appFile === undefined ? {} : { appFile }),
+          ...(noDesktop ? { noDesktop: true } : {}),
         });
       }
       case '--help':

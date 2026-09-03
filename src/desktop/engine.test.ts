@@ -230,6 +230,10 @@ describe('换防收口面（律 8 / 契约篇 §6.11）', () => {
     expect(io.written[io.written.length - 1]).toBe(ENTER_MODES); // 清屏重进
     expect(io.raw).toBe(true); // raw 重设
     expect(io.inputHandler).not.toBeNull(); // 监听重装
+    // 放流步回归锁（pty 审计抓出的真缺陷）：对家栈（pi-tui）停屏时显式
+    // pause 过 stdin——Node 语义下被显式 pause 的流再挂 data 监听不自动回
+    // flowing，resume 必须补 io.resume()，否则复位后引擎永久失聪
+    expect(io.paused).toBe(false);
     clock.advance(20); // FPS 帽：距上帧一帧间隔内排到帽点
     const last = io.written[io.written.length - 1]!;
     expect(last.startsWith('\x1b[?2026h')).toBe(true); // 全量重绘首帧

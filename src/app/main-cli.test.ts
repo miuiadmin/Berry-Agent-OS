@@ -17,6 +17,8 @@ import { describe, expect, it, vi } from 'vitest';
 /* ---------------- 六命令主流程 + wrapper/检测面全 mock（单元边界） ---------------- */
 
 vi.mock('./tui-main.js', () => ({ tuiMain: vi.fn(async () => 0) }));
+// 批 C：无参主入口改道桌面首启（desktop-main）——mock 同律（分派面单测不跑真装配）
+vi.mock('./desktop-main.js', () => ({ desktopMain: vi.fn(async () => 0) }));
 // run-main 的 mock 体是 hoisted 单例 vi.fn（基建大扫 #8）：dispatch 内
 // vi.resetModules() 会让 vi.mock 工厂重跑——工厂返回同一 spy 实例，既有调用史
 // 断言（mock.calls）与测试注入的 mockRejectedValueOnce（once 队列）都跨
@@ -210,11 +212,11 @@ describe('CLI 分派：upgrade 互斥面修订（20260901-c #13）', () => {
 
 describe('CLI 分派：--app-file 缺值空串占位（20260901-c #14）', () => {
   it('TUI 入口缺值 → 用法错退 2（旧形直传装配层 APP_ENTRY_UNRESOLVED 退 1）', async () => {
-    const { tuiMain } = await import('./tui-main.js');
+    const { desktopMain } = await import('./desktop-main.js');
     const { code, stderr } = await dispatch(['--app-file']);
     expect(code).toBe(2);
     expect(stderr).toContain('用法：berry --app-file');
-    expect(vi.mocked(tuiMain)).not.toHaveBeenCalled();
+    expect(vi.mocked(desktopMain)).not.toHaveBeenCalled();
   });
 
   it('run 入口缺值 → 用法错退 2（同律）', async () => {

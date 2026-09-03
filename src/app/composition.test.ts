@@ -49,7 +49,7 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行 + admin 第十行 + checkpoint 第十一行 + lsp 第十二行 + channels 第十三行〔Ring 1 第二行树化〕 + webui 第十四行——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20/§3.4/会话篇 §5.3/契约篇 §6.7/§6.8） */
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行 + admin 第十行 + checkpoint 第十一行 + lsp 第十二行 + channels 第十三行〔Ring 1 第二行树化〕 + webui 第十四行 + obs 第十五行 + browser 第十六行 + desktop 第十七行〔Ring 1 第三行树化——契约篇 §6.11 批 C〕——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20/§3.4/会话篇 §5.3/契约篇 §6.7/§6.8） */
 const DEFAULT_LAYER_IDS = new Set([
   'chat',
   'memory',
@@ -67,6 +67,7 @@ const DEFAULT_LAYER_IDS = new Set([
   'webui',
   'obs',
   'browser',
+  'desktop',
 ]);
 
 /**
@@ -109,6 +110,7 @@ describe('overlay 装载与拒绝式校验', () => {
     // + webui 第十四行（Web 通道件——契约篇 §6.8）
     // + obs 第十五行（观测件——契约篇 §6.9）
     // + browser 第十六行（浏览器自动化件——契约篇 §6.10）
+    // + desktop 第十七行（系统桌面服务面——Ring 1 第三行树化，契约篇 §6.11 批 C）
     // ——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -127,8 +129,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'webui', pkg: 'builtin:webui' },
       { id: 'obs', pkg: 'builtin:obs' },
       { id: 'browser', pkg: 'builtin:browser' },
+      { id: 'desktop', pkg: 'builtin:desktop' },
     ]);
-    expect(report.plan).toHaveLength(16);
+    expect(report.plan).toHaveLength(17);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -599,6 +602,7 @@ describe('builtin: 保留前缀解析', () => {
     const stubWebui = { name: 'webui-stub', apply: async () => {} };
     const stubObs = { name: 'obs-stub', apply: async () => {} };
     const stubBrowser = { name: 'browser-stub', apply: async () => {} };
+    const stubDesktop = { name: 'desktop-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -616,6 +620,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:webui': stubWebui,
       'builtin:obs': stubObs,
       'builtin:browser': stubBrowser,
+      'builtin:desktop': stubDesktop,
     });
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -634,6 +639,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'webui', pkg: 'builtin:webui' },
       { id: 'obs', pkg: 'builtin:obs' },
       { id: 'browser', pkg: 'builtin:browser' },
+      { id: 'desktop', pkg: 'builtin:desktop' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', pkg: 'builtin:chat', builtin: stubChat },
@@ -652,6 +658,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'webui', pkg: 'builtin:webui', builtin: stubWebui },
       { id: 'obs', pkg: 'builtin:obs', builtin: stubObs },
       { id: 'browser', pkg: 'builtin:browser', builtin: stubBrowser },
+      { id: 'desktop', pkg: 'builtin:desktop', builtin: stubDesktop },
     ]);
   });
 
@@ -702,10 +709,12 @@ describe('Ring 1 必备行：assertRing1Required / diffRing1Rows', () => {
     'builtin:channels': { name: 'channels-stub', apply: async () => {} },
     'builtin:webui': { name: 'webui-stub', apply: async () => {} },
     'builtin:obs': { name: 'obs-stub', apply: async () => {} },
+    'builtin:browser': { name: 'browser-stub', apply: async () => {} },
+    'builtin:desktop': { name: 'desktop-stub', apply: async () => {} },
   });
 
-  it('起算清单：RING1_REQUIRED_ROW_IDS = [tools, channels]（后续行树化纵切逐行累加）', () => {
-    expect(RING1_REQUIRED_ROW_IDS).toEqual(['tools', 'channels']);
+  it('起算清单：RING1_REQUIRED_ROW_IDS = [tools, channels, desktop]（后续行树化纵切逐行累加）', () => {
+    expect(RING1_REQUIRED_ROW_IDS).toEqual(['tools', 'channels', 'desktop']);
   });
 
   it('健康树：全行可解析 → 零违规', () => {
@@ -948,8 +957,8 @@ describe('partitionPlan：装载计划分区', () => {
     // 空注册表：官方默认层行 unresolved 但照进 plan（行原貌分区——不按激活态）
     const report = loadComposition(dataDir, {}, KNOWN_APPS);
     const part = partitionPlan(report.plan);
-    // Ring 1 必备行先剔（tools/channels 两行 → ring1 袋——独立装载锚维持现状）
-    expect(part.ring1.map((r) => r.id)).toEqual(['tools', 'channels']);
+    // Ring 1 必备行先剔（tools/channels/desktop 三行 → ring1 袋——独立装载锚维持现状）
+    expect(part.ring1.map((r) => r.id)).toEqual(['tools', 'channels', 'desktop']);
     // 其余官方默认层行（apps 缺席）+ 无 apps 用户行全数归系统区
     expect(part.system.every((r) => r.apps === undefined)).toBe(true);
     expect(part.zoneRows.get('chat')!.map((r) => r.id)).toEqual(['mountable']);

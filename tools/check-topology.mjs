@@ -153,6 +153,12 @@ const MODULE_EDGES = {
     // 九批刀一）：builtins 注册 + browserDeps 闭包（browser-spawn/登记簿/桥核
     // 工厂——assembly 同构）
     'browser',
+    // desktop = 系统桌面批 C 消费面（契约篇 §6.11，2026-09-03 第八十五批）：
+    // 桌面壳后端（desktop-shell 持 src/desktop/ 引擎）+ 宿主入口编舞
+    //（desktop-main）+ 熔断账本（desktop-boot）住 app 域——引擎纯渲染件经
+    // desktop/index.ts 公共面消费（非新模块席：公开文档模块计数锚由批 G 统步，
+    // 此处只开边不开席）
+    'desktop',
   ],
 };
 

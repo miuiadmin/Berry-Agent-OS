@@ -104,16 +104,23 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 零 config = 行惰性无害零 spawn（lsp 空 servers 同款先例）；卸掉即无浏览器
   // 能力，核心循环不破
   { id: 'browser', pkg: 'builtin:browser' },
+  // 第十七行 = desktop 行（Ring 1 第三行树化，契约篇 §6.11 系统桌面批
+  // 2026-09-03 第八十五批批 C——channels 先例同构）：桌面服务面（ctx 键
+  // `desktop` 的 holder）入列；桌面壳后端与引擎不入行（宿主入口持终端与起停
+  // 编舞，两连崩熔断回锁期行仍装载——服务面与 /desktop 重试动词可达）。
+  // **Ring 1 必备行**非可卸
+  { id: 'desktop', pkg: 'builtin:desktop' },
 ];
 
 /**
  * Ring 1 必备行 id 清单（契约篇 §5.1 行树化批「第二断言类」——tools 行起算
- * （2026-08-26）、channels 行随 Web 通道纵切入列（2026-08-30，契约篇 §6.8），
+ * （2026-08-26）、channels 行随 Web 通道纵切入列（2026-08-30，契约篇 §6.8）、
+ * desktop 行随系统桌面批入列（2026-09-03 第八十五批批 C，契约篇 §6.11），
  * 后续行树化纵切逐行累加：skills/llm/persist/safety 策略行）。
  * 判据：卸掉该行首启核心循环「问→做→守→存」必破 = Ring 1（内核边界篇 §5.1
  * 一句话判据在装载面的投影）；fixed 词条不动（其定义 = 安全栈强制点行）。
  */
-export const RING1_REQUIRED_ROW_IDS: readonly string[] = ['tools', 'channels'];
+export const RING1_REQUIRED_ROW_IDS: readonly string[] = ['tools', 'channels', 'desktop'];
 
 /** Ring 1 必备行断言违规（启动拒绝的事实清单——missing/disabled/platform/unresolved） */
 export interface Ring1Violation {

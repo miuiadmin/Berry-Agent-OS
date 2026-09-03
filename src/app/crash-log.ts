@@ -20,8 +20,8 @@ import { VERSION } from './version.js';
 /** 致命异常种类（与 signals.ts FatalKind 同词——uncaughtException/unhandledRejection） */
 export type CrashKind = 'uncaughtException' | 'unhandledRejection';
 
-/** 崩溃发生入口（五入口各记其名——排障时定位是哪个形态崩的） */
-export type CrashEntry = 'tui' | 'run' | 'attach' | 'daemon' | 'tick';
+/** 崩溃发生入口（各入口各记其名——排障时定位是哪个形态崩的；desktop = 桌面首启形态，批 C） */
+export type CrashEntry = 'tui' | 'run' | 'attach' | 'daemon' | 'tick' | 'desktop';
 
 /** 单条崩溃记录（error 收任意 throw 形态——Error 取 message+stack、其他入 message） */
 export interface CrashRecord {

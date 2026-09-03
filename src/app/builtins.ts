@@ -35,6 +35,7 @@ import { createChannelsApp, type ChannelsAppDeps } from '../channels/index.js';
 import { createWebuiApp, type WebuiAppDeps } from '../webui/index.js';
 import { createObsApp } from '../obs/index.js';
 import { createSubagentApp } from './subagent-app.js';
+import { createDesktopApp } from './desktop-service.js';
 import type { AgentLocation } from './agents-md.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import type { DatabaseConnection, MigrationSpec } from '../persist/index.js';
@@ -234,6 +235,11 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     // ctx.browser 服务（工具面十件随刀二落——lsp 款惰性：注册不依赖引擎在线，
     // 首用才起）。恒注册（卸行靠 overlay 禁用）
     'builtin:browser': createBrowserApp(opts.browserDeps),
+    // desktop 官方件（Ring 1 第三行，契约篇 §6.11 系统桌面批——2026-09-03
+    // 第八十五批批 C）：桌面服务面 holder 入列（零闭包依赖——obs 件同款零
+    // deps 形态；壳后端不入行，宿主入口起屏后 attach 真身）。恒注册（Ring 1
+    // 必备行——overlay 禁用即启动断言拒启；熔断回锁锁的是起屏不是装载）
+    'builtin:desktop': createDesktopApp(),
   };
 }
 
