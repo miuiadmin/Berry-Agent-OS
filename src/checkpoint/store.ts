@@ -230,66 +230,109 @@ export async function listAllManifests(dataRoot: string, logger?: Pick<AppLogger
   return { manifests, corruptFiles };
 }
 
-/* ---------- 在飞捕获 blob 保护注册表（全面复盘 20260903 #1，会话篇 §5.3 裁剪条） ----------
- * doCapture 按会话身份并发是结构常态（委派子会话/webui 多会话/goal tick 并行），
- * 并发捕获「blob 先落盘、manifest 最后落」的窗口内，他方的顺手裁剪按陈旧清单会把
- * 本捕获已落的 blob 判孤删掉——manifest 随后引用已删 blob，/rewind readBlob ENOENT
- * 永久损坏。注册表按数据根记「在飞捕获已决定引用的 hash 全集」（stat 快径引用与
- * 新增写入同格——旧 manifest 可能恰被并发裁掉，快径引用同样暴露），manifest 落盘
- * 或捕获失败即注销；清孤白名单 = 幸存引用集 ∪ 注册表（sweepOrphanBlobs 内并）。
- * 引用计数形：同 hash 并发多捕获各持一计，先收场的注销不减断后者的保护。
- * 进程内存态（与写串行链自有边界同判）：双进程共享数据域的并发残余窗由
- * executePrune 时点重读收窄、不闭死（§6 多实例「允许双开」的既有边界，如实挂账）。
- * 真孤儿语义不变：捕获失败注销后、后续清孤照常回收其 blob。
+/* ---------- 捕获/清孤读写互斥（遗漏大扫 20260904 #0 改判重构，会话篇 §5.3 裁剪条） ----------
+ * 初版执法 = 清孤时点重读 + 在飞捕获注册表（全面复盘 20260903 #1），读后行模型
+ * 对并发捕获有两结构性缺口：① 注册表在 sweep 入口一次性快照，决策点跨 await 比对
+ * 陈旧集——注册晚于入口的在飞 blob 越守门被删；② 捕获在 sweep 扫描窗内完整收场
+ * （blob 与 manifest 全落、注册已注销）——任何「读清单 ∪ 读守门集」的快照组合都
+ * 看不见它。现行执法 = per 数据根读写锁统一模型（初版注册表整体退役）：
+ *   - 捕获持共享（captureSnapshot 全程——捕获间互相同行，并发是结构常态）；
+ *   - 清孤独占且临界段覆盖三步一气：删弃项 manifest → 重读全局清单视图 → 扫删；
+ *   - 互斥之下「清单盘面」成为唯一真相源且线性化——清孤起扫前一切在飞捕获已
+ *     收场（其 manifest 已入锁内重读的白名单），重读结果不再陈旧。
+ * 写者优先（独占申请后新捕获排队，防清孤饿死）；锁为进程内存态（与写串行链自有
+ * 边界同判）：双进程共享数据域的残余窗不闭死（§6 多实例「允许双开」的既有边界，
+ * 如实挂账）。真孤儿语义不变：捕获失败无 manifest，后续清孤照常回收其 blob。
  */
-const inflightCaptureBlobCounts = new Map<string, Map<string, number>>();
-
-/** 登记在飞捕获将引用的 blob hash（decision 时点——早于/伴随 writeBlob；计数 +1） */
-export function registerInflightCaptureBlob(dataRoot: string, hash: string): void {
-  let counts = inflightCaptureBlobCounts.get(dataRoot);
-  if (counts === undefined) {
-    counts = new Map<string, number>();
-    inflightCaptureBlobCounts.set(dataRoot, counts);
-  }
-  counts.set(hash, (counts.get(hash) ?? 0) + 1);
+/** blob 仓读写锁面（共享 = 捕获临界段；独占 = 清孤临界段） */
+interface BlobStoreRwLock {
+  /** 在读临界段执行（捕获路——互相同行，与独占清孤互斥） */
+  withRead<T>(fn: () => Promise<T>): Promise<T>;
+  /** 在写临界段执行（清孤路——与一切捕获及其他清孤互斥） */
+  withWrite<T>(fn: () => Promise<T>): Promise<T>;
 }
 
-/** 注销一批在飞捕获 hash（captureSnapshot 收尾必达——成功落 manifest 后与失败路同格；计数 -1 归零即摘） */
-export function unregisterInflightCaptureBlobs(dataRoot: string, hashes: Iterable<string>): void {
-  const counts = inflightCaptureBlobCounts.get(dataRoot);
-  if (counts === undefined) return;
-  for (const hash of hashes) {
-    const n = counts.get(hash);
-    if (n === undefined) continue;
-    if (n <= 1) counts.delete(hash);
-    else counts.set(hash, n - 1);
+/** per 数据根锁表（dataRoot → 锁；进程生命周期同寿——与写串行链自有边界同判） */
+const blobStoreLocks = new Map<string, BlobStoreRwLock>();
+
+/** 取（或建）数据根的 blob 仓读写锁（写者优先——队首写者就绪即同步置位再唤醒，无空窗） */
+function blobStoreLock(dataRoot: string): BlobStoreRwLock {
+  let lock = blobStoreLocks.get(dataRoot);
+  if (lock === undefined) {
+    // 活跃读者数 / 写临界段进行中旗标 / 挂起写者队列 / 挂起读者队列（FIFO）
+    let activeReaders = 0;
+    let writerActive = false;
+    const waitingWriters: Array<() => void> = [];
+    const waitingReaders: Array<() => void> = [];
+    // 队首写者就绪即启动：无写者在跑且读者清零才放行（唤醒前同步置 writerActive
+    // ——写者续体晚于 resolve 的微任务间隙里新读者/新写者都见「写占中」无空窗）
+    const tryStartWriter = (): void => {
+      if (writerActive || activeReaders > 0 || waitingWriters.length === 0) return;
+      writerActive = true;
+      waitingWriters.shift()!();
+    };
+    lock = {
+      async withRead(fn) {
+        // 有写者占中或挂起（写者优先——读者不得越过挂起写者，防其饿死）即排队；
+        // 唤醒后重查（唤醒 resolve 与本续体之间的微任务间隙可能有新写者入场）
+        while (writerActive || waitingWriters.length > 0) {
+          await new Promise<void>((resolve) => waitingReaders.push(resolve));
+        }
+        activeReaders++;
+        try {
+          return await fn();
+        } finally {
+          activeReaders--;
+          tryStartWriter(); // 末位读者放行队首写者
+        }
+      },
+      async withWrite(fn) {
+        const gate = new Promise<void>((resolve) => waitingWriters.push(resolve));
+        tryStartWriter(); // 无人在场即刻进临界段；否则等读者清零/前任写者交接
+        await gate;
+        try {
+          return await fn();
+        } finally {
+          writerActive = false;
+          // 交接序：后任写者优先（写链串行防读者插队饿死写者），无后任放行全体读者
+          if (waitingWriters.length > 0) tryStartWriter();
+          else while (waitingReaders.length > 0) waitingReaders.shift()!();
+        }
+      },
+    };
+    blobStoreLocks.set(dataRoot, lock);
   }
-  if (counts.size === 0) inflightCaptureBlobCounts.delete(dataRoot); // 空集即回收 Map 槽
+  return lock;
 }
 
-/** 空保护集（无在飞捕获时免建 Set——读路径零分配） */
-const EMPTY_BLOB_GUARD: ReadonlySet<string> = new Set<string>();
+/** 捕获临界段入口（captureSnapshot 全程持共享——manifest 与 blob 落盘一气） */
+export function withBlobStoreRead<T>(dataRoot: string, fn: () => Promise<T>): Promise<T> {
+  return blobStoreLock(dataRoot).withRead(fn);
+}
 
-/** 读在飞保护全集（清孤白名单并集用——按需构建；捕获并发数少，构造成本可忽略） */
-export function inflightCaptureBlobGuard(dataRoot: string): ReadonlySet<string> {
-  const counts = inflightCaptureBlobCounts.get(dataRoot);
-  if (counts === undefined) return EMPTY_BLOB_GUARD;
-  return new Set(counts.keys());
+/** 清孤临界段入口（executePrune 全程持独占——删 manifest + 重读 + 扫删三步一气） */
+export function withBlobStoreWrite<T>(dataRoot: string, fn: () => Promise<T>): Promise<T> {
+  return blobStoreLock(dataRoot).withWrite(fn);
 }
 
 /**
  * 全量引用计数清孤 blob：扫描 blobs/ 分桶，删掉幸存 manifest 集合不再引用的
  * blob（blob 为多 manifest 共享，引用计数是唯一正确删法——§5.3 裁剪条）。
- *
- * 幸存集之外再并在飞捕获注册表（全面复盘 20260903 #1）：清单看不见的「正在写」
- * blob（已落盘但 manifest 未落）不判孤——注册表登记面即其未来引用面。
+ * 直连消费面（测试/工具）自持独占；executePrune 已持锁走锁内核免嵌套自死锁。
  */
-export async function sweepOrphanBlobs(dataRoot: string, survivors: readonly CheckpointManifest[]): Promise<number> {
+export function sweepOrphanBlobs(dataRoot: string, survivors: readonly CheckpointManifest[]): Promise<number> {
+  return withBlobStoreWrite(dataRoot, () => sweepOrphanBlobsLocked(dataRoot, survivors));
+}
+
+/** 清孤内核（调用方须已持该数据根的独占——锁内白名单 = 幸存引用集单源，无第二真相） */
+export async function sweepOrphanBlobsLocked(
+  dataRoot: string,
+  survivors: readonly CheckpointManifest[],
+): Promise<number> {
   const referenced = new Set<string>();
   for (const m of survivors) {
     for (const f of m.files) referenced.add(f.hash);
   }
-  const guard = inflightCaptureBlobGuard(dataRoot);
   let removed = 0;
   const blobsRoot = join(dataRoot, 'blobs');
   let buckets: string[];
@@ -301,7 +344,7 @@ export async function sweepOrphanBlobs(dataRoot: string, survivors: readonly Che
   for (const bucket of buckets) {
     const bucketDir = join(blobsRoot, bucket);
     for (const name of await readdir(bucketDir).catch(() => [] as string[])) {
-      if (!referenced.has(name) && !guard.has(name)) {
+      if (!referenced.has(name)) {
         await rm(join(bucketDir, name), { force: true });
         removed++;
       }

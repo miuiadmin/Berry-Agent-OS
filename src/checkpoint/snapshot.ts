@@ -24,11 +24,11 @@ import {
   listAllManifests,
   listSessionManifests,
   newManifestId,
-  registerInflightCaptureBlob,
-  unregisterInflightCaptureBlobs,
+  sweepOrphanBlobsLocked,
+  withBlobStoreRead,
+  withBlobStoreWrite,
   writeBlob,
   writeManifest,
-  sweepOrphanBlobs,
   deleteManifest,
   type CheckpointManifest,
 } from './store.js';
@@ -183,23 +183,24 @@ export interface CaptureMeta {
  * 读内容 sha256 入仓。超 8 MiB 单文件跳过记 skipped（披露——恢复时不碰）。
  */
 export async function captureSnapshot(cx: CaptureContext, meta: CaptureMeta): Promise<CheckpointManifest> {
-  const prevList = await listSessionManifests(cx.dataRoot, meta.sessionId);
-  const prev = prevList[0]; // 时间降序首 = 最新
-  // 上一 manifest 的 rel → 条目索引（指纹比对快查）
-  const prevByRel = new Map<string, CheckpointManifest['files'][number]>();
-  if (prev !== undefined) {
-    for (const f of prev.files) prevByRel.set(f.rel, f);
-  }
+  // 捕获全程持共享读锁（遗漏大扫 20260904 #0 改判重构，会话篇 §5.3 裁剪条）：
+  // 捕获间互相同行（doCapture 按会话身份并发是结构常态）；与清孤独占互斥——
+  // blob 与 manifest 的落盘面在锁内一气完成，清孤起扫前一切在飞捕获已收场，
+  // 其 manifest 已入清孤锁内重读的白名单（初版在飞注册表整体退役）。
+  return withBlobStoreRead(cx.dataRoot, async () => {
+    const prevList = await listSessionManifests(cx.dataRoot, meta.sessionId);
+    const prev = prevList[0]; // 时间降序首 = 最新
+    // 上一 manifest 的 rel → 条目索引（指纹比对快查）
+    const prevByRel = new Map<string, CheckpointManifest['files'][number]>();
+    if (prev !== undefined) {
+      for (const f of prev.files) prevByRel.set(f.rel, f);
+    }
 
-  const fingerprints = await walkFingerprints(cx.workspaceRoot, cx.exclude);
-  const files: CheckpointManifest['files'][number][] = [];
-  const skipped: string[] = [];
-  let newBytes = 0;
-  let totalBytes = 0;
-  // 本捕获的在飞登记面（全面复盘 20260903 #1）：decision 时点逐 hash 登记（早于
-  // writeBlob），manifest 落盘或异常收尾统一注销（finally 单点——真孤儿照常可回收）
-  const inflightHashes: string[] = [];
-  try {
+    const fingerprints = await walkFingerprints(cx.workspaceRoot, cx.exclude);
+    const files: CheckpointManifest['files'][number][] = [];
+    const skipped: string[] = [];
+    let newBytes = 0;
+    let totalBytes = 0;
     for (const fp of fingerprints) {
       if (fp.size > MAX_SNAPSHOT_FILE_BYTES) {
         skipped.push(fp.rel); // 体量上限跳过（披露面——不静默）
@@ -208,10 +209,8 @@ export async function captureSnapshot(cx: CaptureContext, meta: CaptureMeta): Pr
       totalBytes += fp.size;
       const prevEntry = prevByRel.get(fp.rel);
       if (prevEntry !== undefined && prevEntry.size === fp.size && prevEntry.mtimeMs === fp.mtimeMs) {
-        // stat 快径命中：指纹未变引用既有 blob（零读零写）。快径引用同样入登记面
-        //——旧 manifest 可能恰被并发裁掉，此 blob 的存亡此刻只靠注册表护住
-        registerInflightCaptureBlob(cx.dataRoot, prevEntry.hash);
-        inflightHashes.push(prevEntry.hash);
+        // stat 快径命中：指纹未变引用既有 blob（零读零写）。读锁与清孤互斥使
+        // 旧 manifest（及其 blob）至少存续到本捕获收场——快径引用不会悬空
         files.push({ rel: fp.rel, hash: prevEntry.hash, size: fp.size, mtimeMs: fp.mtimeMs, mode: fp.mode });
         continue;
       }
@@ -225,9 +224,6 @@ export async function captureSnapshot(cx: CaptureContext, meta: CaptureMeta): Pr
         readFile(join(cx.workspaceRoot, fp.rel)),
       );
       const hash = hashContent(content);
-      // decision 时点先登记再落盘：并发的清孤在此刻起即认得这是「正在写」的引用
-      registerInflightCaptureBlob(cx.dataRoot, hash);
-      inflightHashes.push(hash);
       if (await writeBlob(cx.dataRoot, hash, content)) {
         newBytes += fp.size; // 实际落盘才计新写（既有 blob 命中零新增）
       }
@@ -249,11 +245,7 @@ export async function captureSnapshot(cx: CaptureContext, meta: CaptureMeta): Pr
     };
     await writeManifest(cx.dataRoot, manifest);
     return manifest;
-  } finally {
-    // 注销必达：成功（manifest 已落盘，后续清孤由时点重读接管）与失败（真孤儿
-    // 语义——后续清孤照常回收其 blob）同格收尾
-    unregisterInflightCaptureBlobs(cx.dataRoot, inflightHashes);
-  }
+  });
 }
 
 /** 裁剪配置（prunePlan 入参——缺省值由件本体填充） */
@@ -330,10 +322,11 @@ export function prunePlan(
  * 执行裁剪：删 manifest + 全量引用计数清孤 blob。
  * 捕获后单入口调用（不设第二触发点）。
  *
- * 清孤竞速收口（全面复盘 20260903 #1，会话篇 §5.3 裁剪条）：幸存集**不采信调用
- * 时点的清单快照**——删完弃项后**时点重读**全局清单视图取当下全集（并发捕获后落
- * 的新 manifest，其引用即时可见），清孤白名单 = 重读幸存集 ∪ 在飞捕获注册表
- * （注册表在 sweepOrphanBlobs 内并——「blob 已落、manifest 未落」窗口的唯一护栏）。
+ * 清孤竞速收口（全面复盘 20260903 #1 立条 → 遗漏大扫 20260904 #0 改判重构，
+ * 会话篇 §5.3 裁剪条）：全程持独占且临界段覆盖三步一气——删弃项 manifest →
+ * 重读全局清单视图 → 扫删。互斥使重读不再陈旧：起扫前一切在飞捕获已收场，
+ * 其 manifest 已入锁内白名单（幸存集不采信调用时点的清单快照——并发捕获后落
+ * 的新 manifest 引用即时可见；初版「时点重读 + 在飞注册表」双件整体退役）。
  * 损坏账以重读为准（复盘 E-1 保护形态不变：解析失败 ≠ 可删）。
  */
 export async function executePrune(
@@ -341,11 +334,13 @@ export async function executePrune(
   drop: readonly CheckpointManifest[],
   logger?: Pick<AppLogger, 'warn'>,
 ): Promise<void> {
-  for (const m of drop) {
-    await deleteManifest(dataRoot, m.sessionId, m.id);
-  }
-  // 时点重读：幸存面 = 当下盘面全集（弃项已删不在内；并发新落 manifest 即时入册）
-  const fresh = await listAllManifests(dataRoot, logger);
-  if (fresh.corruptFiles.length > 0) return; // 清孤保护模式（解析失败 ≠ 可删）
-  await sweepOrphanBlobs(dataRoot, fresh.manifests);
+  await withBlobStoreWrite(dataRoot, async () => {
+    for (const m of drop) {
+      await deleteManifest(dataRoot, m.sessionId, m.id);
+    }
+    // 时点重读：幸存面 = 当下盘面全集（弃项已删不在内；并发新落 manifest 即时入册）
+    const fresh = await listAllManifests(dataRoot, logger);
+    if (fresh.corruptFiles.length > 0) return; // 清孤保护模式（解析失败 ≠ 可删）
+    await sweepOrphanBlobsLocked(dataRoot, fresh.manifests);
+  });
 }

@@ -19,6 +19,7 @@ import {
   listSessionManifests,
   manifestPath,
   readBlob,
+  sweepOrphanBlobs,
   type CheckpointManifest,
 } from './store.js';
 
@@ -414,13 +415,14 @@ describe('executePrune：清孤竞速收口（全面复盘 20260903 #1）', () =
       // B 的 manifest「后落」：引用 a.txt 同 blob + 新 b.txt blob
       writeFileSync(join(ws, 'b.txt'), 'race1-b-new', 'utf8');
       const mB = await snapAt(ws, store, 'sess-b');
-      // A 的顺手裁剪按陈旧清单执行（弃 A 旧快照；幸存集采信 stale = 空）
+      // A 的顺手裁剪按陈旧清单执行（弃 A 旧快照；幸存面若采信调用方 stale 即空）
       const drop = prunePlan(stale.manifests, opts(1, 1e9), new Set(['sess-a']));
       expect(drop).toHaveLength(1);
       await executePrune(store, drop);
       // 修前真形（探针 /tmp/berry-scan9/probes/storage/sweep-race.mts 已证）：清孤
       // 幸存集 = 陈旧清单 ∖ 弃项 = 空 → B 的 blob 全判孤删 → manifest 悬空 /
-      // /rewind ENOENT。修后：sweep 前时点重读全局清单，B 的 manifest 引用即时可见
+      // /rewind ENOENT。修后：executePrune 锁内时点重读全局清单（独占下必含
+      // 已收场捕获的 manifest——B 的引用即时可见）
       for (const f of mB.files) {
         await expect(readBlob(store, f.hash)).resolves.toBeTruthy();
       }
@@ -430,7 +432,7 @@ describe('executePrune：清孤竞速收口（全面复盘 20260903 #1）', () =
     }
   });
 
-  it('在飞保护注册表：捕获进行中（blob 已落、manifest 未落）的 blob 不被清孤（修前红=签名缺位 TypeError）', async () => {
+  it('读写互斥：捕获进行中（blob 已落、manifest 未落）的 blob 不被清孤（修前红=签名缺位 TypeError）', async () => {
     const ws = join(root, 'ws-race2');
     const store = join(root, 'store-race2');
     mkdirSync(ws, { recursive: true });
@@ -438,13 +440,13 @@ describe('executePrune：清孤竞速收口（全面复盘 20260903 #1）', () =
     let capture: Promise<CheckpointManifest> | undefined;
     try {
       // 四个 6MiB 大文件：首 blob 落盘后余下文件的读+hash 拉出真时长中窗（毫秒级，
-      // 1ms 轮询必命中——窗口内任何清单视图都看不见 B 的 manifest，只有注册表能护）
+      // 1ms 轮询必命中——窗口内任何清单视图都看不见 B 的 manifest，唯互斥可护）
       const sixMiB = (b: number) => Buffer.alloc(6 * 1024 * 1024, b);
       writeFileSync(join(ws, 'b0.bin'), sixMiB(0x61));
       for (let i = 1; i <= 3; i++) writeFileSync(join(ws, `b${i}.bin`), sixMiB(0x60 + i));
       capture = snapAt(ws, store, 'sess-b2');
       // 中窗探测：blobs/ 已出现实文件 && B 的 manifest 目录仍缺席（真形中窗 =
-      // 探针形态「hX 落盘、M_B 未落」——修前清孤在此窗删 blob 即真数据丢失）
+      // 探针形态「hX 落盘、M_B 未落」——初版注册表在此窗删 blob 即真数据丢失）
       const blobsRoot = join(store, 'blobs');
       const manifestDir = join(store, 'manifests', 'sess-b2');
       for (;;) {
@@ -459,17 +461,55 @@ describe('executePrune：清孤竞速收口（全面复盘 20260903 #1）', () =
         if (existsSync(manifestDir)) break; // 窗口已过（防御——此形态下测试退化为平凡绿）
         await new Promise((resolve) => setTimeout(resolve, 1));
       }
-      // 窗口内他方顺手裁剪：此刻执行清孤，唯一护栏 = 在飞捕获注册表
+      // 窗口内他方顺手裁剪：executePrune 申请独占即排队等捕获读锁排干（读写互斥）
       await executePrune(store, []);
       const mB = await capture;
-      // 修前真形：注册表缺席 → B 已落 blob 判孤删除 → manifest 悬空。修后：decision
-      // 时点登记的 hash 全集进清孤白名单，manifest 落盘即注销（真孤儿照常回收）
+      // 初版真形：无互斥 → 清孤按当下清单（B manifest 未落）判 B 已落 blob 为孤删
+      // → manifest 悬空。现行：独占下重读清单时捕获必已收场、其 manifest 已入
+      // 白名单（真孤儿——失败捕获无 manifest——照常回收）
       for (const f of mB.files) {
         await expect(readBlob(store, f.hash)).resolves.toBeTruthy();
       }
     } finally {
       // 先等在飞捕获落定再清场（否则 finally 拆工作区引爆未决 readFile——红跑同样守序）
       await capture?.catch(() => {});
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(store, { recursive: true, force: true });
+    }
+  });
+
+  it('读写互斥：sweep 扫描窗内并发捕获（注册晚于守门快照 + 完整收场于窗内），blob 不判孤（修前红=守门快照陈旧越删——遗漏大扫 20260904 #0）', async () => {
+    const ws = join(root, 'ws-race3');
+    const store = join(root, 'store-race3');
+    mkdirSync(ws, { recursive: true });
+    try {
+      // 慢扫面：20 个 '!*' 名孤儿桶 × 各 5 孤儿，victim 空桶另建——本仓目标平台
+      // readdir 字典序下 '!*'（0x21 起）恒先于一切 hex 桶名（0x30 起），victim 桶
+      // 末位被扫（扫描窗必跨越捕获全程——编舞不依赖竞速运气，预置面先于 sweep 就位）
+      const victimContent = 'race3-victim-content';
+      const victimHash = hashContent(Buffer.from(victimContent, 'utf8'));
+      const blobsRoot = join(store, 'blobs');
+      for (let b = 0; b < 20; b++) {
+        const bucket = `!${b.toString(16)}`; // !0..!j：字典序恒先于 victim 的 hex 桶
+        mkdirSync(join(blobsRoot, bucket), { recursive: true });
+        for (let i = 0; i < 5; i++) {
+          writeFileSync(join(blobsRoot, bucket, `orphan-${b}-${i}-`.padEnd(64, 'x')), 'garbage');
+        }
+      }
+      mkdirSync(join(blobsRoot, victimHash.slice(0, 2)), { recursive: true }); // victim 桶最后建
+      writeFileSync(join(ws, 'a.txt'), victimContent, 'utf8');
+      // 起 sweep 不 await（守门快照此刻同步拍下——空集）→ 并发捕获（注册晚于快照、
+      // blob 与 manifest 全部落于扫描窗内）→ 等 sweep 收场
+      const sweepP = sweepOrphanBlobs(store, []);
+      const mB = await snapAt(ws, store, 'sess-b3');
+      await sweepP;
+      // 修前真形（遗漏大扫 20260904 #0 探针复现）：victim 越陈旧守门被删 → manifest
+      // 悬空 → readBlob ENOENT。修后：清孤独占等捕获收场才起扫——victim 晚于扫描
+      // 落盘即不在扫描面，任何 readdir 序下都幸存
+      for (const f of mB.files) {
+        await expect(readBlob(store, f.hash)).resolves.toBeTruthy();
+      }
+    } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(store, { recursive: true, force: true });
     }
