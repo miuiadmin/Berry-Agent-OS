@@ -176,6 +176,12 @@ export class CellBuffer implements ICellBuffer {
     return this.graphemeMap.get(i);
   }
 
+  /** 稀疏面是否非空（遗漏大扫 20260903 desktop D3-1：差分热路径开关——两侧图
+   * 全空的屏幕（绝大多数帧）零 Map 查询开销；任一侧有字素才逐格追加全文比对） */
+  hasGraphemes(): boolean {
+    return this.graphemeMap.size !== 0;
+  }
+
   /** 声明本帧可见光标（输入框等交互件 render 内调用） */
   setCursor(x: number, y: number): void {
     this.cursorPos = { x, y };

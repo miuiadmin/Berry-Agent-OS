@@ -125,4 +125,21 @@ describe('oracle：差分帧', () => {
     expect(term.buffer.active.getLine(0)!.translateToString(true)).toBe('r0');
     expect(term.buffer.active.getLine(2)!.translateToString(true)).toBe('r2');
   });
+
+  it('同首码点字素更替（👨‍👩→👨‍👨）：差分非空且屏上换新（遗漏大扫 20260903 desktop D3-1 修死）', async () => {
+    const term = new Terminal({ cols: 10, rows: 1, allowProposedApi: true });
+    const front = new CellBuffer(10, 1);
+    front.writeString(0, 0, '👨‍👩'); // 屏上真相（多码点字素整字存稀疏面）
+    await writeTerm(term, frameContent(new CellBuffer(10, 1), front, true));
+    // 本帧：同格换同首码点的另一家族 emoji——chars/styles/widths 三数组全等
+    // （同首码点 U+1F468 / 同宽 2），修前差分空串 → 零写出且「零变更零写出」
+    // 早退跳过双缓冲换位 → front 基线永持旧字素，屏上永久陈旧
+    const back = new CellBuffer(10, 1);
+    back.writeString(0, 0, '👨‍👨');
+    const delta = frameContent(front, back, false);
+    expect(delta).not.toBe(''); // 修前空串——红（探针 probe-grapheme 形态）
+    expect(delta).toContain('👨‍👨'); // 整字素写出（稀疏面取回全文）
+    await writeTerm(term, delta);
+    expect(term.buffer.active.getLine(0)!.translateToString(true)).toContain('👨‍👨');
+  });
 });

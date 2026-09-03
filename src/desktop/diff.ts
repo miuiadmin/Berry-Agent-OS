@@ -35,11 +35,16 @@ export function createRowDiff(height: number): RowDiff {
 
 /**
  * 逐格差分 front（屏上真相）vs back（本帧渲染结果）→ 每行 [first, last] 变更区间。
- * 比较 chars/styles/widths 三数组逐格；多码点字素（稀疏面）以首格码点为比较面
- * （同格同首码点即同呈现——稀疏 Map 内容由写入路径保证一致）。
+ * 比较 chars/styles/widths 三数组逐格；多码点字素（稀疏面）三数组同格全等时追加
+ * 比对稀疏 Map 全文（遗漏大扫 20260903 desktop D3-1：同首码点不同字素——家族
+ * emoji 更替 👨‍👩→👨‍👨 同首码点同宽 2——三数组全等即判未变，零写出且「零变更零
+ * 写出」早退跳过双缓冲换位 → 屏上永久陈旧；旧注「稀疏 Map 内容由写入路径保证
+ * 一致」被探针 probe-grapheme 实测证伪，差分面必须自证）。
  */
 export function diffRows(front: CellBuffer, back: CellBuffer, out: RowDiff): void {
   const w = front.width;
+  // 稀疏面比对开关：两侧图全空 → 零 Map 查询（热路径零增量）；任一侧有字素才开
+  const checkMulti = front.hasGraphemes() || back.hasGraphemes();
   for (let y = 0; y < front.height; y++) {
     const base = y * w;
     let first = -1;
@@ -49,7 +54,8 @@ export function diffRows(front: CellBuffer, back: CellBuffer, out: RowDiff): voi
       if (
         front.chars[i] !== back.chars[i] ||
         front.styles[i] !== back.styles[i] ||
-        front.widths[i] !== back.widths[i]
+        front.widths[i] !== back.widths[i] ||
+        (checkMulti && !sameMultiGrapheme(front, back, i))
       ) {
         if (first < 0) first = x;
         last = x;
@@ -78,6 +84,17 @@ export function diffRows(front: CellBuffer, back: CellBuffer, out: RowDiff): voi
 /** 格是否空白（空格 + 缺省样式 + 宽 1——与 CellBuffer 初始态同构） */
 function backIsBlank(back: CellBuffer, i: number): boolean {
   return back.chars[i] === 0x20 && back.styles[i] === 0 && back.widths[i] === 1;
+}
+
+/**
+ * 稀疏面整字素比对（遗漏大扫 20260903 desktop D3-1）：同格同首码点不同字素
+ * （👨‍👩→👨‍👨 同首码点 U+1F468）三数组全等但呈现不同——Map 双查比对全文；
+ * 两侧皆无项 = 单码点格，三数组已裁决（真——读路径零分配）。
+ */
+function sameMultiGrapheme(front: CellBuffer, back: CellBuffer, i: number): boolean {
+  const a = front.multiAt(i);
+  const b = back.multiAt(i);
+  return a === undefined && b === undefined ? true : a === b;
 }
 
 /** 样式字 → SGR 参数序列（与 cell.ts packStyle 位域对齐；0 参数 = 全复位） */

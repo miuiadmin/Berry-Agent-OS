@@ -292,6 +292,43 @@ describe('resize', () => {
     io.resize(10, 4);
     expect(io.written.length).toBe(n);
   });
+
+  it('挂起期 resize 由 resume 起手核对收编：失配即重分配——无越界行定位（遗漏大扫 20260903 desktop D2-1 修死）', () => {
+    const { io, clock, engine } = makeEngine(10, 4); // 4 行缓冲
+    const sizes: { columns: number; rows: number }[] = [];
+    engine.on('resize', (s) => sizes.push(s));
+    engine.start(new Text({ content: 'desk' }));
+    clock.advance(0); // 首帧
+    engine.suspend();
+    io.resize(3, 2); // 挂起期几何缩到 3x2——handleResize 挂起短路（事件整个被弃）
+    engine.resume();
+    // resume 起手核对：失配即 handleResize 同款重分配。修前不核对——按旧
+    // 4 行 10 列缓冲 forceFull 重绘，差分写出含越界光标定位 '\x1b[4;1H'
+    // （终端实高 2——探针 probe-resize2 实证形态）
+    expect(engine.columns).toBe(3);
+    expect(engine.rows).toBe(2);
+    expect(io.output).toContain('\x1b[2J'); // 重分配清屏锤在场
+    expect(sizes).toEqual([{ columns: 3, rows: 2 }]); // resize 事件补上抛
+    clock.advance(20); // FPS 帽一帧间隔后全量重绘
+    const frame = io.written[io.written.length - 1]!;
+    // 全帧 CUP 定位必须全落在新几何界内（行 ≤2 / 列 ≤3）
+    const cups = [...frame.matchAll(/\x1b\[(\d+);(\d+)H/g)];
+    expect(cups.length).toBeGreaterThan(0); // 有定位可查（非空帧）
+    for (const m of cups) {
+      expect(Number(m[1])).toBeLessThanOrEqual(2);
+      expect(Number(m[2])).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it('挂起期几何未变：resume 走原基线重置路径（ENTER_MODES 仍为末笔——零重分配）', () => {
+    const { io, clock, engine } = makeEngine(10, 4);
+    engine.start(new Text({ content: 'x' }));
+    clock.advance(0);
+    engine.suspend();
+    engine.resume();
+    expect(io.written[io.written.length - 1]).toBe(ENTER_MODES); // 无 2J 尾随
+    expect(engine.columns).toBe(10); // 缓冲未重分配
+  });
 });
 
 describe('输入接线', () => {

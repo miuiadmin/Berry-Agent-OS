@@ -90,6 +90,17 @@ describe('writeString 字素落位', () => {
     expect(buf.cellAt(1, 0)!.width).toBe(1); // 旧续格痕迹洗净
   });
 
+  it('hasGraphemes 稀疏面开关（遗漏大扫 20260903 desktop D3-1）：写多码点字素即真、覆写摘痕即假', () => {
+    const buf = new CellBuffer(4, 1);
+    expect(buf.hasGraphemes()).toBe(false); // 空图（绝大多数帧的形态）
+    buf.writeString(0, 0, '\u{1F1E8}\u{1F1F3}');
+    expect(buf.hasGraphemes()).toBe(true);
+    buf.writeString(0, 0, 'ab'); // 覆写摘痕——图回空
+    expect(buf.hasGraphemes()).toBe(false);
+    buf.clear(); // clear 同步清空稀疏面（既有行为钉扎）
+    expect(buf.hasGraphemes()).toBe(false);
+  });
+
   it('续格样式随首格一致（整字观感）', () => {
     const buf = new CellBuffer(4, 1);
     buf.writeString(0, 0, '中', { fg: 5, bold: true });

@@ -96,6 +96,23 @@ export interface InputDecoderOptions {
 
 /** 粘贴态防护帽：超帽强制冲刷（恶意/畸形流不锁死解码器——4 MiB） */
 const PASTE_CAP = 4 * 1024 * 1024;
+/** bracketed paste 终界（包裹尾——6 字节 \x1b[201~） */
+const PASTE_END = '\x1b[201~';
+
+/**
+ * rest 尾部可悬置量（遗漏大扫 20260903 desktop D1-1）：终界 PASTE_END 的最长
+ * 真前缀后缀长（0-5）。pty 写缓冲分块（典型 4-16KiB）可能把 6 字节终界劈成
+ * 两半——上 chunk 尾部恰是终界前缀时不能并入粘贴体（并入后下 chunk 永不匹配
+ * 完整终界 → 解码器滞留 paste 态，此后键盘输入全被吞进 pasteBuf 零事件），
+ * 须悬置到实例字段待下 chunk 拼回再搜。
+ */
+function pasteMarkerPrefixLen(rest: string): number {
+  const max = Math.min(PASTE_END.length - 1, rest.length);
+  for (let k = max; k > 0; k--) {
+    if (rest.endsWith(PASTE_END.slice(0, k))) return k;
+  }
+  return 0;
+}
 /** CSI 参数缓冲防护帽（超帽丢弃本序列回地面态——畸形流防御） */
 const CSI_CAP = 64;
 
@@ -114,6 +131,12 @@ export class InputDecoder {
   private csiPoisoned = false;
   /** 粘贴体积攒缓冲 */
   private pasteBuf = '';
+  /**
+   * 跨 chunk 终界悬置尾（≤5 字节，遗漏大扫 20260903 desktop D1-1）：上 chunk
+   * 末尾可能是终界 \x1b[201~ 的真前缀——悬置于此，下 chunk 先拼回再搜。生命
+   * 周期：paste 态未命中路径置位；终界命中 / 防护帽冲刷 / discardPending 清。
+   */
+  private pendingPasteTail = '';
   /** 地面态可打印文本游程积攒（连续可打印合并单事件——打字/提交不撕裂） */
   private textRun = '';
   /** lone-ESC 挂起时刻（null = 无挂起） */
@@ -240,12 +263,20 @@ export class InputDecoder {
           continue;
         }
         case 'paste': {
-          // 粘贴体：找包裹尾 \x1b[201~——整段交付，体内容不逐键解析
-          const rest = chunk.slice(i);
-          const end = rest.indexOf('\x1b[201~');
+          // 粘贴体：找包裹尾 PASTE_END——整段交付，体内容不逐键解析。
+          // 跨 chunk 终界拼接（遗漏大扫 20260903 desktop D1-1）：上 chunk 尾部
+          // 的终界真前缀悬置在 pendingPasteTail——先拼回再搜；命中时推进量须
+          // 还账悬置字节（那 tail.length 个字节来自上 chunk，本 chunk 未消费）
+          const tail = this.pendingPasteTail;
+          this.pendingPasteTail = '';
+          const rest = tail + chunk.slice(i);
+          const end = rest.indexOf(PASTE_END);
           if (end < 0) {
-            this.pasteBuf += rest;
-            i = chunk.length;
+            // 未命中：头部（确定不可能参与终界）并入体积攒；尾部真前缀悬置
+            const hold = pasteMarkerPrefixLen(rest);
+            this.pasteBuf += rest.slice(0, rest.length - hold);
+            this.pendingPasteTail = rest.slice(rest.length - hold);
+            i = chunk.length; // 本 chunk 全量消化（并入或悬置——无剩可解）
             this.enforcePasteCap();
           } else {
             this.pasteBuf += rest.slice(0, end);
@@ -253,7 +284,9 @@ export class InputDecoder {
             this.pasteBuf = '';
             this.mode = 'ground';
             this.escPendingAt = null;
-            i += end + '\x1b[201~'.length;
+            // 终界长 6 > 悬置上限 5 ⇒ 推进量恒 ≥1（无死循环）；且 end+6 ≤
+            // rest.length 保证不越过本 chunk 末尾
+            i += end + PASTE_END.length - tail.length;
             if (text.length > 0) this.queue.push({ kind: 'paste', text });
           }
           continue;
@@ -289,6 +322,7 @@ export class InputDecoder {
     this.csiBuf = '';
     this.csiPoisoned = false;
     this.pasteBuf = '';
+    this.pendingPasteTail = '';
     this.textRun = '';
     this.escPendingAt = null;
     this.preedit = null;
@@ -522,6 +556,7 @@ export class InputDecoder {
     if (this.pasteBuf.length > PASTE_CAP) {
       const text = this.pasteBuf;
       this.pasteBuf = '';
+      this.pendingPasteTail = ''; // 悬置尾同弃（已回地面态——半截终界无意义）
       this.mode = 'ground';
       if (text.length > 0) this.queue.push({ kind: 'paste', text });
     }

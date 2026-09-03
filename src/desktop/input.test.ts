@@ -232,6 +232,46 @@ describe('bracketed paste（严格整段）', () => {
     const d = new InputDecoder();
     expect(feed(d, '\x1b[200~a\r\nb\x1b[201~')).toEqual([{ kind: 'paste', text: 'a\r\nb' }]);
   });
+
+  it('终界跨 chunk 分裂：悬置尾拼回后完整交付 + 后续文本正常（遗漏大扫 20260903 desktop D1-1 修死）', () => {
+    const d = new InputDecoder();
+    // 末 chunk 恰含终界前缀 '\x1b[2'——修前全量入 pasteBuf，下 chunk '01~'
+    // 永不匹配完整终界 → 滞留 paste 态键盘失聪（探针 probe-paste 零事件形态；
+    // 失聪累积到 4MiB 防护帽再炸出巨型 paste——批判员修正的垃圾交付形态）
+    d.feed('\x1b[200~hi\x1b[2');
+    expect(d.take()).toEqual([]); // 终界未齐：不交付不泄漏
+    d.feed('01~');
+    d.feed('x');
+    expect(d.take()).toEqual([
+      { kind: 'paste', text: 'hi' },
+      { kind: 'text', text: 'x' },
+    ]);
+  });
+
+  it('终界逐字节到达（极端分块）：悬置尾滚动拼接仍整段交付', () => {
+    const d = new InputDecoder();
+    d.feed('\x1b[200~a');
+    for (const ch of '\x1b[201~') d.feed(ch); // 6 字节终界每 chunk 恰 1 字节
+    d.feed('b');
+    expect(d.take()).toEqual([
+      { kind: 'paste', text: 'a' },
+      { kind: 'text', text: 'b' },
+    ]);
+  });
+
+  it('体尾非终界前缀的字符不悬置：随 chunk 即时入账（悬置面最小化）', () => {
+    const d = new InputDecoder();
+    d.feed('\x1b[200~ab'); // 'ab' 皆非终界真前缀 → 全并入体积攒
+    d.feed('\x1b[201~');
+    expect(d.take()).toEqual([{ kind: 'paste', text: 'ab' }]);
+  });
+
+  it('discardPending 连悬置尾一并弃：换防后半截终界不成残留态', () => {
+    const d = new InputDecoder();
+    d.feed('\x1b[200~hi\x1b[2'); // 悬置尾 '\x1b[2' 在场
+    d.discardPending(); // 换防吞在途——悬置尾必须同弃
+    expect(feed(d, '01~')).toEqual([{ kind: 'text', text: '01~' }]); // 按地面态重解
+  });
 });
 
 describe('畸形流防御与换防吞在途', () => {

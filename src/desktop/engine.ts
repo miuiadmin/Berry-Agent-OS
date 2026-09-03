@@ -9,9 +9,10 @@
  * - **换防收口面**（律 8 / 契约篇 §6.11，引擎侧机制单源）：
  *   - suspend 三件套：onInput(null) → pause() → setRawMode(先验态)；leaveModes
  *     出屏（kitty pop/粘贴关/光标显/备屏出）；requestRender 挂起静默短路。
- *   - resume 五步：enterModes 清屏进（备屏/模式重开/kitty 重推）→ setRawMode(true)
- *     → onInput 重装 → io.resume 放流（对家栈停屏显式 pause 过 stdin）→
- *     front 失真标脏 + 全量首帧重绘。
+ *   - resume 六步：enterModes 清屏进（备屏/模式重开/kitty 重推）→ setRawMode(true)
+ *     → onInput 重装 → io.resume 放流（对家栈停屏显式 pause 过 stdin）→ 几何
+ *     核对（挂起期 resize 事件被挂起态短路整批丢弃——失配即 handleResize 同款
+ *     重分配，遗漏大扫 20260903 desktop D2-1）→ front 失真标脏 + 全量首帧重绘。
  *   - drainInput：退回 shell 前排空 stdin 缓冲（临时吞处理器 + 闲窗轮询）。
  *   - decoder.discardPending：换防瞬间在途转义一窗全丢。
  * - **输入接线**：decoder.feed → 事件队列排空 → emitter 'input'；lone-ESC 判定
@@ -304,8 +305,10 @@ export class DesktopEngine {
   }
 
   /**
-   * 复位（换防接收方）：模式串清屏进 → raw 重设 → 监听重装 → 放流 → 全量首帧
-   * 重绘。front 基线在挂起期已失真（对方栈写过屏）——forceFull 全量重绘。
+   * 复位（换防接收方）：模式串清屏进 → raw 重设 → 监听重装 → 放流 → 几何核对
+   * （失配即 handleResize 同款重分配——挂起期 resize 事件被挂起短路丢弃，
+   * 遗漏大扫 20260903 desktop D2-1）→ 全量首帧重绘。front 基线在挂起期已
+   * 失真（对方栈写过屏）——forceFull 全量重绘。
    *
    * 放流步（io.resume）不可省：对家栈（pi-tui）停屏时显式 pause 了 stdin——
    * Node 语义下「已被显式 pause 的流」再挂 data 监听不会自动回 flowing，
@@ -319,6 +322,16 @@ export class DesktopEngine {
     this.io.onInput(this.handleInput);
     this.io.resume();
     this.state = 'running';
+    // 几何核对（遗漏大扫 20260903 desktop D2-1）：挂起期 resize 事件被
+    // handleResize 首行挂起短路整个丢弃——resume 起手比对当前 io 尺寸，
+    // 失配即走 handleResize 同款重分配（此时 state 已 running：新
+    // CellBuffer×2 + rowDiff 重建 + 2J 清屏锤 + resize 事件 + forceFull）。
+    // 修前不核对：按旧尺寸 forceFull 重绘——终端已缩则差分写出含越界光标
+    // 定位/旧宽折行，已扩则桌面不扩张
+    if (this.io.columns !== this.front.width || this.io.rows !== this.front.height) {
+      this.handleResize(); // 尾部自带 requestRender——直接收口
+      return;
+    }
     this.forceFull = true;
     this.front.clear(); // 基线重置（全量差分起点）
     this.cursorVisible = false; // 显隐态重置（清屏后首帧重发）
