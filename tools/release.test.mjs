@@ -13,7 +13,7 @@
  * node 语义直跑，不参与 typecheck 段。
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -27,6 +27,7 @@ import {
   decideIdempotent,
   inspectPackEntries,
   parseNpmPackJson,
+  planSnapshotArchive,
   planTagOperations,
   publishArgs,
   runRelease,
@@ -414,6 +415,13 @@ function publishExpect(dir, publishTag, dryRun = false) {
   ];
 }
 
+/**
+ * 归档源最小面快照文本（greenBase build 落盘与子步 3.5 断言复用——同源字节，
+ * 幂等支的「同内容」判定即本文本）。序列化形态与抽取器 --write 同律（2 空格
+ * 缩进 + 单换行收尾）。
+ */
+const SURFACE_TEXT = JSON.stringify({ apiVersion: '1.0', exports: [], capabilities: [] }, null, 2) + '\n';
+
 /** 四门禁 + 净空 + 构建 + 双 pack + 安装冒烟的全绿底座（各测按路径增删） */
 function greenBase(version) {
   return {
@@ -423,7 +431,14 @@ function greenBase(version) {
     'gate:format:check': () => ({ code: 0, stdout: '', stderr: '' }),
     'git-clean': () => ({ code: 0, stdout: '', stderr: '' }),
     probe: () => ({ code: 1, stdout: '', stderr: 'npm error code E404' }), // 缺席 = 正常发
-    build: () => ({ code: 0, stdout: '', stderr: '' }),
+    build: () => {
+      // 子步 3.5 归档源真身（第九十一批）：canned build 同步落 dist/api/surface.json
+      // —— pack:real 落真 tarball 同律（真发布里 build 产此物，快照归档步消费它；
+      // SURFACE_TEXT 常量与其字节等价——幂等支断言复用同源文本）
+      mkdirSync(join(workDir, 'dist/api'), { recursive: true });
+      writeFileSync(join(workDir, 'dist/api/surface.json'), SURFACE_TEXT);
+      return { code: 0, stdout: '', stderr: '' };
+    },
     'pack:inspect': () => ({
       code: 0,
       stdout: JSON.stringify([
@@ -476,6 +491,10 @@ function greenBase(version) {
     'smoke:run': () => ({ code: 0, stdout: `${version} "Peiligang"\n`, stderr: '' }),
     // 真握手（复盘 G-1）：dump-config 断言官方应用清单在场（默认应用 = berrycode）
     'smoke:apps': () => ({ code: 0, stdout: '默认应用：berrycode\n', stderr: '' }),
+    // 子步 3.5 归档两步（第九十一批）：真发路径机械 commit；dry-run 只投影不触达
+    // （dry-run 测试不消费此二罐头——缺罐头即脚本缺口原则照常护面）
+    'snapshot:add': () => ({ code: 0, stdout: '', stderr: '' }),
+    'snapshot:commit': () => ({ code: 0, stdout: '', stderr: '' }),
     publish: () => ({ code: 0, stdout: '', stderr: '' }),
   };
 }
@@ -842,5 +861,97 @@ describe('安装冒烟两断言负例（遗漏大扫 20260901 O-10 + L-6——�
       runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
     ).rejects.toThrow(/默认应用/);
     expect(labels(calls)).not.toContain('publish');
+  });
+});
+
+describe('契约 3 子步 3.5：面快照归档（技术栈 §8.3——第九十一批）', () => {
+  it('planSnapshotArchive 三态：缺席落档 / 等价跳过 / 异质响亮拒（与契约 4 decideIdempotent 对称）', () => {
+    expect(planSnapshotArchive({ archiveExists: false, identical: false })).toEqual({ action: 'archive' });
+    expect(planSnapshotArchive({ archiveExists: true, identical: true })).toMatchObject({ action: 'skip' });
+    expect(planSnapshotArchive({ archiveExists: true, identical: false })).toMatchObject({ action: 'reject' });
+  });
+
+  it('真发路径：归档落盘 + COMPATIBILITY.md 同笔再生 + 机械 commit（消息定形、归档先于 publish）', async () => {
+    const version = '1.0.0-alpha.3';
+    const base = greenBase(version);
+    base['dist-tag-add'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['view-tags:post'] = () => ({
+      code: 0,
+      stdout: JSON.stringify({ latest: version, next: version }),
+      stderr: '',
+    });
+    base['git-tag:list'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['git-rev:head'] = () => ({ code: 0, stdout: 'abc123\n', stderr: '' });
+    base['git-tag:create'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['git-tag:push'] = () => ({ code: 0, stdout: '', stderr: '' });
+    const { io, calls } = scriptedIo(base);
+
+    await runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } });
+
+    // 归档两件真落盘（canned build 产源 → 步骤消费 → 落档）
+    expect(readFileSync(join(workDir, `api/snapshots/${version}.json`), 'utf8')).toBe(SURFACE_TEXT);
+    expect(readFileSync(join(workDir, 'COMPATIBILITY.md'), 'utf8')).toContain('# API 兼容性档案（COMPATIBILITY）');
+    expect(readFileSync(join(workDir, 'COMPATIBILITY.md'), 'utf8')).toContain(`### ${version}（基线）`);
+    // 机械 commit：add 点名两件 + commit 消息定形；归档步先于 publish（tag 树含快照的前置序）
+    expect(calls.find((c) => c.label === 'snapshot:add').args).toEqual([
+      'add',
+      `api/snapshots/${version}.json`,
+      'COMPATIBILITY.md',
+    ]);
+    expect(calls.find((c) => c.label === 'snapshot:commit').args).toEqual([
+      'commit',
+      '-m',
+      `chore(release): API surface snapshot ${version}`,
+    ]);
+    expect(labels(calls).indexOf('snapshot:commit')).toBeLessThan(labels(calls).indexOf('publish'));
+  });
+
+  it('幂等重跑：同版本同内容已在档 → 跳过（零 snapshot 步、写面不动）', async () => {
+    const version = '1.0.0-alpha.3';
+    mkdirSync(join(workDir, 'api/snapshots'), { recursive: true });
+    writeFileSync(join(workDir, `api/snapshots/${version}.json`), SURFACE_TEXT);
+    const base = greenBase(version);
+    base['dist-tag-add'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['view-tags:post'] = () => ({
+      code: 0,
+      stdout: JSON.stringify({ latest: version, next: version }),
+      stderr: '',
+    });
+    base['git-tag:list'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['git-rev:head'] = () => ({ code: 0, stdout: 'abc123\n', stderr: '' });
+    base['git-tag:create'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['git-tag:push'] = () => ({ code: 0, stdout: '', stderr: '' });
+    const { io, calls } = scriptedIo(base);
+
+    await runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } });
+
+    expect(labels(calls)).not.toContain('snapshot:add');
+    expect(labels(calls)).not.toContain('snapshot:commit');
+    // COMPATIBILITY.md 不被重写（幂等跳过不动写面——文件缺席照旧缺席）
+    expect(existsSync(join(workDir, 'COMPATIBILITY.md'))).toBe(false);
+  });
+
+  it('同版本异质在档 → 响亮拒——publish 永不触达（版本号复用/归档损坏不静默覆盖）', async () => {
+    const version = '1.0.0-alpha.3';
+    mkdirSync(join(workDir, 'api/snapshots'), { recursive: true });
+    writeFileSync(join(workDir, `api/snapshots/${version}.json`), JSON.stringify({ apiVersion: '0.9' }) + '\n');
+    const { io, calls } = scriptedIo(greenBase(version));
+    await expect(
+      runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
+    ).rejects.toThrow(/同版本异内容快照已在档/);
+    expect(labels(calls)).not.toContain('publish');
+  });
+
+  it('dry-run：只投影——零 snapshot 步、归档目录不落盘（演习与 CI release-dry-run 恒绿面）', async () => {
+    const version = '1.0.0-alpha.3';
+    const base = greenBase(version);
+    base['git-tag:list'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['git-rev:head'] = () => ({ code: 0, stdout: 'abc123\n', stderr: '' });
+    const { io, calls } = scriptedIo(base);
+    await runRelease(['--dry-run'], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } });
+    expect(labels(calls)).not.toContain('snapshot:add');
+    expect(labels(calls)).not.toContain('snapshot:commit');
+    expect(existsSync(join(workDir, 'api/snapshots'))).toBe(false);
+    expect(existsSync(join(workDir, 'COMPATIBILITY.md'))).toBe(false);
   });
 });

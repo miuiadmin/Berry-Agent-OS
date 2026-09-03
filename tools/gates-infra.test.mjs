@@ -41,6 +41,19 @@ test('CI 工作流在场：四门禁全数执法 + fetch-depth 0（#19）', () =
   assert.ok(/(^|\s)push:/.test(yml) && /pull_request:/.test(yml), 'ci.yml 须 push + pull_request 双触发');
 });
 
+test('api-governance 工作流在场：PR 裁决标签闸 + 标签事件重验（第九十一批）', () => {
+  // API 治理 §6.13.6 CI 加强的形态锁（同 ci.yml 锁纪律——工作流被删/锚被
+  // 「优化」掉即红，标签闸静默退化是最危险的假绿形态）
+  const yml = readFileSync(join(repoRoot, '.github/workflows/api-governance.yml'), 'utf8');
+  assert.ok(yml.includes('node tools/check-api-pr-gate.mjs'), 'api-governance.yml 缺标签闸调用');
+  assert.ok(/fetch-depth:\s*0/.test(yml), 'api-governance.yml 必须 fetch-depth: 0（BASE...HEAD 三点 diff）');
+  // labeled/unlabeled 触发 = 补标签免重推自动重验（独立工作流的立项理由）
+  assert.ok(/labeled/.test(yml) && /unlabeled/.test(yml), 'api-governance.yml 须含 labeled/unlabeled 触发');
+  assert.ok(yml.includes('LABELS:') && yml.includes('BASE_SHA:'), 'api-governance.yml 缺 LABELS/BASE_SHA env 注入');
+  // 只对 PR 面执法——push 触发缺席是有意形态（push 路由 gates job 查 1 兜底）
+  assert.ok(!/(^|\s)push:/.test(yml), 'api-governance.yml 不应有 push 触发（标签闸只管 PR 宣告面）');
+});
+
 test('pre-commit 钩子在场：可执行 + 四门禁全数出现（#20）', () => {
   const hookPath = join(repoRoot, '.githooks/pre-commit');
   const mode = statSync(hookPath).mode;

@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { API_CAPABILITY_MISSING, API_VERSION_MISMATCH, API_VERSION_MALFORMED } from './errors.js';
 import {
+  API_ENFORCEMENT_IGNITED,
   CAPABILITIES,
   VIRTUAL_API_KEYS,
   adjudicateApiGate,
@@ -102,6 +103,34 @@ describe('adjudicateApiGate：装载门四出口（§6.13.4——纯函数，冷
     const gate = adjudicateApiGate({ minApiVersion: '1.0', experimental: ['berryagent'] }, '1.0', 'a');
     expect(gate.experimentalKeys.has('berryagent')).toBe(true);
     expect(gate.experimentalKeys.has('typebox')).toBe(false);
+  });
+});
+
+describe('收剑点火位（§6.13.4「批 4 翻必填」机器形态——第九十一批）', () => {
+  it('常量现役 = false（pre-release 窗口容忍态——点火翻转 = 首个 dist-tag=latest 当笔单点改 + 同笔测试）', () => {
+    // 锁常量现役值：意外的提前翻转（无批注的顺手改）在此红——点火是发布事件不是代码事件
+    expect(API_ENFORCEMENT_IGNITED).toBe(false);
+  });
+  it('缺省参数跟常量单源（产码调用点不传——两行为天然同源）', () => {
+    // 同一调用形态（不传 ignited）：现役 = legacy 容忍出口
+    const gate = adjudicateApiGate(undefined, '1.0', 'demo/app');
+    expect(gate.status).toBe('legacy');
+  });
+  it('点火态：api 块缺席 → API_VERSION_MISMATCH 拒载（warn 变拒载；min fail-loud 全体生效）', () => {
+    try {
+      adjudicateApiGate(undefined, '1.0', 'demo/app', true);
+      expect.unreachable('点火态 api 块缺席应拒载');
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain('demo/app');
+      expect((err as Error).message).toContain('api 块必填');
+      expect(String((err as { code?: unknown }).code)).toBe(API_VERSION_MISMATCH);
+    }
+  });
+  it('点火态：api 块在场 → 四出口序不变（点火只翻缺席腿，min/target/experimental 裁决原样）', () => {
+    const gate = adjudicateApiGate({ minApiVersion: '1.0', targetApiVersion: '1.5' }, '1.2', 'a', true);
+    expect(gate.status).toBe('admit');
+    expect(gate.effectiveTarget).toBe('1.2');
   });
 });
 

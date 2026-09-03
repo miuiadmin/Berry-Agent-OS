@@ -41,6 +41,10 @@ export default defineConfig({
             // 净树 spawn exit 0 + CHECK_API_SNAPSHOT env 缝换片证查 1 可红 + 手写
             // token 扫描器单测（tsgo 模板幻影陷阱回归锁）
             'tools/check-api.test.mjs',
+            // PR 裁决标签闸回归锁（API 治理 §6.13.6 CI 加强，第九十一批）：纯核心
+            // 三态直锁 + CLI 换片红/绿探针（面文件触碰而无裁决标签必红——闸静默
+            // 退化先在测试面红）
+            'tools/check-api-pr-gate.test.mjs',
             'tools/gates-infra.test.mjs',
             // vitest setup 密封面锁（基建大扫 #16/#47）：双身份探针——spawn 单文件
             // vitest 执法（哨兵外层值须被 delete + 临时根随 afterAll 清）

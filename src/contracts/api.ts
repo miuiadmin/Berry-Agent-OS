@@ -205,6 +205,19 @@ export function isValidApiVersion(v: string): boolean {
   return API_VERSION_FORMAT.test(v);
 }
 
+/**
+ * API 兼容执法收剑点火位（契约篇 §6.13.4「批 4 翻必填」+ §6.13.12「机器建设
+ * 在窗口内、兼容执法单点收剑」——2026-09-03 第九十一批落位）。
+ *
+ * - `false`（现役）= pre-release 窗口容忍态：api 块缺席走 legacy 出口聚合 warn；
+ * - `true`（首个 dist-tag=latest 当笔翻转）= 点火：api 块缺席从 warn 变拒载
+ *   （`API_VERSION_MISMATCH`），min fail-loud 对全体应用生效。
+ *
+ * **散拷禁令**：常量消费面只 adjudicateApiGate 出口 4 一处（测试经纯函数
+ * `ignited` 参数注入两态，不改常量）；点火日翻转 = 改此单点 + 同笔测试。
+ */
+export const API_ENFORCEMENT_IGNITED = false;
+
 /** 清单 api 块形状（AppManifestSchema 的 api 键运行时形——§6.13.4） */
 export interface ApiBlock {
   /** 硬地板：宿主 apiVersion < min 即拒载（api 块在场则必填） */
@@ -232,13 +245,33 @@ export interface ApiGateResult {
  *    升级指引三段）；
  * 2. min ≤ 宿主 < target → 钳制不警示（生效 target = min(宿主, target)）；
  * 3. 宿主 > target → 正常兼容态不警示（editions 设计目的）；
- * 4. api 块缺席 → status 'legacy'（调用方聚合 per-boot warn，批 4 翻必填）。
+ * 4. api 块缺席 → 点火前 status 'legacy'（调用方聚合 per-boot warn）；点火后
+ *    （`API_ENFORCEMENT_IGNITED` 翻 true）抛 `API_VERSION_MISMATCH` 拒载——
+ *    「批 4 翻必填」的唯一机器翻转点。
  * 格式/不变式（min ≤ target）由清单校验先执法（validateAppManifest）——本函数
  * 防御式复验格式，不变式信任前置校验。
+ *
+ * @param ignited 点火位注入（缺省 = `API_ENFORCEMENT_IGNITED` 常量单源——测试
+ *   两态注入专用参数，产码调用点不传）。
  */
-export function adjudicateApiGate(api: ApiBlock | undefined, hostApiVersion: string, appId: string): ApiGateResult {
-  // 出口 4：legacy 容忍态（面/行为按宿主当前——不进任何兼容模式）
+export function adjudicateApiGate(
+  api: ApiBlock | undefined,
+  hostApiVersion: string,
+  appId: string,
+  ignited: boolean = API_ENFORCEMENT_IGNITED,
+): ApiGateResult {
+  // 出口 4：api 块缺席——点火前 legacy 容忍态（面/行为按宿主当前——不进任何兼容
+  // 模式）；点火后拒载（min fail-loud 全体生效的机器形态）
   if (api === undefined) {
+    if (ignited) {
+      throw new AppError(
+        API_VERSION_MISMATCH,
+        `应用 ${appId} 清单缺 api 块——兼容执法已点火（api 块必填），` +
+          `须在 .app.yaml 补 ` +
+          `api:\n  minApiVersion: <宿主当前 apiVersion 或更旧>` +
+          `\n（契约篇 §6.13.4 批 4 翻必填——min fail-loud 与兼容模式对全体应用生效）。`,
+      );
+    }
     return { status: 'legacy', effectiveTarget: hostApiVersion, experimentalKeys: new Set() };
   }
   const min = api.minApiVersion;

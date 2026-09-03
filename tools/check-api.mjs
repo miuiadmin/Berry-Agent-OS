@@ -1,20 +1,23 @@
 #!/usr/bin/env node
 /**
- * API 治理机器执法层（契约篇 §6.13.8 check-api 七查，第八十七批批 2）。
+ * API 治理机器执法层（契约篇 §6.13.8 check-api 八查，第八十七批批 2 起——
+ * 查 8 随第九十一批增设）。
  *
- * 进 lint:topology 链（CI 同一套）。七查形态（批 2 落码节奏——批表 §6.13.11）：
+ * 进 lint:topology 链（CI 同一套）。八查形态（落码节奏——批表 §6.13.11）：
  * 1. drift——快照 src/contracts/api-surface.json ≠ 抽取真值即红（面漂移当场抓）；
  * 2. tier 全标——快照逐条 tier 词汇合法 + 公开根直导出（自由符号，现役为零）必带
  *    JSDoc 标签；typebox 转发条目（forwarded）记载不承诺、不参与执法（冷读 M4）；
- * 3. 废弃登记完整性——骨架先行（现零 deprecated 条目即绿）；DEP 注册簿随批 3 落地
- *    后充实双向对照 / DEP 编号唯一 / removalIn ≥ introducedIn + 3 minor 三执法；
- * 4. 官方全家桶零废弃使用——骨架先行（零 deprecated 条目即绿）；批 3 充实扫描面；
+ * 3. 废弃登记完整性——DEP 注册簿行不变式 + 双向对照（批 3 充实）；
+ * 4. 官方全家桶零废弃使用——批 3 充实扫描面；
  * 5. 实验面隔离——experimental 符号/键漏进 docs/ 与 examples/ 即红（现零实验键恒绿，
  *    机制常驻——实验键上线日即执法日）；
- * 6. compat 件死期——批 4 前结构性拒绝（src/compat/ 在场即红——死期机器未落地，
+ * 6. compat 件死期——批 4 点火前结构性拒绝（src/compat/ 在场即红——死期机器未落地，
  *    compat 件无登记可查 = fail-closed，非静默放行）；
  * 7. 清单 api 块狗家全覆盖——仓内全部 .app.yaml 的 api 块在场且合法（schema 校验 +
  *    装载门裁决非 legacy）；与官方三清单回填同批落——生效日即绿（冷读 M3）。
+ * 8. 生成物 drift（第九十一批）——COMPATIBILITY.md / docs/API参考.md ≠ 生成器
+ *    真值（面快照 + 注册簿 + 归档族派生）即红：生成物是提交件，手改或面变更后
+ *    漏再生即漂移（再生入口 = npm run build 尾挂或生成器 CLI --write）。
  *
  * 出口：零问题静默过（门禁链惯例）；有问题 stderr 逐条 + exit 1。
  */
@@ -24,6 +27,8 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { createJiti } from 'jiti';
 import { extractSurface, scanTopLevelExports, serializeSurface } from './extract-api-surface.mjs';
+import { renderCompatibility, loadArchivedSnapshots, COMPATIBILITY_PATH } from './generate-compatibility.mjs';
+import { renderApiReference, API_REFERENCE_PATH } from './generate-api-reference.mjs';
 
 /** 仓库根（脚本位置上一级） */
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -314,6 +319,43 @@ const DEPRECATIONS =
     }
   }
   if (manifests.length === 0) v(`[查 7] apps/ 目录零 .app.yaml——官方清单目录空（仓库布局异常）`);
+}
+
+/* ---------------- 查 8：生成物 drift（第九十一批——两生成物 ≠ 生成器真值红） ---------------- */
+
+{
+  // 生成物派生自【提交位快照】（非抽取真值——快照 ≠ 真值时查 1 已红；生成物纪律
+  // 单独执法：手改生成物 / 面变更后漏再生在此红）。seam 注入的快照/注册簿原样
+  // 入渲染——回归锁换片位天然联动（篡改快照 = 查 1 + 查 8 双红）。
+  const snapSurface = JSON.parse(snapshotText);
+  const pairs = [
+    {
+      label: 'COMPATIBILITY.md',
+      path: COMPATIBILITY_PATH,
+      want: renderCompatibility({
+        surface: snapSurface,
+        deprecations: DEPRECATIONS,
+        snapshots: loadArchivedSnapshots(),
+      }),
+    },
+    {
+      label: 'docs/API参考.md',
+      path: API_REFERENCE_PATH,
+      want: renderApiReference({ surface: snapSurface, deprecations: DEPRECATIONS }),
+    },
+  ];
+  for (const { label, path, want } of pairs) {
+    if (!existsSync(path)) {
+      v(`[查 8] 生成物 ${label} 缺席（npm run build 尾挂或生成器 --write 落盘——生成物是提交件）`);
+      continue;
+    }
+    if (readFileSync(path, 'utf8') !== want) {
+      v(
+        `[查 8] 生成物 ${label} 漂移：与生成器真值不符（面快照 + DEP 注册簿 + 归档族派生）——` +
+          `手改生成物或面变更后漏再生；重跑 \`npm run build\`（或 node tools/generate-*.mjs --write）`,
+      );
+    }
+  }
 }
 
 /* ---------------- 出口 ---------------- */

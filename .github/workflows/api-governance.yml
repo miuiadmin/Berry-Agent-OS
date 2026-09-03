@@ -1,0 +1,29 @@
+# API 治理 PR 裁决标签闸（契约篇 §6.13.6「面变更 PR 须带裁决标签」+ §6.13.8
+# CI 加强——2026-09-03 第九十一批窗口内机器建设）。
+#
+# 独立工作流（不挂进 ci.yml 的 push/pull_request 双触发）：本闸只对 PR 面
+# 执法（push 事件无标签面），且 types 显式含 labeled/unlabeled——贡献者补
+# 标签后无需重推即自动重验（若挂 ci.yml，标签事件会重跑 20 分钟 gates 矩阵）。
+# 零 npm ci：闸是纯 node 脚本（无依赖面），秒级。
+#
+# push 路的兜底执法：gates job 的 check-api 查 1（快照 ≠ 抽取真值即红）——
+# 标签闸管「宣告」，查 1 管「同步」，单一职责互不重叠。
+name: api-governance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+jobs:
+  pr-verdict-label-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 全史拉取（BASE...HEAD 三点 diff 需要 base 可达——与 ci.yml 同律）
+          fetch-depth: 0
+      - name: PR 裁决标签闸（面文件变更必带 api-break:/api-deprecate:/api-add: 之一）
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node tools/check-api-pr-gate.mjs

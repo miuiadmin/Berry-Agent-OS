@@ -10,6 +10,10 @@
  *   2. registry 探测（只读三态：缺席 E404 / 在场 / 不可达拒发）
  *   3. 构建即打包与发布物验收——清 dist 全新 build → pack --dry-run 白名单
  *      检视 → 真打包 → 安装冒烟（tarball 装临时 prefix 后 bin --version = 版本号）
+ *      → 子步 3.5 面快照归档（api/snapshots/<version>.json 落档 + COMPATIBILITY.md
+ *      同笔再生 + 机械 commit——技术栈 §8.3，2026-09-03 第九十一批挂机；归档
+ *      commit 先于契约 6 打 tag，tag 树必含本版快照；同版本同内容幂等跳过、
+ *      异内容响亮拒；--dry-run 只投影不触 git 写面）
  *   4. 幂等收口与 publish 单点——在场等价（同 shasum）跳过 publish；异质响亮
  *      拒；publish 上传物 = 本脚本打出的 tarball 本体（检视即所传）
  *   5. dist-tag 终态机器断言——preview 期统一律 latest===next===刚发版
@@ -31,14 +35,20 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
+import { createJiti } from 'jiti';
+import { loadArchivedSnapshots, renderCompatibility } from './generate-compatibility.mjs';
 
 /** 仓库根（脚本自身位置上一级——与 copy-app-assets.mjs 同款锚定） */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+const jiti = createJiti(import.meta.url);
+/** 便利导入：仓库内相对路径 → 模块运行时面（子步 3.5 装载真册 DEP 注册簿用） */
+const imp = (rel) => jiti.import(fileURLToPath(new URL(rel, import.meta.url)));
 
 /** 四门禁名（技术栈篇 §2.3；契约 1 逐个真跑，任一非零即止） */
 const GATES = ['typecheck', 'test', 'lint:topology', 'format:check'];
@@ -393,6 +403,20 @@ export const INJECT_SCENARIOS = {
   },
 };
 
+/**
+ * 契约 3 子步 3.5：面快照归档判定（纯函数——三态，与契约 4 decideIdempotent
+ * 同形对称：缺席落档 / 等价跳过 / 异质响亮拒）。幂等语义覆盖中断重跑：归档
+ * commit 已落的重跑同内容跳过（不造空 commit）；同版本异内容 = 版本号复用或
+ * 归档损坏，静默覆盖会抹掉真历史——必须人工裁决。
+ * @param {{archiveExists: boolean, identical: boolean}} input
+ *   archiveExists = api/snapshots/<version>.json 在场；identical = 与构建产物字节等价
+ */
+export function planSnapshotArchive({ archiveExists, identical }) {
+  if (!archiveExists) return { action: 'archive' };
+  if (identical) return { action: 'skip', reason: '同版本同内容快照已归档（中断重跑幂等跳过）' };
+  return { action: 'reject', reason: '同版本异内容快照已在档——版本号复用或归档损坏，先人工裁决（拒静默覆盖）' };
+}
+
 // ───────────────────────── 编排骨舞（io 注入缝） ─────────────────────────
 
 /**
@@ -529,6 +553,59 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
       version: pkg.version,
       defaultAppId: readDefaultAppId(workDir),
     });
+
+    // ── 契约 3 子步 3.5：面快照归档（技术栈 §8.3——快照与兼容档案一币两面）──
+    // 源 = 契约 3 构建产出的 dist/api/surface.json（上传物同源——检视即所传同律）；
+    // 归档 commit 先于契约 6 打 tag（tag 树必含本版快照）且同笔携再生
+    // COMPATIBILITY.md。机械 commit 走普通 git commit——pre-commit 四门禁照跑
+    // （树 = 契约 1 已绿之树 + 确定性生成物，绿是预期；发布机不豁免执法）；若
+    // add 后 commit 失败，staged 残留会被下轮契约 1 净空核验拦下——fail-loud
+    // 由净空闸兜底。
+    const builtSurfacePath = join(workDir, 'dist/api/surface.json');
+    if (!existsSync(builtSurfacePath)) {
+      throw new Error('dist/api/surface.json 缺席——build 链断在面快照步（契约 3 必在清单应已拦，此处兜底响亮）');
+    }
+    const builtSurfaceText = readFileSync(builtSurfacePath, 'utf8');
+    const archiveDir = join(workDir, 'api/snapshots');
+    const archivePath = join(archiveDir, `${pkg.version}.json`);
+    const archivePlan = planSnapshotArchive({
+      archiveExists: existsSync(archivePath),
+      identical: existsSync(archivePath) && readFileSync(archivePath, 'utf8') === builtSurfaceText,
+    });
+    if (archivePlan.action === 'reject') throw new Error(`子步 3.5 拒：${archivePlan.reason}`);
+    if (archivePlan.action === 'skip') {
+      console.log(`── 子步 3.5 面快照归档：${pkg.version} ${archivePlan.reason}`);
+    } else if (dryRun) {
+      console.log(
+        `── 子步 3.5 面快照归档（dry-run 只投影）：将落 api/snapshots/${pkg.version}.json + 同笔再生 COMPATIBILITY.md + 机械 commit`,
+      );
+    } else {
+      mkdirSync(archiveDir, { recursive: true });
+      writeFileSync(archivePath, builtSurfaceText);
+      // 同笔再生 COMPATIBILITY.md：新归档激活「变更史」逐版判级小节（渲染输入 =
+      // 含刚落档本次快照的档族全体）；DEP 注册簿走真册（机器判级认登记不认动机）
+      const regenerated = renderCompatibility({
+        surface: JSON.parse(builtSurfaceText),
+        deprecations: (await imp('../src/contracts/deprecations.ts')).DEPRECATIONS,
+        snapshots: loadArchivedSnapshots(archiveDir),
+      });
+      writeFileSync(join(workDir, 'COMPATIBILITY.md'), regenerated);
+      console.log(
+        `── 子步 3.5 面快照归档：api/snapshots/${pkg.version}.json + COMPATIBILITY.md 同笔再生（机械 commit）`,
+      );
+      const add = await anchoredIo.exec('snapshot:add', 'git', [
+        'add',
+        `api/snapshots/${pkg.version}.json`,
+        'COMPATIBILITY.md',
+      ]);
+      if (add.code !== 0) throw new Error(`git add 快照归档两件失败（退出码 ${add.code}）`);
+      const commit = await anchoredIo.exec('snapshot:commit', 'git', [
+        'commit',
+        '-m',
+        `chore(release): API surface snapshot ${pkg.version}`,
+      ]);
+      if (commit.code !== 0) throw new Error(`快照归档 commit 失败（退出码 ${commit.code}）`);
+    }
 
     // ── 契约 4：幂等收口与 publish 单点 ──
     const plan = planTagOperations(pkg.version);

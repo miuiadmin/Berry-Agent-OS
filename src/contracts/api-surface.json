@@ -90,6 +90,17 @@
       ]
     },
     {
+      "symbol": "API_ENFORCEMENT_IGNITED",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "standalone",
+        "daemon",
+        "server"
+      ]
+    },
+    {
       "symbol": "API_EXPERIMENTAL_UNDECLARED",
       "module": "berryagent",
       "tier": "stable",
