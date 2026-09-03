@@ -1337,7 +1337,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         sourceEventSeqs: [...carrier.sourceEventSeqs],
       });
       chargeSessionWrite(current.session.header.sessionId, 'appendWithSurfaceOp'); // #14：成功写计费（flush 屏障在其后）
-      await persistence?.flush();
+      // 定向屏障（B9——第十一轮遗漏大扫 20260904-b）：只排空当前会话待写批。
+      // 修前无参全量 flush——任一无关会话的持久写失败都 reject 炸穿**已成功
+      // 落账**的载体代写（压缩五步误落 compaction/failed + 10 分钟冷却、溢出
+      // 腿把已压缩成功的 turn 整体报失败——跨会话爆炸半径 + 冷却底账污染）。
+      // 本会话自己的写失败照常 reject（durable 承诺不降级）；其余 flush 调用点
+      // 的全量形（queryEvents 跨会话查询/affectedSessionCounts 聚合/关停序列）
+      // 语义各自成立，不在本刀射界
+      await persistence?.flush(current.session.header.sessionId);
       return event;
     },
     /** 模型历史投影只读（增补 7 装配缺口第 2 件——应用读当前会话投影走此面，禁自扫原始流绕投影） */

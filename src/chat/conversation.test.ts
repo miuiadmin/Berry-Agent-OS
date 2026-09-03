@@ -1169,6 +1169,24 @@ describe('ConversationDriver 驱动级取消模型（S6 形态①②③）', () 
     expect(calls.length).toBe(1);
   });
 
+  it('打断前 steering 余量多条：interrupt 循环排空全量落审计（B3——第十一轮遗漏大扫 20260904-b，修前红：one-at-a-time 模式单次 drain 只取最旧一条，其余余量存活被 followUp 循环当新批捎跑——打断前提交的存量不是「窗口期新输入」，形态② 捎跑语义不覆盖它）', async () => {
+    const { driver, session, calls } = makeS6Driver();
+    const pending = driver.submitOnce('慢问');
+    await tick(); // run 在飞（挂起流首轮——长轮内 turn 边界未到，余量滞留队列）
+    driver.submit('存量插话A'); // running → steer 入队
+    driver.submit('存量插话B'); // 同上——两条都在打断前提交
+    await driver.interrupt();
+    await pending;
+
+    expect(calls.length).toBe(1); // 存量余量全量不捎跑（打断 = 弃当前批次——A、B 都不驱动打断后的新 run）
+    // 两条余量都走 inject 落审计（message_start/end → durable user/message）
+    const userEvents = session.events.filter((e) => e.type === 'user/message');
+    expect(userEvents).toHaveLength(3); // 开场问句 + A + B（审计不断流、不蒸发）
+    await tick();
+    expect(driver.isRunning).toBe(false); // 无幽灵续跑
+    expect(calls.length).toBe(1);
+  });
+
   it('打断后窗口期新输入：followUp 循环捎跑（循环判据只看停摆——形态②）', async () => {
     const { driver, calls } = makeS6Driver();
     const settled: string[] = [];

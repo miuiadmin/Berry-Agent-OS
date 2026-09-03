@@ -691,6 +691,64 @@ describe('fork 种子（前缀 + end-seed 边界）', () => {
     expect(child.header.delegationDepth).toBe(1);
     expect(child.header.origin).toBe('delegation');
   });
+
+  it('turn 内遮蔽载体随种子走：子投影不复活被遮蔽中段、摘要载体可见（B7 第十一轮遗漏大扫 20260904-b——修复前必红）', () => {
+    // 父日志：闭合 turn（seq 0-4，中段 2-3 将被遮蔽）+ 敞开 turn 内压缩载体（seq 6）
+    const s = new Session();
+    s.append('turn/start', {});
+    s.append('user/message', { content: '头部锚' }); // seq 1
+    s.append('user/message', { content: '中段甲' }); // seq 2 —— 待遮蔽
+    s.append('user/message', { content: '中段乙' }); // seq 3 —— 待遮蔽
+    s.append('turn/end', { reason: 'completed' }); // seq 4
+    s.append('turn/start', {}); // seq 5 敞开 turn（委派/溢出压缩发生处）
+    s.append('user/message', { content: '[COMPACTION-SUMMARY] 摘要' }, {
+      surfaceOp: { op: 'replace', start: 2, end: 3 }, // 载体 seq 6，遮蔽前缀内 2-3
+      sourceEventSeqs: [2, 3],
+    });
+    // 父投影：锚 + 载体（中段 2-3 被遮蔽）
+    expect(s.deriveMessages().map((m) => (m as { content?: string }).content)).toEqual([
+      '头部锚',
+      '[COMPACTION-SUMMARY] 摘要',
+    ]);
+    const boundary = lastClosedTurnBoundary(s.events); // = 5
+    const child = s.fork({ boundary, origin: 'delegation' });
+    // 修复前：载体 seq 6 在边界后段被切 → 子投影复活中段甲/乙且摘要丢失（4 条→3 条遮蔽倒挂）
+    expect(child.deriveMessages().map((m) => (m as { content?: string }).content)).toEqual([
+      '头部锚',
+      '[COMPACTION-SUMMARY] 摘要',
+    ]);
+    // 载体重编 seq 落在 end-seed 之前，end-seed/seedLength 顺延载体数
+    expect(child.events[5]!.type).toBe('user/message');
+    expect(child.events[5]!.seq).toBe(5);
+    expect(child.events[5]!.surfaceOp).toEqual({ op: 'replace', start: 2, end: 3 });
+    expect(child.events[6]!.type).toBe('session/end-seed');
+    expect(child.events[6]!.seq).toBe(6);
+    expect(child.header.seedLength).toBe(7);
+  });
+
+  it('遮蔽区间跨界的载体：区间夹取到前缀内，载体在子日志不遮蔽自身（B7——修复前必红：载体整个被切，子投影丢摘要）', () => {
+    const s = new Session();
+    s.append('turn/start', {}); // seq 0
+    s.append('user/message', { content: '锚' }); // seq 1
+    s.append('user/message', { content: '中段' }); // seq 2 —— 待遮蔽
+    s.append('assistant/message', { content: '答' }); // seq 3 —— 待遮蔽
+    s.append('turn/end', { reason: 'completed' }); // seq 4
+    s.append('turn/start', {}); // seq 5 敞开
+    s.append('assistant/message', { content: '敞开答' }); // seq 6 —— 与中段一起被遮蔽（区间跨界）
+    s.append('user/message', { content: '[SUMMARY] 摘要' }, {
+      surfaceOp: { op: 'replace', start: 2, end: 6 }, // 载体 seq 7，区间横跨边界 5
+      sourceEventSeqs: [2, 3, 4, 5, 6],
+    });
+    const boundary = lastClosedTurnBoundary(s.events); // = 5
+    const child = s.fork({ boundary, origin: 'delegation' });
+    // 载体进种且区间夹取 [2,4]：后段 5-6 不在子日志，不夹取则重编载体（seq 5）滑进原区间自遮蔽
+    expect(child.events[5]!.surfaceOp).toEqual({ op: 'replace', start: 2, end: 4 });
+    expect(child.events[6]!.type).toBe('session/end-seed');
+    expect(child.deriveMessages().map((m) => (m as { content?: string }).content)).toEqual([
+      '锚',
+      '[SUMMARY] 摘要',
+    ]);
+  });
 });
 
 describe('种子注入（恢复 loadStored 的会话侧半边）', () => {

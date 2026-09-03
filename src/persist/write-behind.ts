@@ -41,6 +41,17 @@ export class WriteBehind {
   private readonly onBatchLatency?: (info: { sessionId: string; events: number; ms: number }) => void;
   /** 待落盘批次（sessionId → 有序事件队列；失败后保留即「保留批次」） */
   private readonly pending = new Map<string, SessionEvent[]>();
+  /**
+   * 种子会话首队时捕获的种子快照（sessionId → seq 0..seedLength-1 副本；
+   * writeBatch 首次写该会话时核对并消费——B8 第十一轮遗漏大扫 20260904-b：
+   * enqueue 位于 Session.append 推入内存日志之后〔emitLive 观察者位〕，
+   * 路径上任何同步 SQL 抛出都会让该事件永缺席持久化队列〔无重试登记〕，
+   * 后续批次建队即留 seq 洞 → 重启 loadEvents 按撕裂尾截断丢活区尾部——
+   * 故 enqueue 路径零 SQL，「库内是否已有本会话事件」核对挪到写路径
+   * 〔那里已有失败保留 + 暂停重试机器兜底〕）。writeBatch 消费或尾链清理
+   * 时删除（键域有界，与 pending/chains 同生命周期纪律）
+   */
+  private readonly seeds = new Map<string, SessionEvent[]>();
   /** 会话登记素材表（首事件时填充；sessions 行以首次登记为准） */
   private readonly registrations = new Map<string, SessionRegistration>();
   /** per-session 串行链（永不 reject——排队机制，不承担错误传播） */
@@ -75,10 +86,16 @@ export class WriteBehind {
     if (queue) {
       queue.push(event);
     } else {
-      // 种子（若有且未落盘）在前，活事件随后——批内即保持 seq 连续
-      const initial = this.pendingSeed(session) ?? [];
-      initial.push(event);
-      this.pending.set(sessionId, initial);
+      // 首队捕获种子快照（纯内存零 SQL——B8 第十一轮遗漏大扫 20260904-b）：
+      // fork/导入子会话的种子物理复制核对（库内是否已有本会话事件）由
+      // writeBatch 写路径承担；修前在此同步查库，SQL 抛出即本事件永缺席
+      // 持久化队列（enqueue 位于 Session.append 推日志之后——观察者位异常
+      // 上抛不回滚内存日志），后续批次建队留 seq 洞。种子判定语义不变：
+      // seedLength = 0 无种子（普通会话）不进簿
+      if (session.header.seedLength > 0) {
+        this.seeds.set(sessionId, [...session.events.slice(0, session.header.seedLength)]);
+      }
+      this.pending.set(sessionId, [event]);
       this.registrations.set(sessionId, registrationOf(session, meta));
     }
     if (!this.paused) {
@@ -88,8 +105,10 @@ export class WriteBehind {
 
   /**
    * 未落盘种子（若有）：seedLength > 0 且库内尚无本会话事件时返回种子快照，
-   * 否则 null。enqueue 首队复制与 ensureSeeded 显式落库的共用判定（会话篇 §5.1
-   * 「seedLength 语义钉死」——导入 seedLength = 种子全长，本判定天然覆盖）。
+   * 否则 null。ensureSeeded 显式落库路径专用判定（会话篇 §5.1「seedLength
+   * 语义钉死」——导入 seedLength = 种子全长，本判定天然覆盖）。注意 enqueue
+   * 首队路径**不在此查库**（B8：同步 SQL 在观察者位抛出即事件蒸发——核对
+   * 挪到 writeBatch 写路径，见 seeds 簿注）。
    */
   private pendingSeed(session: Session): SessionEvent[] | null {
     const seedLength = session.header.seedLength;
@@ -172,16 +191,29 @@ export class WriteBehind {
       if (this.chains.get(sessionId) === tail && !this.pending.has(sessionId)) {
         this.chains.delete(sessionId);
         this.registrations.delete(sessionId);
+        this.seeds.delete(sessionId); // 防御位（B8）：种子簿随死重同删——正常路 writeBatch 已消费；此位只兜批未灌链的角落，防簿项滞留
       }
     });
     return next;
   }
 
   /** 实际写批：失败 = 保留批次 + 暂停自动重试 + 响亮上报；成功 = 复位暂停并灌积压 */
-  private async writeBatch(sessionId: string, batch: SessionEvent[]): Promise<void> {
+  private async writeBatch(sessionId: string, incoming: SessionEvent[]): Promise<void> {
     const reg = this.registrations.get(sessionId)!;
     const beganAt = performance.now(); // 批落延迟打点起点（#27——成功路终点回读）
+    let batch = incoming;
     try {
+      // 种子补齐（B8——第十一轮遗漏大扫 20260904-b）：种子会话首批落盘前，
+      // 若库内尚无本会话事件则把首队捕获的种子快照前置到批头（fork/导入子
+      // 会话事件流自包含且 seq 连续——会话篇 §5）。核对在写路径内：失败走
+      // 既有失败机器（保留批 + 暂停 + 重试——seeds 簿不删，下轮 writeBatch
+      // 重新核对）；核对成功即删簿（种子已在本批或已在库，重试批不再重复
+      // 核对——appendCore 部分写后 remainder 过滤按自有边界自洽续片）
+      const seed = this.seeds.get(sessionId);
+      if (seed !== undefined && this.store.countEvents(sessionId) === 0) {
+        batch = [...seed, ...batch];
+      }
+      if (seed !== undefined) this.seeds.delete(sessionId);
       this.store.appendCore(reg, batch, this.incarnation);
     } catch (cause) {
       /* 部分写裁剪（契约篇 §1.6 资源护栏族 #13，2026-08-27 刀〇b——**强制不变式**）：

@@ -441,8 +441,15 @@ export class ConversationDriver {
     // 的撤销说明行——与 dismantle 无参 abort 的缺省文案「该提问已被撤销」两路
     // 分流（interrupt = 打断 run；dismantle = quit/retire 撤销提问）
     this.runAbort.abort('该运行已被打断');
-    // 打断前余量落审计（consumeMeta 清元数据 + inject 落投影与展示）
-    for (const message of this.consumeMeta(this.queue.drain())) this.inject(message);
+    // 打断前余量落审计（consumeMeta 清元数据 + inject 落投影与展示）。
+    // **循环排空**（B3——第十一轮遗漏大扫 20260904-b）：队列缺省
+    // one-at-a-time 模式下 drain() 每次只取最旧一条，单次 drain 遗漏其余
+    // 余量——存量余量若存活，run 终结后 followUp 循环立即以之起全新模型
+    // run（打断前提交的存量不是「窗口期新输入」，形态② 捎跑语义不覆盖
+    // 它），与「打断 = 弃当前批次」承诺直接矛盾
+    const drained: AgentMessage[] = [];
+    while (this.queue.hasItems()) drained.push(...this.queue.drain());
+    for (const message of this.consumeMeta(drained)) this.inject(message);
     return this.runPromise;
   }
 

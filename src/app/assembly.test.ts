@@ -449,6 +449,55 @@ describe('createRuntime 装配面', () => {
     expect(bareSessions.deriveMessages()).toEqual([]);
   });
 
+  it('appendWithSurfaceOp 定向 flush（B9——第十一轮遗漏大扫 20260904-b，修前红：收尾无参全量 flush，任一无关会话的持久写失败都炸穿已成功的载体代写——压缩五步误落 failed+冷却、溢出腿误报压缩失败）', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<{
+      appendEvent(type: string, data: unknown): SessionEvent | undefined;
+      appendWithSurfaceOp(carrier: {
+        readonly type: string;
+        readonly data: { readonly content: unknown; readonly source: string };
+        readonly surfaceOp: { readonly op: 'replace'; readonly start: number; readonly end: number };
+        readonly sourceEventSeqs: readonly number[];
+      }): Promise<SessionEvent | undefined>;
+    }>('sessions')!;
+    // 当前会话造两条可遮蔽事件（seq1/seq2；seq0 为 sandbox/mode 占位）
+    sessions.appendEvent('memory/diff', { baseline: 'aa', entries: [] });
+    sessions.appendEvent('memory/diff', { baseline: 'bb', entries: [] });
+
+    // 毒化另一无关会话的持久写：先造第二会话并落一笔待写事件（进 write-behind
+    // 队列），再把 store.appendCore 对该会话替换为恒抛——全量 flush 会试图排空
+    // 它并 reject；定向 flush（只排当前会话）不受牵连
+    const other = runtime.persistence!.createSession({ cwd: '/poison-other' });
+    other.append('memory/diff', { baseline: 'poison', entries: [] });
+    const otherId = other.header.sessionId;
+    const store = runtime.persistence!.store as unknown as {
+      appendCore(reg: { sessionId: string }, batch: readonly unknown[], inc: string): number;
+    };
+    const origAppendCore = store.appendCore.bind(store);
+    store.appendCore = (reg, batch, inc) => {
+      if (reg.sessionId === otherId) throw new Error('poisoned write（模拟无关会话持久写失败）');
+      return origAppendCore(reg, batch, inc);
+    };
+
+    // 合法载体代写：载体 append 成功后收尾 flush 应只屏障当前会话——
+    // 修前：无参 flush() 排空毒化会话批 → reject 炸穿（载体已落账却报失败）；
+    // 修后：flush(sessionId) 定向屏障 → 正常返回
+    const carrier = await sessions.appendWithSurfaceOp({
+      type: 'user/message',
+      data: { content: '压缩摘要', source: 'app:compaction' },
+      surfaceOp: { op: 'replace', start: 1, end: 2 },
+      sourceEventSeqs: [0, 1, 2],
+    });
+    expect(carrier).toBeDefined();
+    // 当前会话载体确实 durable（定向屏障真实排空了自己——不是跳过 flush；
+    // loadSession 从库重建事件对象，按 seq 对账非引用比对）
+    const flushed = runtime.persistence!.loadSession(runtime.session!.header.sessionId)!;
+    expect(flushed.events.some((e) => e.seq === carrier!.seq)).toBe(true);
+
+    // 复原毒化（避免污染后续 teardown 的关停 flush）
+    store.appendCore = origAppendCore as typeof store.appendCore;
+  });
+
   it('llm 模型目录只读投影（P0-1：listModels/getModel——ModelInfo 投影面）', async () => {
     const runtime = await assemble();
     const service = runtime.ctx.tryGet<{

@@ -123,6 +123,39 @@ describe('Persistence 门面：接线与往返', () => {
     await p2.close();
   });
 
+  it('fork 子会话首队种子核对 SQL 容错（B8——第十一轮遗漏大扫 20260904-b，修前红：enqueue 位于 Session.append 推入内存日志之后，同步 countEvents 抛出即该事件永缺席持久化队列——后续批次建队留 seq 洞，重启 loadEvents 按撕裂尾截断丢活区尾部）', async () => {
+    const path = nextPath();
+    const p = Persistence.open({ path, windowMs: 10_000 }); // 长窗口：只走显式 flush，排除定时器竞速
+    const parent = p.createSession();
+    parent.append('turn/start', {});
+    parent.append('user/message', { content: '前缀' });
+    parent.append('turn/end', { reason: 'completed' });
+    await p.flush(parent.header.sessionId);
+
+    const child = p.forkSession(parent); // seedLength = 4（3 前缀 + end-seed），库内子会话零事件
+    // 毒化 countEvents：仅对子会话、仅首段（模拟 WAL 争用窗 SQLITE_BUSY 超时）
+    const origCountEvents = p.store.countEvents.bind(p.store);
+    let poisoned = true;
+    (p.store as unknown as { countEvents(id: string): number }).countEvents = (id: string) => {
+      if (poisoned && id === child.header.sessionId) throw new Error('poisoned countEvents（模拟 SQLITE_BUSY）');
+      return origCountEvents(id);
+    };
+    // 子会话首笔活体事件：enqueue 路径零 SQL 后不再上抛（修前：append 推日志后
+    // emitLive → enqueue → pendingSeed → countEvents 同步抛出炸穿 append）
+    expect(() => child.append('user/message', { content: '子会话首笔' })).not.toThrow();
+    // 解除毒化：写路径核对（writeBatch 内）重试不再抛
+    poisoned = false;
+    await p.flush(child.header.sessionId);
+    await p.close();
+
+    // 重开全量往返：种子 + 首笔连续落库（无 seq 洞——撕裂尾修复不触发截断）
+    const p2 = Persistence.open({ path });
+    const back = p2.loadSession(child.header.sessionId)!;
+    expect(back.length).toBe(5); // 4 种子 + 1 活区（修前红：毒化窗事件缺席 → 0 条）
+    expect(back.events.slice(4).map((e) => e.type)).toEqual(['user/message']);
+    await p2.close();
+  });
+
   it('跨会话并行互不阻塞：flush() 全量屏障覆盖多个会话', async () => {
     const p = Persistence.open({ path: nextPath(), windowMs: 20 });
     const a = p.createSession();

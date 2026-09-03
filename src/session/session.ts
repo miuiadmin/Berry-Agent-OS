@@ -442,17 +442,40 @@ export class Session {
     if (open !== 0) {
       throw new AppError(SESSION_FORK_BOUNDARY_INVALID, `边界 ${boundary} 落在敞开 turn 内（须落在 turn 闭合之后）`);
     }
-    // 种子收尾标记：end-seed 占据 seq=boundary，位置即边界；种子里不发活体通知（历史不重播）
+    // 遮蔽载体随种子走（B7——第十一轮遗漏大扫 20260904-b，会话篇 §5 增补条款）：
+    // 边界后段（敞开 turn 内）落账的 surfaceOp 载体若遮蔽区间与前缀相交
+    // （start < boundary——溢出压缩 mid-run 五步正此形态），不随物理前缀进种
+    // 即子投影遮蔽语义断裂：被遮蔽中段复活 + 摘要载体丢失。相交载体克隆
+    // 重编 seq 落在 end-seed 之前；遮蔽区间夹取到前缀内（end := min(end,
+    // boundary-1)）——后段事件不进子日志，不夹取则重编后的载体落位滑进原
+    // 区间、在子日志内遮蔽自身/彼此（重编 seq 恒 ≤ 原 seq，而原区间上界
+    // 可达原 seq-1）。前缀事件 seq 原样不动，遮蔽区间指回前缀位置照常
+    // 解析。单点统一模型：委派 / rewind / 服务面 fork 全部消费者同享。
+    const carriers: SessionEvent[] = [];
+    for (let i = boundary; i < this.log.length; i++) {
+      const event = this.log[i]!;
+      if (event.surfaceOp && event.surfaceOp.start < boundary) {
+        carriers.push(
+          Object.freeze({
+            ...event,
+            seq: boundary + carriers.length,
+            surfaceOp: Object.freeze({ ...event.surfaceOp, end: Math.min(event.surfaceOp.end, boundary - 1) }),
+          }),
+        );
+      }
+    }
+    // 种子收尾标记：end-seed 占据尾位（seq 顺延载体数），位置即边界；种子里不发活体通知（历史不重播）
     const endSeed: SessionEvent = Object.freeze({
       type: 'session/end-seed',
-      seq: boundary,
+      seq: boundary + carriers.length,
       time: this.log[boundary - 1]?.time ?? Date.now(),
       data: deepFreeze({}),
     });
-    // 完整种子 = 源前缀（共享冻结引用）+ 边界标记；构造时 seedLength 自动 = boundary + 1
+    // 完整种子 = 源前缀（共享冻结引用）+ 相交遮蔽载体（克隆重编）+ 边界标记；
+    // 构造时 seedLength 自动 = boundary + 载体数 + 1（消费者读侧 slice(seedLength) 不变式照旧）
     const child = new Session({
       sessionId: opts.sessionId,
-      seed: [...this.log.slice(0, boundary), endSeed],
+      seed: [...this.log.slice(0, boundary), ...carriers, endSeed],
       origin: opts.origin ?? 'fork',
       parentSession: this.header.sessionId,
       delegationDepth: this.header.delegationDepth + (opts.origin === 'delegation' ? 1 : 0),
