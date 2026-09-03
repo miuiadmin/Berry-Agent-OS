@@ -75,6 +75,23 @@ export default async function apply(ctx) {
 }
 `;
 
+/** 宿主自省面 fixture（§6.13.5 桥接档——就绪度审计 20260903 P3）：ctx.host
+ * 各面经 tap 服务回读，缺席时以 '(absent)' 哨兵呈现（成员缺席不物化空面） */
+const FX_HOST_FACE = `
+export const name = 'fx-hostface';
+export default async function apply(ctx) {
+  const h = ctx.host;
+  ctx.provide('fx/hostface-taps', {
+    version: () => (h === undefined ? '(absent)' : h.version),
+    apiVersion: () => (h === undefined ? '(absent)' : h.apiVersion),
+    formFactor: () => (h === undefined ? '(absent)' : h.formFactor),
+    capHas: (n) => (h === undefined ? '(absent)' : h.capabilities.has(n)),
+    capList: () => (h === undefined ? [] : [...h.capabilities.list()].sort()),
+    expEnabled: (n) => (h === undefined ? '(absent)' : h.experimental.enabled(n)),
+  });
+}
+`;
+
 /**
  * 最小工具服务桩：register 记录 + get 查回 + 注销器记录（桥接工具注册的宿主
  * 物化断言面——register 返回注销器是真 ToolsService 契约面，行回卷摘除断言用）
@@ -299,6 +316,51 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
     expect(exits[0]!.rows).toEqual(['wx']);
     expect(exits[0]!.workerId).toBe('e2e-worker-2');
     await until(() => root.tryGet('fx/taps-x') === undefined);
+  });
+
+  it('hostFaceData 注入：ctx.host 随 apply 帧过河——真 worker 子进程内物化同形面（§6.13.5 桥接档；修复前红：applyRow 载荷无第 4 位、ctx.host undefined）', async () => {
+    // 独立域（宿主半 hostFaceData 注入面）：真 spawn 真 apply 往返——直连
+    // MessageChannel 单测（worker.test.ts）之外锁「宿主半真的把数据放进帧」
+    const domain3 = spawnWorkerDomain({
+      root,
+      tools: tools as unknown as ToolsService,
+      workerUrl: WORKER_URL,
+      workerId: 'e2e-worker-3',
+      // 合成数据：断言过河忠实于宿主所发（真目录值归 assembly 面测试）
+      hostFaceData: {
+        version: '8.8.8-e2e',
+        apiVersion: '8.8',
+        formFactor: 'daemon',
+        capabilities: ['memory.store'],
+        experimentalKeys: [],
+      },
+    });
+    try {
+      const hostfaceEntry = join(fixtureDir, 'fx-hostface.ts');
+      writeFileSync(hostfaceEntry, FX_HOST_FACE);
+      await until(
+        () =>
+          domain3.endpoint.call('svc', 'load', [{ id: '__probe__', entry: hostfaceEntry }]).then(
+            () => true,
+            () => false,
+          ),
+        20_000,
+      );
+      await domain3.load({ id: 'hf', entry: hostfaceEntry, sandbox: { carrier: 'worker' } });
+      const scope = root.fork({ name: 'hf', rowId: 'hf', builtinRow: false });
+      await domain3.applyRow({ id: 'hf', sandbox: { carrier: 'worker' } }, scope);
+      // 宿主物化代理读 tap（svc.invoke 过桥往返 worker 域实现）
+      const taps = root.get<Record<string, (...args: unknown[]) => Promise<unknown>>>('fx/hostface-taps');
+      await expect(taps['version']!()).resolves.toBe('8.8.8-e2e');
+      await expect(taps['apiVersion']!()).resolves.toBe('8.8');
+      await expect(taps['formFactor']!()).resolves.toBe('daemon');
+      await expect(taps['capHas']!('memory.store')).resolves.toBe(true);
+      await expect(taps['capHas']!('nope.cap')).resolves.toBe(false);
+      await expect(taps['expEnabled']!('typebox')).resolves.toBe(false);
+      await scope.dispose();
+    } finally {
+      domain3.terminate('hostFace e2e 收尾');
+    }
   });
 
   it('workerEntryUrl：按宿主半自身形态判别 worker 同伴入口（.ts 源 → worker.ts / 编译产物 → worker.js）', () => {

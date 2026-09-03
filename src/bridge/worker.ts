@@ -20,6 +20,9 @@
  *   TUI 渲染——日志纪律单点：宿主 logger 统一格式与级别过滤）
  * - ctx.signal             → 行控制器（apply 取消（桥接入站 signal）/unload
  *   双源 abort——应用长任务对齐响应）
+ * - ctx.host               → 宿主面纯数据物化（apply 载荷第 4 位 HostFaceData
+ *   过河 → materializeHostFace 同构面——§6.13.5 桥接档；载荷缺席 = 成员缺席，
+ *   不物化空面）
  *
  * v1 同步收窄面（BRIDGE_SURFACE_NARROWED 响亮 throw，契约篇 §1.7 清单）：
  * parallel/serial/waterfall / registerMessageRole / registerSessionEventType /
@@ -30,6 +33,7 @@ import { AppError, BRIDGE_METHOD_NOT_FOUND, BRIDGE_SURFACE_NARROWED, APP_LOAD_FA
 import type { AppEventHandler } from '../contracts/app.js';
 import type { ToolDefinition } from '../contracts/tools.js';
 import { TOOL_TIMEOUT_FLOOR_MS } from '../contracts/tools.js';
+import { materializeHostFace, type HostFaceData } from '../contracts/api.js';
 import {
   createAppJiti,
   importAppEntry,
@@ -232,6 +236,8 @@ function makeStubCtx(
   config: Readonly<Record<string, unknown>>,
   presence: Readonly<Record<string, boolean>>,
   registrations: Promise<unknown>[],
+  /** 宿主面过河数据（apply 载荷第 4 位；undefined = 宿主未注入——ctx.host 成员缺席，不物化空面） */
+  hostFace: HostFaceData | undefined,
 ): Record<string, unknown> {
   const logger = {
     debug: (message: string, fields?: Record<string, unknown>) => logUp(endpoint, rowId, 'debug', message, fields),
@@ -327,6 +333,9 @@ function makeStubCtx(
     config: Object.freeze({ ...config }),
     logger,
     signal: state.ctl.signal,
+    // ctx.host：宿主面纯数据物化（§6.13.5 桥接档）——载荷缺席时成员整体缺席
+    // （undefined 值会被 external 载体的 JSON 序列化丢尾，故条件展开而非恒挂键）
+    ...(hostFace === undefined ? {} : { host: materializeHostFace(hostFace) }),
   };
 }
 
@@ -412,10 +421,12 @@ export function startWorkerRealm(port: BridgePort, workerId: string): BridgeEndp
     })
     /* svc.apply：重建行状态 → 桩 ctx → default(ctx, config) → 注册排水。
      * signal = 桥接入站取消（宿主 apply 超时/域死）→ 联动行控制器 abort */
-    .handle('svc', 'apply', async ([rowIdArg, configArg, presenceArg], signal) => {
+    .handle('svc', 'apply', async ([rowIdArg, configArg, presenceArg, hostFaceArg], signal) => {
       const rowId = rowIdArg as string;
       const config = (configArg ?? {}) as Readonly<Record<string, unknown>>;
       const presence = (presenceArg ?? {}) as Readonly<Record<string, boolean>>;
+      // 宿主面过河数据（第 4 位——宿主侧按「已注入才追加」原则发送，缺席即 undefined）
+      const hostFace = hostFaceArg as HostFaceData | undefined;
       const module = modules.get(rowId);
       if (module === undefined) {
         throw new AppError(APP_LOAD_FAILED, `svc.apply 先行装载缺失（行 ${rowId}——load 必先于 apply）`);
@@ -433,7 +444,7 @@ export function startWorkerRealm(port: BridgePort, workerId: string): BridgeEndp
       rows.set(rowId, state);
       signal.addEventListener('abort', () => state.ctl.abort(), { once: true });
       const registrations: Promise<unknown>[] = [];
-      const ctx = makeStubCtx(endpoint, state, rowId, config, presence, registrations);
+      const ctx = makeStubCtx(endpoint, state, rowId, config, presence, registrations, hostFace);
       try {
         await module.default(ctx as unknown as Parameters<typeof module.default>[0], config);
         // 注册排水：全部过界注册落定才算 apply 完成（activated 时序确定）

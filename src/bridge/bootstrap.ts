@@ -35,6 +35,7 @@ import { randomUUID } from 'node:crypto';
 import { AppError, BRIDGE_METHOD_NOT_FOUND, APP_LOAD_FAILED } from '../contracts/errors.js';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { AppPlanRow } from '../contracts/app.js';
+import type { HostFaceData } from '../contracts/api.js';
 import type { ContextScope } from '../context/types.js';
 import { runInCallerChain } from '../context/chain.js';
 import type { WorkerModuleMeta, WorkerRowLoader } from '../context/loader.js';
@@ -265,6 +266,12 @@ export interface WorkerDomainOptions {
   readonly root: ContextScope;
   /** 工具服务（缺省懒解析 root 的 'tools' 服务——Ring 1 装载序里工具行可能晚于 worker 行激活，捕获期解析会拿到 undefined） */
   readonly tools?: ToolsService;
+  /**
+   * 宿主面过河数据（§6.13.5 桥接档——svc.apply 载荷第 4 位）：已注入才随帧
+   * 追加（缺省 undefined = 不追加，对岸 ctx.host 成员缺席）。external 载体
+   * stdio 走 JSON 序列化会丢尾 undefined，故不能恒挂第 4 位。
+   */
+  readonly hostFaceData?: HostFaceData;
   /** svc.load 在途超时（毫秒，缺省 60s——jiti 全图转译 + import 的合理上限） */
   readonly loadTimeoutMs?: number;
   /** 心跳节律（毫秒；**首次 svc.load 成功后起表**——boot 窗〔tsx 编译/模块装载〕ping 无应答属正常不计拍，该窗由 loadTimeoutMs 监督；运行期冻结由本探针执法，K3-c 监督编舞的配置面，端点机制见 session.ts） */
@@ -502,7 +509,11 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
       // optionalInject 在场快照（worker 侧 tryGet 的同步收窄补偿——激活时点定档）
       const presence: Record<string, boolean> = {};
       for (const name of meta.optionalInject ?? []) presence[name] = opts.root.tryGet(name) !== undefined;
-      return endpoint.call('svc', 'apply', [row.id, row.config ?? {}, presence], { signal: callOpts?.signal });
+      // svc.apply 载荷：宿主面数据按「已注入才追加」原则携第 4 位过河（undefined
+      // 恒挂会被 external 载体 JSON 序列化丢尾 → 帧形状漂移，协议单点在两载体同款）
+      const applyArgs: unknown[] = [row.id, row.config ?? {}, presence];
+      if (opts.hostFaceData !== undefined) applyArgs.push(opts.hostFaceData);
+      return endpoint.call('svc', 'apply', applyArgs, { signal: callOpts?.signal });
     },
     terminate(reason) {
       terminated = true; // exit 处理据此跳过意外死亡通知（主动收尾非事故）

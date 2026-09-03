@@ -608,3 +608,59 @@ describe('startWorkerRealm — svc.load 载荷 apiGate 过桥（API 声明门分
     expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), undefined);
   });
 });
+
+describe('startWorkerRealm — svc.apply 载荷 hostFaceData 过桥（ctx.host 档位同面——§6.13.5 桥接档；就绪度审计 20260903 P3）', () => {
+  /** 宿主自省面读出 fixture：ctx.host 各面经 tap 服务回读（svc.invoke 往返——
+   * 结构化克隆只过纯数据，方法面在对岸物化后本域调用） */
+  const FX_HOST_FACE = `
+export const name = 'fx-hostface';
+export default async function apply(ctx) {
+  const h = ctx.host;
+  ctx.provide('fx/hostface-taps', {
+    version: () => (h === undefined ? '(absent)' : h.version),
+    apiVersion: () => (h === undefined ? '(absent)' : h.apiVersion),
+    formFactor: () => (h === undefined ? '(absent)' : h.formFactor),
+    capHas: (n) => (h === undefined ? '(absent)' : h.capabilities.has(n)),
+    capList: () => (h === undefined ? [] : [...h.capabilities.list()].sort()),
+    expEnabled: (n) => (h === undefined ? '(absent)' : h.experimental.enabled(n)),
+  });
+}
+`;
+
+  /** tap 方法调用捷径（svc.invoke 三段载荷） */
+  function tapCall(ch: { host: BridgeEndpoint }, rowId: string, method: string, ...args: unknown[]) {
+    return ch.host.call('svc', 'invoke', [rowId, 'fx/hostface-taps', method, args]);
+  }
+
+  it('第 4 位载荷物化 ctx.host：五面全同值过河（修复前红：apply 载荷无 host 数据帧、ctx.host undefined）', async () => {
+    const { ch, dir } = setup();
+    const entry = writeApp(dir, 'fx-hostface.ts', FX_HOST_FACE);
+    await ch.host.call('svc', 'load', [{ id: 'h1', entry }]);
+    // 合成数据（非真 readHostFaceData 产物）——断言「过河忠实于宿主所发」而非真目录值
+    const hostFace = {
+      version: '9.9.9-test',
+      apiVersion: '9.9',
+      formFactor: 'standalone',
+      capabilities: ['memory.store', 'web.fetch'],
+      experimentalKeys: [],
+    };
+    await ch.host.call('svc', 'apply', ['h1', {}, {}, hostFace]);
+    await expect(tapCall(ch, 'h1', 'version')).resolves.toBe('9.9.9-test');
+    await expect(tapCall(ch, 'h1', 'apiVersion')).resolves.toBe('9.9');
+    await expect(tapCall(ch, 'h1', 'formFactor')).resolves.toBe('standalone');
+    await expect(tapCall(ch, 'h1', 'capHas', 'memory.store')).resolves.toBe(true);
+    await expect(tapCall(ch, 'h1', 'capHas', 'nope.cap')).resolves.toBe(false);
+    await expect(tapCall(ch, 'h1', 'capList')).resolves.toEqual(['memory.store', 'web.fetch']);
+    // 面在场语义：stable 键不在实验集 → false（enabled 只答 tier=experimental 在场）
+    await expect(tapCall(ch, 'h1', 'expEnabled', 'typebox')).resolves.toBe(false);
+  });
+
+  it('载荷缺席 = ctx.host 成员缺席：不物化空面（宿主未注入形态的诚实呈现——undefined 不冒充数据面）', async () => {
+    const { ch, dir } = setup();
+    const entry = writeApp(dir, 'fx-hostface.ts', FX_HOST_FACE);
+    await ch.host.call('svc', 'load', [{ id: 'h2', entry }]);
+    await ch.host.call('svc', 'apply', ['h2', {}, {}]);
+    await expect(tapCall(ch, 'h2', 'version')).resolves.toBe('(absent)');
+    await expect(tapCall(ch, 'h2', 'capList')).resolves.toEqual([]);
+  });
+});

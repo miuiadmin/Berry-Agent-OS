@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { AppError, APP_LOAD_FAILED } from '../contracts/errors.js';
 import type { AppPlanRow } from '../contracts/app.js';
 import type { ToolsService } from '../contracts/tools.js';
+import type { HostFaceData } from '../contracts/api.js';
 import type { ContextScope } from '../context/types.js';
 import type { WorkerModuleMeta } from '../context/loader.js';
 import { BridgeEndpoint } from './session.js';
@@ -83,6 +84,12 @@ export interface ExternalDomainOptions {
   readonly root: ContextScope;
   /** 工具服务（缺省懒解析 root 的 'tools'） */
   readonly tools?: ToolsService;
+  /**
+   * 宿主面过河数据（§6.13.5 桥接档——svc.apply 载荷第 4 位，worker 腿同款）：
+   * 已注入才随帧追加（缺省 undefined = 不追加，对岸 ctx.host 成员缺席）。
+   * external 载体 stdio 走 JSON 序列化丢尾 undefined——恒挂第 4 位必致帧形状漂移。
+   */
+  readonly hostFaceData?: HostFaceData;
   /** svc.load 在途超时（毫秒，缺省 60s——fork 冷启 + jiti 全图转译） */
   readonly loadTimeoutMs?: number;
   /** 心跳节律（毫秒；首次 svc.load 成功后起表——与 worker 腿同款两窗分工） */
@@ -376,7 +383,11 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
       // optionalInject 在场快照（域侧 tryGet 的同步收窄补偿——激活时点定档）
       const presence: Record<string, boolean> = {};
       for (const name of meta.optionalInject ?? []) presence[name] = opts.root.tryGet(name) !== undefined;
-      return endpoint.call('svc', 'apply', [row.id, row.config ?? {}, presence], { signal: callOpts?.signal });
+      // svc.apply 载荷：宿主面数据按「已注入才追加」原则携第 4 位过河（worker 腿
+      // 同款协议单点——external 复用 worker 域入口，帧形状两载体必须同构）
+      const applyArgs: unknown[] = [row.id, row.config ?? {}, presence];
+      if (opts.hostFaceData !== undefined) applyArgs.push(opts.hostFaceData);
+      return endpoint.call('svc', 'apply', applyArgs, { signal: callOpts?.signal });
     },
     terminate(reason) {
       terminated = true; // exit 处理据此跳过意外死亡通知（主动收尾非事故）

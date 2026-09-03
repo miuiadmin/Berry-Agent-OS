@@ -185,6 +185,26 @@ process.stdout.write(JSON.stringify({ kind: 'tell', event: 'log', payload: { row
 setInterval(() => {}, 1 << 30);
 `;
 
+/**
+ * hostFace 过河 fixture（§6.13.5 桥接档——就绪度审计 20260903 P3）：apply 时捕捉
+ * ctx.host 五面进 tap；缺席时回 '(absent)' 哨兵（缺席可断言不崩）。与 worker 腿
+ * bootstrap.test.ts / worker.test.ts 同款断言面——双载体同帧物化同形面。
+ */
+const FX_HOST_FACE = `
+export const name = 'fx-hostface';
+export default async function apply(ctx) {
+  const h = ctx.host;
+  ctx.provide('fx/hostface-taps', {
+    version: () => (h === undefined ? '(absent)' : h.version),
+    apiVersion: () => (h === undefined ? '(absent)' : h.apiVersion),
+    formFactor: () => (h === undefined ? '(absent)' : h.formFactor),
+    capHas: (n) => (h === undefined ? '(absent)' : h.capabilities.has(n)),
+    capList: () => (h === undefined ? [] : [...h.capabilities.list()].sort()),
+    expEnabled: (n) => (h === undefined ? '(absent)' : h.experimental.enabled(n)),
+  });
+}
+`;
+
 /** 测试环境根（fixture 全落这里；afterAll 统一清） */
 let fixtureDir: string;
 let root: ContextScope;
@@ -192,6 +212,8 @@ let tools: FakeTools;
 /** 共享域（Echo parity 用例组——fork 冷启 ~1.5s，beforeAll 一次起域复用） */
 let domain: ExternalDomain;
 let echoEntry: string;
+/** hostFace 过河 fixture 入口（hostFaceData e2e 用例——与 worker 腿同款断言面） */
+let hostfaceEntry: string;
 /** 共享域意外死亡记录（terminate 用例断言主动收尾不落此——事故面观测） */
 const unexpectedExits: Array<{ workerId: string; code: number; rows: readonly string[]; diagnostic?: string }> = [];
 
@@ -238,6 +260,8 @@ beforeAll(async () => {
   writeFileSync(join(fixtureDir, 'fx-term-trap.ts'), FX_TERM_TRAP);
   writeFileSync(join(fixtureDir, 'fx-freeze.ts'), FX_FREEZE);
   writeFileSync(join(fixtureDir, 'fx-noisy.mjs'), FX_NOISY);
+  hostfaceEntry = join(fixtureDir, 'fx-hostface.ts');
+  writeFileSync(hostfaceEntry, FX_HOST_FACE);
   root = createContext({ name: 'bridge-ext-test' });
   tools = new FakeTools();
   domain = spawnExternalDomain({
@@ -332,6 +356,37 @@ describe('spawnExternalDomain — Echo parity（真 fork 子进程，worker 腿�
     // 子进程真死（exit 事件已到——terminate 编舞完成）
     await until(() => !pidAlive(domain.child.pid));
     expect(unexpectedExits).toEqual([]); // 主动收尾不触发意外死亡通知
+  });
+
+  it('hostFaceData 注入：ctx.host 随 apply 帧过河——external 载体同帧同形面（§6.13.5 桥接档；修复前红：applyRow 载荷无第 4 位、ctx.host undefined）', async () => {
+    // 独立域携 hostFaceData 起（共享域无注入面——宿主侧选项逐域传）
+    const hfDomain = spawnTestDomain({
+      workerId: 'e2e-hostface',
+      hostFaceData: {
+        version: '7.7.7-ext',
+        apiVersion: '7.7',
+        formFactor: 'daemon',
+        capabilities: ['memory.store'],
+        experimentalKeys: [],
+      },
+    });
+    try {
+      await untilReady(hfDomain, hostfaceEntry);
+      await hfDomain.load({ id: 'hf', entry: hostfaceEntry, sandbox: { carrier: 'external' } });
+      const scope = root.fork({ name: 'hf', rowId: 'hf', builtinRow: false });
+      await hfDomain.applyRow({ id: 'hf', sandbox: { carrier: 'external' } }, scope);
+      const taps = root.get<Record<string, (...args: unknown[]) => Promise<unknown>>>('fx/hostface-taps');
+      await expect(taps['version']!()).resolves.toBe('7.7.7-ext');
+      await expect(taps['apiVersion']!()).resolves.toBe('7.7');
+      await expect(taps['formFactor']!()).resolves.toBe('daemon');
+      await expect(taps['capHas']!('memory.store')).resolves.toBe(true);
+      await expect(taps['capHas']!('nope.cap')).resolves.toBe(false);
+      await expect(taps['capList']!()).resolves.toEqual(['memory.store']);
+      await expect(taps['expEnabled']!('typebox')).resolves.toBe(false);
+      await scope.dispose();
+    } finally {
+      hfDomain.terminate('hostFace e2e 收尾');
+    }
   });
 });
 

@@ -151,7 +151,7 @@ import {
   resolveDefaultApp,
   readApiGateAtRoot,
 } from './app-registry.js';
-import { buildHostFace } from './host-face.js';
+import { buildHostFace, readHostFaceData } from './host-face.js';
 import type { FormFactor } from '../contracts/api.js';
 import type { AppManifest } from '../contracts/app.js';
 import { createBuiltinRegistry, collectBuiltinMigrations } from './builtins.js';
@@ -1894,6 +1894,10 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   const workerChoreography = {
     heartbeatMs: 15_000,
     resourceLimits: { maxOldGenerationSizeMb: 512 },
+    // 宿主面过河数据（§6.13.5 桥接档——域内 ctx.host 物化源）：与根 ctx.host
+    // 同源同形（readHostFaceData 单源派生），worker/external 两腿舰队共用——
+    // 域内应用自省面与 main 域同面（worker 域应用同面可得）
+    hostFaceData: readHostFaceData(formFactor),
     // 按行覆盖（第三纵切 budget.memoryMb 落码形态）：应用组件命中的 worker 行
     // 按清单限值执行（键 = 行 pkg 装载身份串，与组件在场断言同键）；未命中
     // 回落全局 512MB。多应用共享组件已在 appMemoryMb 构建时取严（min）

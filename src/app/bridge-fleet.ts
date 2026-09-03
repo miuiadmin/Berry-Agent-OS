@@ -46,6 +46,7 @@ import {
   SANDBOX_UNAVAILABLE,
 } from '../contracts/errors.js';
 import { resolveRowCarrier, exclusiveAppOf, type AppPlanRow } from '../contracts/app.js';
+import type { HostFaceData } from '../contracts/api.js';
 import type { ToolsService } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import { appZoneId } from '../context/context.js';
@@ -74,6 +75,12 @@ export interface BridgeFleetOptions {
   readonly execArgv?: readonly string[];
   /** 工具服务（缺省由 bootstrap 懒解析 root 的 'tools'——装载序晚期行友好） */
   readonly tools?: ToolsService;
+  /**
+   * 宿主面过河数据（§6.13.5 桥接档——两载体域内 ctx.host 的物化源）：随
+   * svc.apply 帧第 4 位过河；未注入 = 域内 ctx.host 成员缺席。条件展开同款
+   * 纪律（undefined 恒挂会被 external 腿 JSON 序列化丢尾）。
+   */
+  readonly hostFaceData?: HostFaceData;
   /** svc.load 在途超时毫秒（缺省 bootstrap 的 60s） */
   readonly loadTimeoutMs?: number;
   /** 心跳节律毫秒（undefined = 不起监督探针——监督编舞由装配层启用） */
@@ -425,6 +432,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         root: opts.root,
         ...(opts.tools === undefined ? {} : { tools: opts.tools }),
         ...(opts.loadTimeoutMs === undefined ? {} : { loadTimeoutMs: opts.loadTimeoutMs }),
+        ...(opts.hostFaceData === undefined ? {} : { hostFaceData: opts.hostFaceData }),
         ...freezeOpts,
         onExit,
       };
