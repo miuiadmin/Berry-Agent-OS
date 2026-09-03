@@ -464,6 +464,13 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
       graceTimer = setTimeout(() => {
         if (settled) return;
         if (closeInfo === undefined) closeInfo = exitInfo;
+        // 合成结算腿补刀：销毁两流读端（遗漏大扫 20260903 fix-code D1-1——宽限
+        // 主动结算后 stdio 管道流未销毁，组外持有者形态下 libuv poll handle
+        // 钉死事件循环：单发 CLI 结果已出而进程永不自然退出、daemon 常驻形态
+        // 每次命中泄漏 fd。close 自然到达的主路 EOF 自关不受影响——仅执法
+        // 合成结算腿补刀；data 监听随流销毁拆除，残余 chunk 由输出缓冲兜底）
+        child.stdout?.destroy();
+        child.stderr?.destroy();
         settle();
       }, 250);
     };

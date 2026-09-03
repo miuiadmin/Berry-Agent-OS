@@ -516,3 +516,49 @@ describe('durable error 腿预算帽（第七轮 H-2——同源双载不破护�
     expect(data.error?.message).toBe('失败：被遮罩'); // 小文本零成本快路径
   });
 });
+
+describe('护栏同尺预算——转义密集文本（遗漏大扫 20260903 fix-code D3-1 修死）', () => {
+  /** 大文本 toolResult 终值（content 腿走 DURABLE_CONTENT_BUDGET_BYTES=60KiB 预算刀） */
+  const bigContent = (text: string): ToolResultMessage => ({
+    role: 'toolResult',
+    toolCallId: 'call-1',
+    toolName: 'bash',
+    content: [{ type: 'text', text }],
+    isError: false,
+    timestamp: 1,
+  });
+
+  it.each([
+    { name: '纯引号 58KiB（原文 ≤60KiB 直放 → 转义 ~116KiB 穿透护栏）', text: '"'.repeat(58 * 1024) },
+    { name: '纯换行 58KiB（每字符转义 2x）', text: '\n'.repeat(58 * 1024) },
+    { name: '控制字符 U+0001 30KiB（转义 6x ~180KiB）', text: ''.repeat(30 * 1024) },
+  ])('转义密集文本按转义后体积截断不再炸 run：$name', ({ text }) => {
+    // 修前：budgetString 量原文字节（≤60KiB 直放）而护栏 jsonBytes 量 JSON
+    // 转义后体积（>64KiB）——两把尺子不同单位，SESSION_EVENT_TOO_LARGE
+    // 上抛炸整个 run + 该 tool/result 及其后审计全丢（探针实证 118842B/184378B）
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    expect(() => sinks.handle({ type: 'message_end', message: bigContent(text) })).not.toThrow();
+    const ev = session.events.find((e) => e.type === 'tool/result')!;
+    const serialized = Buffer.byteLength(JSON.stringify(ev.data), 'utf8');
+    expect(serialized).toBeLessThanOrEqual(64 * 1024); // 护栏同尺：落账体积必在护栏内
+  });
+
+  it('普通 ASCII 58KiB 对照组：预算内零截断原样落账（既有快路径不破）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    sinks.handle({ type: 'message_end', message: bigContent('a'.repeat(58 * 1024)) });
+    const ev = session.events.find((e) => e.type === 'tool/result')!;
+    const content = (ev.data as { content?: Array<{ type: string; text?: string }> }).content ?? [];
+    expect(content[0]?.text).toBe('a'.repeat(58 * 1024)); // 转义零膨胀——原文即终值
+  });
+
+  it('截断后必带尾标记（转义尺下截断语义保持）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    sinks.handle({ type: 'message_end', message: bigContent('\n'.repeat(58 * 1024)) });
+    const ev = session.events.find((e) => e.type === 'tool/result')!;
+    const content = (ev.data as { content?: Array<{ type: string; text?: string }> }).content ?? [];
+    expect(content[0]?.text).toContain('truncated for durable log');
+  });
+});

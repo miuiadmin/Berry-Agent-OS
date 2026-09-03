@@ -91,28 +91,50 @@ const TRUNCATED_MARKER = '\n…[truncated for durable log]';
  */
 type DurableBlock = TextContent | ThinkingContent | ImageContent;
 
-/** 单块 UTF-8 字节度量（截断预算的计量单位；image 按 base64 字符串长度近似） */
+/** 单块护栏同尺度量（截断预算的计量单位；image 按 base64 字符串长度近似——
+ * base64 字母表无转义字符，转义前后等长）
+ *
+ * 度量单位 = JSON 转义后体积（遗漏大扫 20260903 fix-code D3-1 修死）：护栏
+ * session.append 量的是 jsonBytes(snapshot)（JSON.stringify 后体积），预算刀
+ * 若量原文字节即两把尺子不同单位——引号/换行每字符转义 2x、控制字符 6x，
+ * 转义密集文本 raw ≤60KiB 穿透预算刀后转义 >64KiB，护栏 SESSION_EVENT_TOO_
+ * LARGE 上抛炸整个 run。预算刀与护栏必须同一把尺。 */
 function blockBytes(block: DurableBlock): number {
   switch (block.type) {
     case 'text':
-      return Buffer.byteLength(block.text, 'utf8');
+      return escapedBytes(block.text);
     case 'thinking':
-      return Buffer.byteLength(block.thinking, 'utf8');
+      return escapedBytes(block.thinking);
     case 'image':
       return block.data.length;
   }
 }
 
+/** 字符串的护栏同尺体积（与 session.jsonBytes 同式：JSON.stringify 加一对
+ * 引号 2B 恒定——并入事件信封余量，不另扣） */
+function escapedBytes(text: string): number {
+  return Buffer.byteLength(JSON.stringify(text), 'utf8');
+}
+
 /**
- * 字符串按字节预算截断（超预算加尾标记；不超原样返回）。
+ * 字符串按「护栏同尺」字节预算截断（超预算加尾标记；不超原样返回）。
  * user 纯文本整串、tool/call 的 arguments 字符串与 error 腿错误说明共用这一把刀
  * ——预算各别传入（content/arguments = 60KiB 内容预算；error 说明 = 2KiB 小帽）。
+ * 度量与截断目标都是转义后体积（见 blockBytes 头注——与护栏同一把尺）。
  */
 function budgetString(text: string, budget: number = DURABLE_CONTENT_BUDGET_BYTES): string {
-  const size = Buffer.byteLength(text, 'utf8');
-  if (size <= budget) return text;
-  // 按字节截（subarray 可能切在多字节字符中间，toString 对坏尾替换 U+FFFD——可接受）
-  const sliced = Buffer.from(text, 'utf8').subarray(0, budget).toString('utf8');
+  if (escapedBytes(text) <= budget) return text;
+  // 转义只增不减：原文截到 budget 字节是安全上界（转义后 ≤ 原文 × 截点）
+  let sliced = Buffer.from(text, 'utf8').subarray(0, budget).toString('utf8');
+  // 收敛循环：截段+尾标记的转义体积压进预算。按超限比例收缩（几何收敛——
+  // 控制字符 6x 形态一轮即近界），近界后逐字符兜底（subarray 可能切在多字节
+  // 字符中间，toString 对坏尾替换 U+FFFD——可接受且不影响收敛）
+  while (escapedBytes(sliced + TRUNCATED_MARKER) > budget) {
+    const over = escapedBytes(sliced + TRUNCATED_MARKER);
+    const next = Math.floor((sliced.length * budget) / over);
+    sliced = sliced.slice(0, Math.max(Math.min(next, sliced.length - 1), 0));
+    if (sliced.length === 0) return TRUNCATED_MARKER;
+  }
   return sliced + TRUNCATED_MARKER;
 }
 
@@ -141,18 +163,18 @@ function truncateForDurable(content: string | readonly DurableBlock[]): string |
       out.push({ type: 'text', text: '[image omitted: durable budget]' });
       continue;
     }
-    // text / thinking：按剩余预算截字节
+    // text / thinking：按剩余预算截字节（度量与判定同尺——转义后体积）
     const text = block.type === 'text' ? block.text : block.thinking;
-    const size = Buffer.byteLength(text, 'utf8');
+    const size = escapedBytes(text);
     if (size <= budget) {
       out.push(block);
       budget -= size;
       continue;
     }
     if (budget > 0) {
-      // 按字节截（subarray 可能切在多字节字符中间，toString 对坏尾替换 U+FFFD——可接受）
-      const sliced = Buffer.from(text, 'utf8').subarray(0, budget).toString('utf8');
-      const marked = sliced + TRUNCATED_MARKER;
+      // 复用 budgetString 的收敛循环（截段+尾标记的转义体积压进剩余预算——
+      // 与护栏同一把尺，见 blockBytes 头注）
+      const marked = budgetString(text, budget);
       out.push(block.type === 'text' ? { type: 'text', text: marked } : { type: 'thinking', thinking: marked });
       budget = 0;
     }

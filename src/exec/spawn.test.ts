@@ -9,8 +9,16 @@
 
 import { describe, expect, it } from 'vitest';
 import { EventEmitter, getEventListeners } from 'node:events';
+import { spawn } from 'node:child_process';
+import { rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AppError, EXEC_SPAWN_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
 import { classifyDenials, runArgv, killTree, OUTPUT_BUDGET_BYTES } from './spawn.js';
+
+/** 仓内 tsx CLI（src/exec → 上两级 = 仓根；子进程以 tsx 转译真源码形态起跑） */
+const TSX_CLI = fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url));
 
 /** 断言拒绝码（错误码是唯一判据） */
 async function expectRejectCode(fn: () => Promise<unknown>, code: string): Promise<AppError> {
@@ -117,6 +125,63 @@ describe('后台孤儿形态执法（运行时探针 20260902 F-2 修死）', ()
         TOOL_TIMEOUT,
       );
       expect(Date.now() - started).toBeLessThan(4000); // 修前 ~12000ms（异组孤儿自然退出）
+    },
+  );
+});
+
+describe('宽限结算流销毁（遗漏大扫 20260903 fix-code D1-1 修死）', () => {
+  it(
+    '组外管道持有者形态：runArgv 宽限结算返回后进程自然退出（修前管道句柄钉死事件循环）',
+    { timeout: 20_000 },
+    async () => {
+      // 进程级探针（探针 leak-runargv2.mts 转正）：子进程跑真身 runArgv——主
+      // 进程秒退 + detached 异组孙进程持管道（'inherit'）+ 300ms abort → 宽限
+      // 主动结算生效 runArgv 正常返回；修前：结算后 child.stdout/stderr 的
+      // libuv poll handle 存活钉死事件循环，子进程永不自然退出（探针实证
+      // +3557ms 仍活、看门狗强杀）——单发 CLI 用户视角挂死、daemon 泄漏 fd。
+      // 修后：合成结算腿补 destroy 两流 → 事件循环放空自然退出（exit 0）。
+      // 孙进程用有界 setTimeout（8s 自灭）防测试自身泄漏；看门狗 4s exit(9)
+      // 区分「钉死」与「退出」两种终态。
+      const spawnModule = fileURLToPath(new URL('./spawn.ts', import.meta.url));
+      const script = [
+        `import { runArgv } from ${JSON.stringify(spawnModule)};`,
+        `const NODE = process.execPath;`,
+        `const inner = ${JSON.stringify(
+          `require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 8000)'], ` +
+            `{ stdio: ['ignore', 'inherit', 'ignore'], detached: true, windowsHide: true }); process.exit(0);`,
+        )};`,
+        `const ac = new AbortController();`,
+        `setTimeout(() => ac.abort(), 300);`,
+        `try {`,
+        `  const run = await runArgv([NODE, '-e', inner], { signal: ac.signal });`,
+        `  console.log('RUN_ARGV_RETURNED exitCode=' + run.exitCode);`,
+        `} catch (e) { console.log('RUN_ARGV_THROWN ' + (e && e.code)); }`,
+        `console.log('SCRIPT_DONE');`,
+        // 看门狗必须 unref——普通定时器自身就钉住事件循环，会把「自然退出」
+        // 误判成悬挂；unref 后仅当循环被真句柄（修前=管道读端）钉住时才触发
+        `setTimeout(() => { console.log('WATCHDOG_FIRED'); process.exit(9); }, 4000).unref();`,
+      ].join('\n');
+      const scriptPath = join(tmpdir(), `spawn-grace-exit-${process.pid}-${Date.now()}.mts`);
+      writeFileSync(scriptPath, script);
+      try {
+        const child = spawn(process.execPath, [TSX_CLI, scriptPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        child.stdout!.on('data', (d: Buffer) => {
+          out += d.toString();
+        });
+        child.stderr!.on('data', (d: Buffer) => {
+          out += d.toString();
+        });
+        const code = await new Promise<number>((resolve) => {
+          child.on('exit', (c) => resolve(c ?? -1));
+        });
+        expect(out).toContain('RUN_ARGV_RETURNED'); // 宽限结算本身生效（F-2 修法②语义不破）
+        expect(out).toContain('SCRIPT_DONE');
+        expect(out).not.toContain('WATCHDOG_FIRED'); // 修前：4s 看门狗强杀即此标记
+        expect(code).toBe(0); // 自然退出（修前 exit 9）
+      } finally {
+        rmSync(scriptPath, { force: true });
+      }
     },
   );
 });
