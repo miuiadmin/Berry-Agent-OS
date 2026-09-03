@@ -23,7 +23,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { scanTopLevelExports } from './extract-api-surface.mjs';
-import { classifyFaceDiff, compareSemver, judgeBreakages, loadArchivedSnapshots } from './generate-compatibility.mjs';
+import {
+  classifyFaceDiff,
+  compareSemver,
+  judgeBreakages,
+  loadArchivedSnapshots,
+  renderCompatibility,
+} from './generate-compatibility.mjs';
 
 /** 仓库根（本文件在 tools/ 下） */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -205,6 +211,58 @@ describe('classifyFaceDiff：两版面 diff 四类分桶（§6.13.6——纯函�
     expect(diff.added).toEqual([]);
     expect(diff.capabilitiesChanged).toBe(true);
   });
+  it('DEP 登记日（tier→deprecated + 载荷挂上）归 re-tiered 桶不归 changed——治理动作非形状变更', () => {
+    // 回归锁：旧实现只剥 tier 不剥 deprecated 载荷，登记日恒误判 changed
+    // （api-deprecate: 裁决类指引死码——re-tiered 桶的 deprecated 分支永不可达）
+    const prev = { exports: [e('Old', 'berryagent', 'stable')], capabilities: [] };
+    const curr = {
+      exports: [
+        e('Old', 'berryagent', 'deprecated', { deprecated: { dep: 'DEP-001', removalIn: '1.2', replacement: 'New' } }),
+      ],
+      capabilities: [],
+    };
+    const diff = classifyFaceDiff(prev, curr);
+    expect(diff.changed).toEqual([]);
+    expect(diff.reTiered).toEqual([{ key: 'berryagent::Old', from: 'stable', to: 'deprecated' }]);
+  });
+  it('DEP 撤销日（载荷消失 + tier 回升）与载荷-only 润色：前者 re-tiered、后者零桶', () => {
+    const registered = {
+      exports: [
+        e('X', 'berryagent', 'deprecated', { deprecated: { dep: 'DEP-001', removalIn: '1.2', replacement: 'New' } }),
+      ],
+      capabilities: [],
+    };
+    // 撤销日：tier 回 stable、载荷消失 → re-tiered
+    const unregistered = classifyFaceDiff(registered, { exports: [e('X')], capabilities: [] });
+    expect(unregistered.changed).toEqual([]);
+    expect(unregistered.reTiered).toEqual([{ key: 'berryagent::X', from: 'deprecated', to: 'stable' }]);
+    // 载荷-only（replacement 文案润色）：tier 同 deprecated、载荷字段变 → 零桶
+    const retouched = classifyFaceDiff(registered, {
+      exports: [
+        e('X', 'berryagent', 'deprecated', { deprecated: { dep: 'DEP-001', removalIn: '1.2', replacement: 'Better' } }),
+      ],
+      capabilities: [],
+    });
+    expect(retouched.changed).toEqual([]);
+    expect(retouched.reTiered).toEqual([]);
+    expect(retouched.added).toEqual([]);
+    expect(retouched.removed).toEqual([]);
+  });
+  it('deprecated 符号真改形（载荷外字段变）仍归 changed——剥键不吞真变', () => {
+    // module 属 key 构成（module::symbol）不构成「改形」——真改形用 since 字段变
+    const dep = { dep: 'DEP-001', removalIn: '1.2', replacement: 'New' };
+    const diff = classifyFaceDiff(
+      {
+        exports: [e('X', 'berryagent', 'deprecated', { since: '1.0', deprecated: dep })],
+        capabilities: [],
+      },
+      {
+        exports: [e('X', 'berryagent', 'deprecated', { since: '1.1', deprecated: dep })],
+        capabilities: [],
+      },
+    );
+    expect(diff.changed).toEqual(['berryagent::X']);
+  });
 });
 
 describe('judgeBreakages：判级携 DEP 语境（§6.13.6 冷读 M1——机器认登记不认动机）', () => {
@@ -217,21 +275,41 @@ describe('judgeBreakages：判级携 DEP 语境（§6.13.6 冷读 M1——机器
       ['berryagent::Due', 'berryagent::NotDue', 'berryagent::Wild'],
       'removed',
       deps,
-      '1.3.0',
+      '1.3',
     );
     expect(verdict.sanctioned).toEqual([{ key: 'berryagent::Due', dep: 'DEP-001' }]);
     expect(verdict.major).toEqual(['berryagent::NotDue', 'berryagent::Wild']);
   });
   it('版本比较逐段数值（1.10 > 1.9——字典序假阳在此红）', () => {
-    // removalIn 1.9 对 1.10.0：数值序已到死期 = sanctioned；字典序会误判未到
+    // removalIn 1.9 对面号 1.10：数值序已到死期 = sanctioned；字典序会误判未到
     const verdict = judgeBreakages(
       ['berryagent::Due'],
       'removed',
       [{ dep: 'DEP-003', symbol: 'berryagent::Due', removalIn: '1.9' }],
-      '1.10.0',
+      '1.10',
     );
     expect(verdict.sanctioned).toEqual([{ key: 'berryagent::Due', dep: 'DEP-003' }]);
     expect(verdict.major).toEqual([]);
+  });
+  it('号域纪律：判级基准 = 面号 apiVersion 两段形（§6.13.2 号独立演进）', () => {
+    // 回归锁：旧签名收宿主 release 号再截断——宿主号漂移在面号前方时
+    // （release 1.30.0 而面号仍 1.2）截断形 1.3 ≥ removalIn 1.3 会假判
+    // 死期已到；判级必须对照面号本体：面号 1.2 < 1.3 = 窗口未走完 → MAJOR
+    const verdict = judgeBreakages(
+      ['berryagent::Due'],
+      'removed',
+      [{ dep: 'DEP-004', symbol: 'berryagent::Due', removalIn: '1.3' }],
+      '1.2',
+    );
+    expect(verdict.major).toEqual(['berryagent::Due']);
+    // 面号走到 1.3（= removalIn）即销账合法——边界含等
+    const dueNow = judgeBreakages(
+      ['berryagent::Due'],
+      'removed',
+      [{ dep: 'DEP-004', symbol: 'berryagent::Due', removalIn: '1.3' }],
+      '1.3',
+    );
+    expect(dueNow.sanctioned).toEqual([{ key: 'berryagent::Due', dep: 'DEP-004' }]);
   });
 });
 
@@ -240,6 +318,12 @@ describe('compareSemver / loadArchivedSnapshots：归档族排序（第九十一
     // 陷阱一：'1.0.0' 是 '1.0.0-alpha.1' 前缀，字典序反排正式版在前；
     // 陷阱二：localeCompare 默认不开 numeric collation，'alpha.10' 字典序先于 'alpha.2'
     const order = ['1.0.0-alpha.2', '1.0.0-alpha.10', '1.0.0-rc.1', '1.0.0', '1.0.1'];
+    expect([...order].reverse().sort(compareSemver)).toEqual(order);
+  });
+  it('compareSemver：非法形态沉底排最末（防御兜底不隐形夹进远古史）', () => {
+    // 回归锁：旧实现非法形返回 [-1,-1,-1] 排最前——与「沉底」注释相反，坏文件名
+    // 被夹进基线侧隐形；沉底 = 排最新位（变更史尾节人眼常扫处可见）
+    const order = ['1.0.0', '1.1.0', 'oops.json'];
     expect([...order].reverse().sort(compareSemver)).toEqual(order);
   });
   it('loadArchivedSnapshots(dir)：目录参数化 + 版本号 semver 升序 + 缺席目录空数组', () => {
@@ -275,6 +359,78 @@ describe('compareSemver / loadArchivedSnapshots：归档族排序（第九十一
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('renderCompatibility：登记日端到端渲染（api-deprecate 裁决类文案复活锁）', () => {
+  /** 迷你面工厂（两快照 + 注册簿 → 全文渲染断言） */
+  const e = (symbol, tier = 'stable', extra = {}) => ({
+    symbol,
+    module: 'berryagent',
+    tier,
+    since: '1.0',
+    formFactors: ['standalone'],
+    ...extra,
+  });
+  it('登记日变更史小节呈现 re-tiered + api-deprecate 指引（不入 changed 无 DEP 假 MAJOR）', () => {
+    const dep = {
+      dep: 'DEP-001',
+      symbol: 'berryagent::Old',
+      introducedIn: '1.1',
+      removalIn: '1.3',
+      replacement: 'New',
+    };
+    const oldDep = { dep: 'DEP-001', removalIn: '1.3', replacement: 'New' };
+    const text = renderCompatibility({
+      surface: {
+        apiVersion: '1.2',
+        exports: [e('New'), e('Old', 'deprecated', { deprecated: oldDep })],
+        capabilities: [],
+      },
+      deprecations: [dep],
+      snapshots: [
+        { version: '1.0.0', surface: { apiVersion: '1.0', exports: [e('Old')], capabilities: [] } },
+        {
+          version: '1.1.0',
+          surface: { apiVersion: '1.1', exports: [e('Old', 'deprecated', { deprecated: oldDep })], capabilities: [] },
+        },
+        // 宿主号漂前面号前方：release 1.30.0 而面号仍 1.2——此版把 Old 删了
+        // （死期 1.3 未到）：判级必须对照面号 → MAJOR；旧码传 release 号截断成
+        // 1.3 ≥ 1.3 会假判销账 MINOR（号域回归锁——§6.13.2 号独立演进）
+        {
+          version: '1.30.0',
+          surface: { apiVersion: '1.2', exports: [e('New')], capabilities: [] },
+        },
+      ],
+    });
+    // 登记日（1.1.0 小节）：旧实现误判 changed → 渲染「changed 无 DEP」假断
+    expect(text).not.toContain('无 DEP（判 MAJOR）');
+    expect(text).toContain('re-tiered');
+    expect(text).toContain('api-deprecate:');
+    expect(text).toContain('DEP 登记');
+    // DEP 节死期状态用面号对照（面号 1.2 < removalIn 1.3 = 窗口内）
+    expect(text).toContain('窗口内');
+    // 1.30.0 小节：窗口未走完的删除断 MAJOR、不得进销账行
+    expect(text).toContain('removed 无 DEP（判 MAJOR');
+    expect(text).not.toContain('DEP-001 销账');
+  });
+});
+
+describe('api-surface.json：formFactors 规范形锁（集合语义——书写序不渗入快照字节）', () => {
+  it('提交位快照每条目 formFactors 升序（键表数组重排不构成面 diff 的机器面）', () => {
+    // 抽取器落快照统一走排序拷贝——本锁读提交位快照：抽取器回归（再生成产乱序）
+    // → 快照漂移被查 1 抓的同时本锁红，双保险
+    const surface = JSON.parse(readFileSync(join(ROOT, 'src/contracts/api-surface.json'), 'utf8'));
+    /** 乱序条目名清单（exports 与 capabilities 两半） */
+    const offenders = [
+      ...surface.exports
+        .filter((x) => JSON.stringify(x.formFactors) !== JSON.stringify([...x.formFactors].sort()))
+        .map((x) => x.symbol),
+      ...surface.capabilities
+        .filter((x) => JSON.stringify(x.formFactors) !== JSON.stringify([...x.formFactors].sort()))
+        .map((x) => `cap:${x.name}`),
+    ];
+    expect(offenders).toEqual([]);
   });
 });
 

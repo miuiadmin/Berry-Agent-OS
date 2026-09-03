@@ -52,9 +52,6 @@ const { compareApiVersions } = await imp('../src/contracts/api.ts');
  */
 const keyOf = (entry) => `${entry.module}::${entry.symbol}`;
 
-/** semver 版本号 → apiVersion 两段形（1.2.3 → 1.2——判级对照 removalIn 用） */
-const apiVersionOf = (semver) => semver.split('.').slice(0, 2).join('.');
-
 /**
  * semver 三段比较（归档族排序专用——release 号全集是 semver 形，导出供
  * release 子步 3.5 与排序单测复用）。字典序两大陷阱在此修正：
@@ -67,8 +64,9 @@ const apiVersionOf = (semver) => semver.split('.').slice(0, 2).join('.');
 export function compareSemver(a, b) {
   const parse = (v) => {
     const m = /^(\d+)\.(\d+)\.(\d+)(?:-([\w.-]+))?$/.exec(v);
-    // 非法形态沉底（归档文件名应恒 semver，此支只是防御性兜底）
-    if (m === null) return { core: [-1, -1, -1], pre: '' };
+    // 非法形态沉底（排最末 = 最新位，变更史尾节人眼常扫处可见；归档文件名应恒
+    // semver，此支纯防御。MAX_SAFE_INTEGER 而非 -1：-1 会排最前被夹进远古史里隐形）
+    if (m === null) return { core: [Number.MAX_SAFE_INTEGER, 0, 0], pre: null };
     return { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ?? null };
   };
   const pa = parse(a);
@@ -117,8 +115,11 @@ export function loadArchivedSnapshots(dir = SNAPSHOTS_DIR) {
 }
 
 /**
- * 两版面 diff 分类（§6.13.6 四类）。changed = 除 tier 外字段有变（形状/语义变）；
- * re-tiered = 仅 tier 变（稳定性重标定非形状变更）。
+ * 两版面 diff 分类（§6.13.6 四类）。changed = 除 tier/deprecated 外字段有变
+ * （形状/语义变）；re-tiered = 仅 tier 变（含 DEP 登记日 tier→deprecated 与
+ * 撤销日 deprecated→原级——治理动作非形状变更，走 api-deprecate: 裁决类）；
+ * deprecated 载荷-only 调整（如 replacement 文案润色）不入任何桶——治理记录
+ * 从 DEP 真册渲染（DEP 节天然反映），不构成面形变更。
  * @param {object} prev 上一版面快照
  * @param {object} curr 当前面快照
  */
@@ -135,8 +136,10 @@ export function classifyFaceDiff(prev, curr) {
       continue;
     }
     const old = prevMap.get(key);
-    const { tier: oldTier, ...oldRest } = old;
-    const { tier, ...rest } = entry;
+    // 剥 tier + deprecated 两键再比——DEP 登记日（tier 变 + 载荷挂上）与撤销日
+    // （载荷消失）都只剩 tier 差异 → re-tiered 桶；载荷-only 桶差为零 → 无面变
+    const { tier: oldTier, deprecated: _oldDep, ...oldRest } = old;
+    const { tier, deprecated: _dep, ...rest } = entry;
     if (JSON.stringify(oldRest) !== JSON.stringify(rest)) changed.push(key);
     else if (oldTier !== tier) reTiered.push({ key, from: oldTier, to: tier });
   }
@@ -153,23 +156,25 @@ export function classifyFaceDiff(prev, curr) {
 
 /**
  * 判级携 DEP 语境（§6.13.6 冷读 M1——机器判级认登记不认动机）。导出供
- * generate-compatibility.test.mjs 直锁判级语义（sanctioned/MAJOR 分桶）。
- * removed/changed 且有生效 DEP、removalIn 已到（该版 apiVersion ≥ removalIn）=
+ * check-api.test.mjs 直锁判级语义（sanctioned/MAJOR 分桶）。
+ * removed/changed 且有生效 DEP、死期已到（该版**面号** apiVersion ≥ removalIn）=
  * sanctioned 销账类 MINOR；无 DEP = MAJOR；added = MINOR。
+ * 号域纪律：removalIn 注册即面号域（apiVersion 两段形 1.2，§6.13.2 号独立
+ * 演进）——判级对照必须用面号，禁传宿主 release 号（semver 三段，宿主号可
+ * 漂移在面号前方——截断比对会假判死期已到）。
  * @param {string[]} keys 变更坐标清单
  * @param {'removed'|'changed'} kind 变更类
  * @param {Array<{ symbol: string; dep: string; removalIn: string }>} deprecations DEP 注册簿
- * @param {string} version 该版 release 号（semver——取 MAJOR.MINOR 对照 removalIn）
+ * @param {string} apiVersion 该版面号（两段形——调用方传 cur.surface.apiVersion）
  */
-export function judgeBreakages(keys, kind, deprecations, version) {
-  const apiV = apiVersionOf(version);
+export function judgeBreakages(keys, kind, deprecations, apiVersion) {
   const bySymbol = new Map(deprecations.map((d) => [d.symbol, d]));
   /** @type {Array<{ key: string; dep: string }>} */ const sanctioned = [];
   /** @type {string[]} */ const major = [];
   for (const key of keys) {
     const reg = bySymbol.get(key);
     // 生效判据 = DEP 在册且死期已到（窗口走完的销账删除/改形才是 sanctioned）
-    if (reg !== undefined && compareApiVersions(apiV, reg.removalIn) >= 0) sanctioned.push({ key, dep: reg.dep });
+    if (reg !== undefined && compareApiVersions(apiVersion, reg.removalIn) >= 0) sanctioned.push({ key, dep: reg.dep });
     else major.push(key);
   }
   return { kind, sanctioned, major };
@@ -250,7 +255,7 @@ export function renderCompatibility({ surface, deprecations, snapshots }) {
       lines.push('');
       continue;
     }
-    renderDiffSection(lines, classifyFaceDiff(prev.surface, cur.surface), cur.version, deprecations);
+    renderDiffSection(lines, classifyFaceDiff(prev.surface, cur.surface), cur.surface.apiVersion, deprecations);
   }
   // 未发布面变更预告节（面快照 vs 最新归档——判级待下版归档）
   const latest = snapshots[snapshots.length - 1];
@@ -293,10 +298,11 @@ export function renderCompatibility({ surface, deprecations, snapshots }) {
  * 渲染单版 diff 小节（判级携 DEP 语境——sanctioned 销账单列、无 DEP 断 MAJOR）。
  * @param {string[]} lines 输出行缓冲
  * @param {ReturnType<typeof classifyFaceDiff>} diff
- * @param {string} version 该版 release 号
+ * @param {string} apiVersion 该版面号（两段形——判级对照 removalIn 用面号域，
+ *   非归档文件名里的宿主 release 号；号域纪律见 judgeBreakages 注释）
  * @param {Array<object>} deprecations DEP 注册簿
  */
-function renderDiffSection(lines, diff, version, deprecations) {
+function renderDiffSection(lines, diff, apiVersion, deprecations) {
   const empty =
     diff.added.length + diff.removed.length + diff.changed.length + diff.reTiered.length === 0 &&
     !diff.capabilitiesChanged;
@@ -305,8 +311,8 @@ function renderDiffSection(lines, diff, version, deprecations) {
     lines.push('');
     return;
   }
-  const removed = judgeBreakages(diff.removed, 'removed', deprecations, version);
-  const changed = judgeBreakages(diff.changed, 'changed', deprecations, version);
+  const removed = judgeBreakages(diff.removed, 'removed', deprecations, apiVersion);
+  const changed = judgeBreakages(diff.changed, 'changed', deprecations, apiVersion);
   if (diff.added.length > 0) {
     lines.push(
       `- **added（判 MINOR / \`api-add:\`）** ${diff.added.length} 项：${diff.added.map((k) => `\`${k}\``).join('、')}`,

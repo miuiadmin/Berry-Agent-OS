@@ -7,9 +7,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -18,9 +18,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -29,9 +29,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -40,9 +40,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -51,9 +51,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -62,9 +62,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -73,9 +73,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -84,9 +84,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -95,9 +95,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -106,9 +106,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -117,9 +117,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -128,9 +128,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -139,9 +139,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -150,9 +150,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -161,9 +161,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -172,9 +172,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -183,9 +183,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -194,9 +194,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -205,9 +205,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -216,9 +216,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -227,9 +227,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -238,9 +238,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -249,9 +249,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -260,9 +260,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -271,9 +271,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -282,9 +282,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -293,9 +293,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -304,9 +304,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -315,9 +315,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -326,9 +326,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -337,9 +337,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -348,9 +348,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -359,9 +359,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -370,9 +370,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -381,9 +381,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -392,9 +392,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -403,9 +403,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -414,9 +414,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -425,9 +425,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -436,9 +436,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -447,9 +447,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -458,9 +458,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -469,9 +469,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -480,9 +480,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -491,9 +491,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -502,9 +502,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -513,9 +513,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -524,9 +524,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -535,9 +535,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -546,9 +546,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -557,9 +557,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -568,9 +568,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -579,9 +579,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -590,9 +590,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -601,9 +601,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -612,9 +612,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -623,9 +623,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -634,9 +634,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -645,9 +645,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -656,9 +656,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -667,9 +667,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -678,9 +678,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -689,9 +689,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -700,9 +700,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -711,9 +711,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -722,9 +722,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -733,9 +733,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -744,9 +744,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -755,9 +755,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -766,9 +766,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -777,9 +777,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -788,9 +788,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -799,9 +799,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -810,9 +810,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -821,9 +821,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -832,9 +832,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -843,9 +843,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -854,9 +854,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -865,9 +865,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -876,9 +876,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -887,9 +887,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -898,9 +898,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -909,9 +909,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -920,9 +920,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -931,9 +931,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -942,9 +942,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -953,9 +953,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -964,9 +964,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -975,9 +975,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -986,9 +986,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -997,9 +997,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1008,9 +1008,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1019,9 +1019,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1030,9 +1030,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1041,9 +1041,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1052,9 +1052,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1063,9 +1063,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1074,9 +1074,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1085,9 +1085,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1096,9 +1096,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1107,9 +1107,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1118,9 +1118,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1129,9 +1129,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1140,9 +1140,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1151,9 +1151,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1162,9 +1162,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1173,9 +1173,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1184,9 +1184,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1195,9 +1195,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1206,9 +1206,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1217,9 +1217,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1228,9 +1228,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1239,9 +1239,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1250,9 +1250,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1261,9 +1261,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1272,9 +1272,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1283,9 +1283,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1294,9 +1294,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1305,9 +1305,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1316,9 +1316,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1327,9 +1327,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1338,9 +1338,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1349,9 +1349,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1360,9 +1360,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1371,9 +1371,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1382,9 +1382,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1393,9 +1393,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1404,9 +1404,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1415,9 +1415,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1426,9 +1426,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1437,9 +1437,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1448,9 +1448,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1459,9 +1459,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1470,9 +1470,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1481,9 +1481,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1492,9 +1492,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1503,9 +1503,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1514,9 +1514,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1525,9 +1525,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1536,9 +1536,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1547,9 +1547,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1558,9 +1558,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1569,9 +1569,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1580,9 +1580,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1591,9 +1591,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1602,9 +1602,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1613,9 +1613,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1624,9 +1624,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1635,9 +1635,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1646,9 +1646,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1657,9 +1657,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1668,9 +1668,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1679,9 +1679,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1690,9 +1690,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1701,9 +1701,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1712,9 +1712,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1723,9 +1723,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1734,9 +1734,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1745,9 +1745,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1756,9 +1756,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1767,9 +1767,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1778,9 +1778,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1789,9 +1789,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1800,9 +1800,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1811,9 +1811,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1822,9 +1822,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1833,9 +1833,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1844,9 +1844,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1855,9 +1855,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1866,9 +1866,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1877,9 +1877,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1888,9 +1888,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1899,9 +1899,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1910,9 +1910,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1921,9 +1921,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1932,9 +1932,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1943,9 +1943,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1954,9 +1954,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1965,9 +1965,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1976,9 +1976,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1987,9 +1987,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -1998,9 +1998,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2009,9 +2009,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2020,9 +2020,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2031,9 +2031,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2042,9 +2042,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2053,9 +2053,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2064,9 +2064,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2075,9 +2075,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2086,9 +2086,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2097,9 +2097,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2108,9 +2108,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2119,9 +2119,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2130,9 +2130,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2141,9 +2141,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2152,9 +2152,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2163,9 +2163,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2174,9 +2174,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2185,9 +2185,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2196,9 +2196,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2207,9 +2207,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2218,9 +2218,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2229,9 +2229,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2240,9 +2240,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2251,9 +2251,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2262,9 +2262,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2273,9 +2273,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2284,9 +2284,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2295,9 +2295,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2306,9 +2306,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2317,9 +2317,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2328,9 +2328,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2339,9 +2339,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2350,9 +2350,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2361,9 +2361,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2372,9 +2372,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2383,9 +2383,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2394,9 +2394,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2405,9 +2405,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2416,9 +2416,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2427,9 +2427,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2438,9 +2438,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2449,9 +2449,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2460,9 +2460,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2471,9 +2471,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2482,9 +2482,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2493,9 +2493,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2504,9 +2504,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2515,9 +2515,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2526,9 +2526,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2537,9 +2537,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2548,9 +2548,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2559,9 +2559,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2570,9 +2570,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2581,9 +2581,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2592,9 +2592,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2603,9 +2603,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ],
       "forwarded": true
     },
@@ -2615,9 +2615,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2626,9 +2626,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2637,9 +2637,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2648,9 +2648,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ],
       "forwarded": true
     },
@@ -2660,9 +2660,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2671,9 +2671,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2682,9 +2682,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2693,9 +2693,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2704,9 +2704,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2715,9 +2715,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2726,9 +2726,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2737,9 +2737,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2748,9 +2748,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2759,9 +2759,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2770,9 +2770,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2781,9 +2781,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2792,9 +2792,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2803,9 +2803,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2814,9 +2814,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2825,9 +2825,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2836,9 +2836,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2847,9 +2847,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2858,9 +2858,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2869,9 +2869,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2880,9 +2880,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2891,9 +2891,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2902,9 +2902,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2913,9 +2913,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2924,9 +2924,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2935,9 +2935,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2946,9 +2946,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2957,9 +2957,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2968,9 +2968,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2979,9 +2979,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -2990,9 +2990,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3001,9 +3001,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3012,9 +3012,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3023,9 +3023,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3034,9 +3034,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3045,9 +3045,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3056,9 +3056,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3067,9 +3067,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3078,9 +3078,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3089,9 +3089,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3100,9 +3100,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3111,9 +3111,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3122,9 +3122,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3133,9 +3133,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3144,9 +3144,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3155,9 +3155,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3166,9 +3166,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3177,9 +3177,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3188,9 +3188,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3199,9 +3199,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3210,9 +3210,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3221,9 +3221,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3232,9 +3232,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3243,9 +3243,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3254,9 +3254,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3265,9 +3265,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3276,9 +3276,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3287,9 +3287,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3298,9 +3298,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3309,9 +3309,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3320,9 +3320,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3331,9 +3331,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3342,9 +3342,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3353,9 +3353,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3364,9 +3364,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3375,9 +3375,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3386,9 +3386,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3397,9 +3397,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3408,9 +3408,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3419,9 +3419,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3430,9 +3430,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3441,9 +3441,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3452,9 +3452,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3463,9 +3463,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3474,9 +3474,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3485,9 +3485,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3496,9 +3496,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3507,9 +3507,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3518,9 +3518,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3529,9 +3529,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3540,9 +3540,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3551,9 +3551,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3562,9 +3562,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3573,9 +3573,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3584,9 +3584,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3595,9 +3595,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3606,9 +3606,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3617,9 +3617,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3628,9 +3628,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3639,9 +3639,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3650,9 +3650,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3661,9 +3661,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3672,9 +3672,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3683,9 +3683,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3694,9 +3694,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3705,9 +3705,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3716,9 +3716,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3727,9 +3727,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3738,9 +3738,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3749,9 +3749,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3760,9 +3760,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3771,9 +3771,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3782,9 +3782,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3793,9 +3793,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3804,9 +3804,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3815,9 +3815,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3826,9 +3826,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3837,9 +3837,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3848,9 +3848,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3859,9 +3859,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3870,9 +3870,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3881,9 +3881,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3892,9 +3892,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3903,9 +3903,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3914,9 +3914,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3925,9 +3925,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3936,9 +3936,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3947,9 +3947,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3958,9 +3958,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3969,9 +3969,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3980,9 +3980,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -3991,9 +3991,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -4002,9 +4002,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ]
     },
     {
@@ -4013,9 +4013,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ],
       "forwarded": true
     },
@@ -4025,9 +4025,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ],
       "forwarded": true
     },
@@ -4037,9 +4037,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ],
       "forwarded": true
     },
@@ -4049,9 +4049,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ],
       "forwarded": true
     },
@@ -4061,9 +4061,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ],
       "forwarded": true
     },
@@ -4073,9 +4073,9 @@
       "tier": "stable",
       "since": "1.0",
       "formFactors": [
-        "standalone",
         "daemon",
-        "server"
+        "server",
+        "standalone"
       ],
       "forwarded": true
     }
@@ -4084,112 +4084,112 @@
     {
       "name": "admin.apps",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:admin"
     },
     {
       "name": "browser.automation",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:browser"
     },
     {
       "name": "channels.multi",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:channels"
     },
     {
       "name": "checkpoint.rewind",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:checkpoint"
     },
     {
       "name": "compaction.longSession",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:compaction"
     },
     {
       "name": "goal.autopilot",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:goal"
     },
     {
       "name": "lsp.bridge",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:lsp"
     },
     {
       "name": "mcp.bridge",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:mcp"
     },
     {
       "name": "memory.store",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:memory"
     },
     {
       "name": "obs.metrics",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:obs"
     },
     {
       "name": "scheduler.tick",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:scheduler"
     },
     {
       "name": "subagent.delegate",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:subagent"
     },
     {
       "name": "web.channel",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:webui"
     },
     {
       "name": "web.fetch",
       "formFactors": [
-        "standalone",
-        "daemon"
+        "daemon",
+        "standalone"
       ],
       "providedBy": "builtin:web"
     }

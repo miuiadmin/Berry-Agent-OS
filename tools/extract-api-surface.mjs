@@ -252,6 +252,10 @@ export async function extractSurface() {
     return e;
   };
   const ALL_FF = ['standalone', 'daemon', 'server'];
+  // 形态集规范化拷贝（升序）：formFactors 是集合语义，api.ts 键表里的数组书写
+  // 序不得渗进快照字节——否则键表重排 = 假面 diff → PR 闸第二刀假红（快照变而
+  // 渲染面全序不变）。所有落快照点统一走本拷贝。
+  const ff = (list) => [...list].sort();
 
   // —— #1a：berryagent 键（token 扫描 + jiti 值面自检）——
   const barrelSymbols = collectBarrelSymbols();
@@ -268,7 +272,7 @@ export async function extractSurface() {
     module: 'berryagent',
     tier: berryKey.tier,
     since: berryKey.since,
-    formFactors: [...berryKey.formFactors],
+    formFactors: ff(berryKey.formFactors),
     ...(s.forwarded ? { forwarded: true } : {}),
   }));
 
@@ -289,7 +293,7 @@ export async function extractSurface() {
       module: key,
       tier: e.tier,
       since: e.since,
-      formFactors: [...e.formFactors],
+      formFactors: ff(e.formFactors),
       forwarded: true,
     });
   }
@@ -305,7 +309,7 @@ export async function extractSurface() {
       module: 'berryagent/llm',
       tier: llmKey.tier,
       since: llmKey.since,
-      formFactors: [...llmKey.formFactors],
+      formFactors: ff(llmKey.formFactors),
     });
   }
 
@@ -319,7 +323,7 @@ export async function extractSurface() {
       module: 'berryagent/sqlite',
       tier: sqliteKey.tier,
       since: sqliteKey.since,
-      formFactors: [...sqliteKey.formFactors],
+      formFactors: ff(sqliteKey.formFactors),
     });
   }
 
@@ -330,7 +334,7 @@ export async function extractSurface() {
       module: 'services',
       tier: entry.tier,
       since: '1.0',
-      formFactors: [...ALL_FF],
+      formFactors: ff(ALL_FF),
     });
   }
 
@@ -344,7 +348,7 @@ export async function extractSurface() {
       module: 'live-events',
       tier: def.tier,
       since: '1.0',
-      formFactors: [...ALL_FF],
+      formFactors: ff(ALL_FF),
     });
   }
 
@@ -364,7 +368,7 @@ export async function extractSurface() {
       module: 'session-events',
       tier: def.tier,
       since: '1.0',
-      formFactors: [...ALL_FF],
+      formFactors: ff(ALL_FF),
     });
   }
 
@@ -376,7 +380,7 @@ export async function extractSurface() {
       module: 'manifest',
       tier: entry.tier,
       since: '1.0',
-      formFactors: [...ALL_FF],
+      formFactors: ff(ALL_FF),
     });
   }
 
@@ -387,14 +391,14 @@ export async function extractSurface() {
       module: 'data-keys',
       tier: entry.tier,
       since: '1.0',
-      formFactors: [...ALL_FF],
+      formFactors: ff(ALL_FF),
     });
   }
 
   // —— 能力面（顶层 capabilities[]——§6.13.5 ctx.host 派生源）——
   const capabilities = CAPABILITIES.map((c) => ({
     name: c.name,
-    formFactors: [...c.formFactors],
+    formFactors: ff(c.formFactors),
     providedBy: c.providedBy,
   })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 

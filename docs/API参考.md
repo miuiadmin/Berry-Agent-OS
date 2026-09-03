@@ -427,17 +427,17 @@
 
 能力 = 件显式声明的语义单位（`ctx.host.capabilities` 派生源；server 形装载器按此拒载要求缺席能力的应用）。
 
-- `admin.apps` — builtin:admin，standalone / daemon
-- `browser.automation` — builtin:browser，standalone / daemon
-- `channels.multi` — builtin:channels，standalone / daemon
-- `checkpoint.rewind` — builtin:checkpoint，standalone / daemon
-- `compaction.longSession` — builtin:compaction，standalone / daemon
-- `goal.autopilot` — builtin:goal，standalone / daemon
-- `lsp.bridge` — builtin:lsp，standalone / daemon
-- `mcp.bridge` — builtin:mcp，standalone / daemon
-- `memory.store` — builtin:memory，standalone / daemon
-- `obs.metrics` — builtin:obs，standalone / daemon
-- `scheduler.tick` — builtin:scheduler，standalone / daemon
-- `subagent.delegate` — builtin:subagent，standalone / daemon
-- `web.channel` — builtin:webui，standalone / daemon
-- `web.fetch` — builtin:web，standalone / daemon
+- `admin.apps` — builtin:admin，daemon / standalone
+- `browser.automation` — builtin:browser，daemon / standalone
+- `channels.multi` — builtin:channels，daemon / standalone
+- `checkpoint.rewind` — builtin:checkpoint，daemon / standalone
+- `compaction.longSession` — builtin:compaction，daemon / standalone
+- `goal.autopilot` — builtin:goal，daemon / standalone
+- `lsp.bridge` — builtin:lsp，daemon / standalone
+- `mcp.bridge` — builtin:mcp，daemon / standalone
+- `memory.store` — builtin:memory，daemon / standalone
+- `obs.metrics` — builtin:obs，daemon / standalone
+- `scheduler.tick` — builtin:scheduler，daemon / standalone
+- `subagent.delegate` — builtin:subagent，daemon / standalone
+- `web.channel` — builtin:webui，daemon / standalone
+- `web.fetch` — builtin:web，daemon / standalone
