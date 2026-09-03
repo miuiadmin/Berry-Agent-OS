@@ -9,15 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { registerHostMessageRole } from '../contracts/messages.js';
 import type { AgentMessage, CustomMessage } from '../contracts/messages.js';
 import type { AssistantMessage, ToolResultMessage, UserMessage } from '../contracts/llm.js';
-import {
-  assistantText,
-  assistantToolLines,
-  formatToolEnd,
-  formatToolStart,
-  joinTextContent,
-  renderAgentMessage,
-  truncate,
-} from './render.js';
+import { assistantText, assistantToolLines, joinTextContent, renderAgentMessage, truncate } from './render.js';
 import type { RendererDefinition } from './types.js';
 
 /* ---------------- 测试消息工厂 ---------------- */
@@ -90,18 +82,10 @@ describe('assistantText / assistantToolLines', () => {
   });
 });
 
-describe('formatToolStart / formatToolEnd', () => {
-  it('开始行 = ⚙ 名 + 参数摘要', () => {
-    expect(formatToolStart('fs.read', { path: '/tmp/x' })).toBe('⚙ fs.read {"path":"/tmp/x"}');
-  });
-
-  it('结束行 = ↳/✖ + 首行文本摘要；空结果只有符号', () => {
-    const result = { content: [{ type: 'text' as const, text: '第一行\n第二行' }] };
-    expect(formatToolEnd(result, false)).toBe('↳ 第一行');
-    expect(formatToolEnd(result, true)).toBe('✖ 第一行');
-    expect(formatToolEnd({ content: [] }, false)).toBe('↳');
-  });
-});
+// formatToolStart/formatToolEnd 旧形态两函数 20260901-d #5 单源定稿后零生产
+// 消费者，第十轮 TUI 专项扫雷 TUI-6 连同本 describe 与 index.ts 再导出收册删除
+//（工具行现行单源：⚙ = assistantToolLines、↳/✖ = renderToolResult——上方
+// assistantToolLines 与下方 renderAgentMessage toolResult 用例即现行行为锁）。
 
 /* ---------------- 总入口 ---------------- */
 

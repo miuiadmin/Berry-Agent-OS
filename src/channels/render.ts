@@ -9,7 +9,6 @@
 
 import type { AgentMessage } from '../contracts/messages.js';
 import { getMessageRoleDefinition, isStandardMessage } from '../contracts/messages.js';
-import type { AgentToolResult } from '../contracts/tools.js';
 import type { AssistantMessage, ImageContent, TextContent, ToolResultMessage, UserMessage } from '../contracts/llm.js';
 import type { RendererDefinition } from './types.js';
 
@@ -53,17 +52,10 @@ export function assistantErrorLine(message: AssistantMessage): string[] {
   return message.errorMessage !== undefined ? [`✖ [错误] ${truncate(message.errorMessage)}`] : [];
 }
 
-/** 工具执行开始行 */
-export function formatToolStart(toolName: string, args: Record<string, unknown>): string {
-  return `⚙ ${toolName} ${truncate(JSON.stringify(args))}`;
-}
-
-/** 工具执行结束行（ok / error 前缀 + 首段文本摘要） */
-export function formatToolEnd(result: AgentToolResult, isError: boolean): string {
-  const brief = truncate(joinTextContent(result.content).trim().split('\n')[0] ?? '');
-  const mark = isError ? '✖' : '↳';
-  return brief ? `${mark} ${brief}` : mark;
-}
+// 工具行渲染单源（20260901-d #5）：直播 ⚙ 行走 assistantToolLines（随
+// message_end）、↳/✖ 行走 renderToolResult（随 toolResult message_start）——
+// 原 formatToolStart/formatToolEnd 两旧形态函数自单源定稿后零生产消费者，
+// 第十轮 TUI 专项扫雷 TUI-6 连同测试与再导出一并收册删除。
 
 /** 内置 user 消息行（❯ 前缀；多行保持） */
 function renderUser(message: UserMessage): string[] {

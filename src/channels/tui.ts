@@ -1,11 +1,14 @@
 /**
  * L4 channels — TUI 通道（技术栈篇 §4.1 M1 首发通道）。
  *
- * pi-tui 差分渲染组件库装配的终端全屏对话界面：消息流（ScrollView
- * follow-end）+ 状态行 + 输入框（Editor）+ 快捷键提示行。通道契约
- * （内核篇 #14）：handle() 消费 loop 活体事件（app 组合根把 AgentEventSink
- * 接到这里）、renderHistory() 拉投影（app 注入回调）——本通道不 import
- * loop/session 实现，拔掉后对话照跑。
+ * pi-tui 组件库装配的终端全屏对话界面：消息流 + 状态行 + 输入框（Editor）+
+ * 快捷键提示行——TuiMainScreen 主屏**线性渲染**（四组件直挂 tui 树），超屏
+ * 内容由终端原生 scrollback 承载、视口底部锚定（编辑器/页脚恒可见；第十轮
+ * TUI 专项扫雷 TUI-3 收正——原「ScrollView follow-end / 布局根差分」注释描述
+ * 的是生产永不命中的 alt-screen 分支，死对象已删）。通道契约（内核篇 #14）：
+ * handle() 消费 loop 活体事件（app 组合根把 AgentEventSink 接到这里）、历史
+ * 拉投影经 opts.history() 闭包（repaint 重画与 start 起屏共用——本通道不
+ * import loop/session 实现，拔掉后对话照跑）。
  *
  * 阻塞式交互（confirm/input）经提问队列占用输入框（prompt 模式）；select
  * 不支持——由 ctx.ui 聚合器降级为 input（§4.3 降级规则）。壳薄逻辑少：
@@ -16,14 +19,11 @@ import {
   CombinedAutocompleteProvider,
   Container,
   Editor,
-  ScrollView,
   Text,
   TuiMainScreen,
-  VStack,
   matchesKey,
   parseKey,
   type AutocompleteProvider,
-  type Component,
   type EditorTheme,
   type SlashCommand,
   type Terminal,
@@ -135,8 +135,6 @@ export interface TuiChannel {
    * entryStatus 设定。undefined = 无聚焦（防御位：空历史 + 状态行清）。
    */
   repaint(sessionId: string | undefined): void;
-  /** 启动时渲染历史投影（拉投影经注入回调——通道不依赖 session） */
-  renderHistory(messages: readonly AgentMessage[]): void;
   /** 本通道的 UI 后端（接 ctx.ui 聚合器 attach） */
   ui(): UiBackend;
   /** 起屏（装配完再调；接管终端输入）。停屏后复起（批 C 桌面换防）不重拉历史——组件树保连续，强制全量重画 */
@@ -221,10 +219,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   /** 起屏旗标（批 C 桌面换防）：首起拉历史投影，停屏后复起只全量重画不重拉 */
   let screenStarted = false;
 
-  /* ---- 组件树：消息流（滚动跟随）/ 状态行 / 输入框 / 提示行 ---- */
-  /** 消息流内容（逐条 append Text；ScrollView 跟随末端） */
+  /* ---- 组件树：消息流 / 状态行 / 输入框 / 提示行（四组件直挂 tui 线性树） ---- */
+  /** 消息流内容（逐条 append Text；超屏走终端原生 scrollback——TuiMainScreen 主屏无自有滚动面） */
   const messages = new Container();
-  const scrollView = new ScrollView(messages, { follow: 'end', primary: true });
   /** 状态行（setStatus 更新；空串 = 空） */
   const statusText = new Text('');
   const editor = new Editor(tui, EDITOR_THEME);
@@ -310,20 +307,13 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     tui.requestRender();
   };
 
-  const layoutRoot = new VStack([
-    { component: scrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
-    { component: statusText, basis: 'auto', grow: 0, shrink: 1, minSize: 0 },
-    { component: editorContainer, basis: 'auto', grow: 0, shrink: 1, minSize: 3 },
-    { component: footerText, basis: 'auto', grow: 0, shrink: 1, minSize: 1 },
-  ]);
+  // 四组件直挂 tui 线性树（TuiMainScreen 主屏逐行写出、原生 scrollback 底部
+  // 锚定——TUI-3 收正：原 VStack 布局根 + setLayoutRoot 条件安装是 alt-screen
+  // 分支的死对象〔'setLayoutRoot' in tui 恒 false〕，连同假注释一并删除）
   tui.addChild(messages);
   tui.addChild(statusText);
   tui.addChild(editorContainer);
   tui.addChild(footerText);
-  // 布局根接管排布（组件仍挂 tui 树上；差分渲染走 ScrollView）
-  if ('setLayoutRoot' in tui) {
-    (tui as { setLayoutRoot(component: Component | undefined): void }).setLayoutRoot(layoutRoot);
-  }
 
   /* ---- 展示原语 ---- */
 
@@ -585,9 +575,6 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     handle,
     handleActivity,
     repaint,
-    renderHistory(history) {
-      for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
-    },
     ui() {
       return backend;
     },
