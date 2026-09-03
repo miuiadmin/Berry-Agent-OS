@@ -14,6 +14,7 @@ import type { LlmRetryData } from '../session/event-types.js';
 // append goal/evidence（测试豁免模块 DAG，跨模块导入合法；本导入轻量只触注册面）
 import '../goal/events.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
+import { chainBackground } from '../context/chain.js';
 import {
   ConversationDriver,
   resolveWakeToolAllowList,
@@ -244,6 +245,175 @@ describe('ConversationDriver 刀四 submitOnce 投递面（挂钟投递口）', 
     const revived = driver.deliver({ role: 'user', content: '预算恢复后唤醒', timestamp: 5 }, { backgroundWake: true });
     expect(revived).toBe('followUp');
     await driver.settle();
+  });
+});
+
+/* ---------------- 刀 B：批消费位记账与 run 身份重定型（第九轮全面复盘 20260903 #4/#9） ---------------- */
+
+describe('ConversationDriver 刀 B 批消费位语义（忙会话自激链判帽 + 身份逐批判型）', () => {
+  /**
+   * 脚本模型层装配（刀 B 红锁用）：每次模型调用回调侧写——测试在回调里投递
+   * 在飞消息（steer 形态，子代理结算通知同款时点）/观察链旗，事件形状与
+   * recordingStream 同款（真驱动 + 真 loop 全链，模型层替身）。
+   */
+  function makeScriptedDriver(
+    onCall: (call: number, driver: ConversationDriver) => void,
+    overrides: Partial<ConversationDriverDeps> = {},
+  ) {
+    let calls = 0;
+    const contexts: LlmContext[] = [];
+    let driverRef!: ConversationDriver;
+    const streamFn: StreamFn = (context: LlmContext, _options: StreamFnOptions) => {
+      contexts.push(context);
+      calls += 1;
+      onCall(calls, driverRef);
+      const message: AssistantMessage = {
+        role: 'assistant',
+        content: [{ type: 'text', text: '答' }],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+        stopReason: 'stop',
+        timestamp: 1,
+      };
+      const events = [
+        { type: 'start' as const, partial: { ...message, content: [] } },
+        { type: 'done' as const, reason: 'stop' as const, message },
+      ];
+      const iterator = {
+        [Symbol.asyncIterator]() {
+          let index = 0;
+          return {
+            next: () =>
+              index < events.length
+                ? Promise.resolve({ value: events[index++]!, done: false as const })
+                : Promise.resolve({ value: undefined, done: true as const }),
+          };
+        },
+      };
+      return { ...iterator, result: async () => message };
+    };
+    driverRef = new ConversationDriver({
+      sessionId: 'test-session',
+      context: { messages: [] },
+      loopConfig: {
+        streamFn,
+        model: 'test/model',
+        // 最小合法转换（与 makeDriver 同款——模型层是脚本，不真消费）
+        convertToLlm: (messages) =>
+          messages.map((m) =>
+            m.role === 'user'
+              ? { role: 'user' as const, content: '', timestamp: 1 }
+              : {
+                  role: 'assistant' as const,
+                  content: [{ type: 'text' as const, text: '' }],
+                  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+                  stopReason: 'stop' as const,
+                  timestamp: 1,
+                },
+          ),
+      },
+      ...overrides,
+    });
+    return { driver: driverRef, contexts, getCalls: () => calls };
+  }
+
+  it('#4 忙会话自激链判帽：run 在飞期到达的 backgroundWake 在批消费位照计账——wake 驱动模型调用 ≤3 后整批降级 inject（与 idle 路同一本账）', async () => {
+    let wakesLeft = 10; // 投递帽（修复前该链无界：每 wake 驱动一模型调用再投下一条——探针同款 10 发封顶）
+    const { driver, contexts } = makeScriptedDriver((call, d) => {
+      // 每次模型调用在飞期投一条后台唤醒（子代理结算通知形态——notify.ts 常驻 busy-form 唤醒源）
+      if (wakesLeft > 0) {
+        wakesLeft -= 1;
+        d.deliver({ role: 'user', content: `wake-${call}`, timestamp: call }, { backgroundWake: true });
+      }
+    });
+    driver.submit('kick'); // 前台 kick（预算清零起点）
+    await driver.settle();
+    // kick(1) + 至多 3 个 wake 驱动模型调用；第 4 条 wake 起在消费位判帽降级 inject 只落账
+    expect(contexts.length).toBeLessThanOrEqual(4);
+    expect(contexts.length).toBeGreaterThanOrEqual(2); // 帽不是 0——wake 批前 3 条照跑
+    // 链停后 idle 投 wake：预算停在帽（3）→ inject 降级（忙会话链与 idle 链同一本账）
+    const after = driver.deliver({ role: 'user', content: '链后唤醒', timestamp: 99 }, { backgroundWake: true });
+    expect(after).toBe('inject');
+    await driver.settle();
+  });
+
+  it('#4 steer 清零：run 在飞期用户手写插话在批消费位恢复自激预算——后续 idle 唤醒重新可开轮', async () => {
+    const { driver, contexts } = makeScriptedDriver((call, d) => {
+      if (call === 3) d.submit('用户手写插话'); // 第 3 个 run 在飞期手写插话 → steer 入队
+    });
+    // 两次 idle 唤醒（预算 2）
+    driver.deliver({ role: 'user', content: 'w1', timestamp: 1 }, { backgroundWake: true });
+    await driver.settle();
+    driver.deliver({ role: 'user', content: 'w2', timestamp: 2 }, { backgroundWake: true });
+    await driver.settle();
+    expect(contexts.length).toBe(2);
+    // 第 3 个 run（idle 唤醒，预算 3 满）：在飞期手写插话 → 消费位清零预算 + 插话被捎跑
+    driver.deliver({ role: 'user', content: 'w3', timestamp: 3 }, { backgroundWake: true });
+    await driver.settle();
+    expect(contexts.length).toBeGreaterThanOrEqual(4); // w1/w2/w3 + 插话捎跑（轮或 run 形态均可）
+    // 第 4 次 idle 唤醒：预算已被用户手写恢复 → followUp（未恢复则 inject——修复前红位）
+    const revived = driver.deliver({ role: 'user', content: 'w4', timestamp: 4 }, { backgroundWake: true });
+    expect(revived).toBe('followUp');
+    await driver.settle();
+  });
+
+  it('#9 屏障逐批判型（steering 轮）：前台 run 在飞期到达的后台唤醒经 turn 边界注入——注入后模型步前 flush 生效（durability 屏障随批翻级）', async () => {
+    const flushed: string[] = [];
+    const { driver, contexts } = makeScriptedDriver(
+      (call, d) => {
+        if (call === 1) d.deliver({ role: 'user', content: '结算唤醒', timestamp: call }, { backgroundWake: true });
+      },
+      {
+        flushSession: async (sessionId) => {
+          flushed.push(sessionId);
+        },
+      },
+    );
+    driver.submit('前台 kick'); // 前台开跑批（identity=false）
+    await driver.settle();
+    expect(contexts.length).toBe(2); // kick + 唤醒注入后的模型步（同 run steering 轮）
+    // 唤醒批重定型 currentRunBackground=true → 该模型步前 flush（修复前恒 false → 0 次——屏障缺位红位）
+    expect(flushed.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('#9 身份重定型（followUp 轮）：结算通知时点入队的后台唤醒由 followUp 循环捎跑——屏障生效 + 调用链 background 以新批旗重包', async () => {
+    const flushed: string[] = [];
+    const chainBgs: boolean[] = [];
+    let notified = false;
+    const { driver, contexts } = makeScriptedDriver(
+      () => {
+        chainBgs.push(chainBackground()); // 流内取样链旗（launch/followUp 各写点的实际包裹面）
+      },
+      {
+        flushSession: async (sessionId) => {
+          flushed.push(sessionId);
+        },
+        // turn_stopping 派发位投递（run 在飞、loop 已退场——消息只能由 followUp 循环消费）
+        onTurnStopping: async () => {
+          if (notified) return;
+          notified = true;
+          driver.deliver({ role: 'user', content: '结算唤醒', timestamp: 1 }, { backgroundWake: true });
+        },
+      },
+    );
+    driver.submit('前台 kick');
+    await driver.settle();
+    expect(contexts.length).toBe(2); // kick + followUp 捎跑轮
+    // followUp 轮：本批全 wake → 身份重定型 + 调用链重包（修复前链旗/屏障都停留在开跑批的 false）
+    expect(chainBgs).toEqual([false, true]);
+    expect(flushed).toEqual(['test-session']); // 后台捎跑轮每模型步前恰一次
+  });
+
+  it('#9 归因不泄漏：goal 唤醒 run 在飞期用户手写插话 → 消费位重定型归因 undefined（用户轮不被归因进 goal 链——goal ③ 续跑判定读此值）', async () => {
+    const { driver, contexts } = makeScriptedDriver((call, d) => {
+      if (call === 1) d.submit('用户手写插话');
+    });
+    const attribution = { goalId: 'G1', wakeId: 'w1', wakePath: 'self' };
+    // goal 唤醒形态：idle 投递带归因的后台唤醒 → launch 定型 g1 → run 在飞期用户插话
+    driver.deliver({ role: 'user', content: 'goal 续跑', timestamp: 1, attribution }, { backgroundWake: true });
+    await driver.settle();
+    expect(contexts.length).toBe(2); // 唤醒轮 + 用户插话捎跑轮
+    // 末批（用户手写）结算后归因 = undefined——修复前仍 = g1（用户轮被归因进 goal 链）
+    expect(driver.currentAttribution).toBeUndefined();
   });
 });
 

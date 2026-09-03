@@ -289,13 +289,13 @@ export class ConversationDriver {
   private readonly flushFace: ((sessionId: string) => Promise<void>) | undefined;
   /** 进模型步前复验（刀三 T7-A——装配桥注入，缺省不复验直通） */
   private readonly onPreModelStep: (() => Promise<PreStepDecision | undefined>) | undefined;
-  /** 当前 run 是否后台批（launch 定型——durability 屏障只对后台 run 生效） */
+  /** 当前批是否后台批（launch/steering/followUp/恢复合流组批消费位逐批判型——durability 屏障只对后台批生效；刀 B #9） */
   private currentRunBackground = false;
   /**
-   * 当前 run 的轮归因（刀三轮身份，launch 定型）：开起批中最近的 user 消息
+   * 当前批的轮归因（刀三轮身份 + 刀 B #9 逐批判型）：批内最近的 user 消息
    * attribution（倒扫——多消息批以最后一条用户消息为准）；无归因批显式置
-   * undefined（跨 run 不泄漏）。run 结算后保留至下一次 launch——onRunSettled
-   * 订阅方（goal 件续跑判定）读的正是刚结算 run 的归因。
+   * undefined（跨 run 不泄漏——用户插话轮不被归因进 goal 链）。批结算后保留
+   * 至下一批判型——onRunSettled 订阅方（goal 件续跑判定）读的正是刚结算批的归因。
    */
   private wakeAttribution: Readonly<Record<string, string>> | undefined;
   /** 会话层重试策略（S4——缺省 enabled/3 次/1s 起） */
@@ -336,7 +336,23 @@ export class ConversationDriver {
         // 已 abort 的收尾窗内，turn 边界轮询空手而归——窗口期新入队消息不得被垂死
         // run 偷走（偷走即落账回显后永无应答），留给 followUp 循环换新控制器捎跑
         if (this.runAbort.signal.aborted) return [];
-        return this.transformBatch(this.consumeMeta(this.queue.drain()));
+        // steer 批消费位语义（刀 B #4/#9——第九轮全面复盘 20260903）：turn 边界
+        // 注入的批同款记账判帽 + 身份重定型——在飞到达的 backgroundWake（子代理
+        // 结算通知形态）经此计数，达帽整批降级 inject（本轮不再注入，run 自然
+        // 收场）；用户手写插话清零预算 + 归因复位（在场信号不因消费位在 run 内
+        // 而丢失）。链 background 不在此翻级：AsyncLocalStorage 由内向外翻结构性
+        // 不可行，链面（审批展示级分量）随 run 开起批（骨架篇 §9.3 写点条）。
+        const drained = this.queue.drain();
+        if (drained.length > 0) {
+          if (this.accountWakeBudget(drained)) {
+            for (const message of this.consumeMeta(drained)) this.inject(message);
+            return [];
+          }
+          const { background, attribution } = this.deriveBatchIdentity(drained);
+          this.currentRunBackground = background;
+          this.wakeAttribution = attribution;
+        }
+        return this.transformBatch(this.consumeMeta(drained));
       },
       getFollowUpMessages: async () => [],
       // 进模型步前屏障 + 复验（刀三）：durability 屏障只对后台 run 生效——前台
@@ -469,6 +485,62 @@ export class ConversationDriver {
   private consumeMeta(batch: readonly AgentMessage[]): AgentMessage[] {
     for (const message of batch) this.deliverMeta.delete(message);
     return [...batch];
+  }
+
+  /**
+   * 批身份派生（刀 B #9——launch 首批与组批消费位共用纯函数）：后台旗 = 批内
+   * 全 backgroundWake（元数据缺失视同用户消息，与 toolFilter 收窄同款批语义）；
+   * 归因 = 倒扫批内最近 user 消息 attribution（无归因批 undefined——防上一批
+   * 值泄漏进用户轮的 goal 归账）。
+   */
+  private deriveBatchIdentity(batch: readonly AgentMessage[]): {
+    background: boolean;
+    attribution: Readonly<Record<string, string>> | undefined;
+  } {
+    const background =
+      batch.length > 0 && batch.every((message) => this.deliverMeta.get(message)?.backgroundWake === true);
+    const attribution = [...batch]
+      .reverse()
+      .find(
+        (message): message is UserMessage =>
+          isStandardMessage(message) && message.role === 'user' && message.attribution !== undefined,
+      )?.attribution;
+    return { background, attribution };
+  }
+
+  /**
+   * 自激预算批记账（刀 B #4——组批消费位共用）：批内任一非 backgroundWake =
+   * 用户在场清零（steer 插话的在场信号不因消费位在 run 内而丢失）；纯 wake 批
+   * 先判帽后 +1（与 deliver idle 路同款「先判后计」——达帽停计，账停在帽上
+   * 持续降级直到用户恢复）。
+   * @returns 纯 wake 批达帽 true（调用方整批降级 inject——只落账不驱动模型）
+   */
+  private accountWakeBudget(batch: readonly AgentMessage[]): boolean {
+    const allWake = batch.every((message) => this.deliverMeta.get(message)?.backgroundWake === true);
+    if (!allWake) {
+      this.wakeCount = 0;
+      return false;
+    }
+    if (this.wakeCount >= ConversationDriver.MAX_CONSECUTIVE_WAKES) return true;
+    this.wakeCount += 1;
+    return false;
+  }
+
+  /**
+   * 组批语义定型（刀 B——第九轮全面复盘 20260903 #4/#9）：followUp 循环与恢复
+   * 合流（resumeAfterRecovery）组批后的预算记账 + run 身份重定型——忙会话形态
+   * 的 steer→捎跑链与 idle 路同一顶帽同一身份语义（idle 路记账在投递点；忙会话
+   * steer 入队不记，消费位统一补记）。空批 = 纯续入（重试恢复无人插话）：预算
+   * 与身份都不动——同一 run 的延续，翻级会中途拆掉后台屏障/归因。
+   * @returns background = 本批后台旗（达帽/空批沿用现值）；capped = 纯 wake 批达帽（调用方整批降级 inject）
+   */
+  private adoptBatchSemantics(batch: readonly AgentMessage[]): { background: boolean; capped: boolean } {
+    if (batch.length === 0) return { background: this.currentRunBackground, capped: false };
+    if (this.accountWakeBudget(batch)) return { background: this.currentRunBackground, capped: true };
+    const { background, attribution } = this.deriveBatchIdentity(batch);
+    this.currentRunBackground = background;
+    this.wakeAttribution = attribution;
+    return { background, capped: false };
   }
 
   /**
@@ -620,19 +692,14 @@ export class ConversationDriver {
     // ——工具执行/管道 sink/context_transform 桥/事件落账全链自然继承归属语境。
     // background 列（S5）：开起批全部 backgroundWake 即 background（与 toolFilter
     // 收窄同款批语义——元数据缺失〔submit 直入〕视同用户消息）；此处只读不删，
-    // 元数据消费删除留给 contextForBatch；run 中途 steering 不翻级，下一 run 定型
-    const background =
-      prompts.length > 0 && prompts.every((message) => this.deliverMeta.get(message)?.backgroundWake === true);
-    // run 身份定型（刀三轮身份）：后台批旗（durability 屏障开关）+ 批内最近
-    // user 归因（倒扫——多消息批以最后一条用户消息为准；无归因显式置
-    // undefined 防上一 run 值泄漏到下一 run）
+    // 元数据消费删除留给 contextForBatch；run 身份逐批判型（刀 B #9）——steering
+    // 注入批在 turn 边界消费位、followUp/恢复合流批在组批消费位重定型
+    const { background, attribution } = this.deriveBatchIdentity(prompts);
+    // run 身份定型（刀三轮身份 + 刀 B #9）：后台批旗（durability 屏障开关）+
+    // 批内最近 user 归因（倒扫——多消息批以最后一条用户消息为准；无归因显式
+    // 置 undefined 防上一 run 值泄漏到下一 run）
     this.currentRunBackground = background;
-    this.wakeAttribution = [...prompts]
-      .reverse()
-      .find(
-        (message): message is UserMessage =>
-          isStandardMessage(message) && message.role === 'user' && message.attribution !== undefined,
-      )?.attribution;
+    this.wakeAttribution = attribution;
     const attempt = runInSessionChain({ sessionId: this.sessionId, background }, () => this.runTurns(prompts));
     // 结算通知序（骨架篇 §9.3 onRunSettled）：finally 先注册先执行——running
     // 复位先于订阅者派发，订阅回调内 deliver 见到的必是闲时（followUp 开轮
@@ -712,7 +779,19 @@ export class ConversationDriver {
       while (!this.dismantled && this.queue.hasItems()) {
         const batch: AgentMessage[] = [];
         while (this.queue.hasItems()) batch.push(...this.queue.drain());
-        result = await this.runWithRetry(batch, { emit: this.emit, signal: this.beginRun() });
+        // followUp 循环批消费位语义（刀 B #4/#9——第九轮全面复盘 20260903）：
+        // 组批后先记账判帽 + 身份重定型，再按**本批** background 重包链——原实现
+        // 继承 launch 开起批的链旗，忙会话捎跑的后台轮会顶着前台链面续跑；达帽
+        // 纯 wake 批整批降级 inject（落账不注入，run 收场），循环复查 queue 已空
+        // 自然退出
+        const { background, capped } = this.adoptBatchSemantics(batch);
+        if (capped) {
+          for (const message of this.consumeMeta(batch)) this.inject(message);
+          continue;
+        }
+        result = await runInSessionChain({ sessionId: this.sessionId, background }, () =>
+          this.runWithRetry(batch, { emit: this.emit, signal: this.beginRun() }),
+        );
         await this.notifyStopping(result); // followUp 轮结算同样派发（回到循环复查）
       }
     } catch (error) {
@@ -856,12 +935,28 @@ export class ConversationDriver {
     return result;
   }
 
-  /** 恢后续入（两腿同款收尾步）：drain 队列 + user_input 变换 + startRun（同轮信号复用——interrupt 连续生效跨恢复边界） */
+  /**
+   * 恢后续入（两腿同款收尾步）：drain 队列 + user_input 变换 + startRun（同轮
+   * 信号复用——interrupt 连续生效跨恢复边界）。
+   *
+   * 恢复合流批消费位语义（刀 B #4/#9——第九轮全面复盘 20260903）：drain 后
+   * 记账判帽 + 身份重定型再续入——空批纯续入不动身份（同一 run 延续：重试/溢出
+   * 恢复本身不重定型也不计预算）；达帽纯 wake 批整批降级 inject 后按空批续入；
+   * 非空批按**本批** background 重包链（原实现继承 launch 开起批链旗——捎跑的
+   * 后台合流批顶着前台链面续跑）。
+   */
   private async resumeAfterRecovery(hooks: { emit: AgentEventSink; signal: AbortSignal }): Promise<RunResult> {
     const drained: AgentMessage[] = [];
     while (this.queue.hasItems()) drained.push(...this.queue.drain());
+    const { background, capped } = this.adoptBatchSemantics(drained);
+    if (capped) {
+      for (const message of this.consumeMeta(drained)) this.inject(message);
+      drained.length = 0;
+    }
     const next = await this.transformBatch(drained);
-    return startRun(next, this.contextForBatch(next), this.config, hooks);
+    return runInSessionChain({ sessionId: this.sessionId, background }, () =>
+      startRun(next, this.contextForBatch(next), this.config, hooks),
+    );
   }
 
   /**
