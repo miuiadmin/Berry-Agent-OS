@@ -5,7 +5,9 @@
  * 三面验收：① 互不绞屏（聚焦者事件进正文、非聚焦者只摘要行）；② repaint
  * 清屏重画（历史按会话键重画 + 旧正文不再现）；③ 在飞占位槽（切入 running
  * 条目 → 占位开、message_update 全量快照直推续流、message_end 终值落正文）。
- * 键盘交互面（Editor/提问队列）不在本文件射程。
+ * 键盘交互面（Editor/提问队列）：输入路由回归锁（TUI 专项扫雷 20260904
+ * TUI-2 转正）——捕获式终端 + 记账宿主/命令表锁规范钉死的「命令>提问>消息」
+ * 序与 quitKeys 拦截。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -85,8 +87,9 @@ const messageUpdate = (text: string): AgentEvent => ({
 /** user 历史消息（repaint 投影重画的载荷形状） */
 const userHistory = (text: string): AgentMessage => ({ role: 'user', content: text, timestamp: 1 });
 
-/** 刷渲染帧（requestRender 经 setTimeout 调度——宏任务一轮后帧已落） */
-const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30));
+/** 刷渲染帧（requestRender 经 setTimeout 调度——宏任务一轮后帧已落；ms 可
+ * 覆盖缺省 30：输入路由锁的命令/补全接受路需更长帧延迟余量） */
+const flush = (ms = 30): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /* ---------------- 用例 ---------------- */
 
@@ -444,5 +447,228 @@ describe('消息流滚动帽（遗漏大扫 20260903 spec D1-2 修死——批 C
     expect(redraw).toContain('消息行04'); // 帽内最旧一条（10-6=4 起）
     expect(redraw).not.toContain('消息行00'); // 修前红：无帽全量重画含最旧行
     expect(redraw).not.toContain('消息行03'); // 帽外三条整段剪除
+  });
+});
+
+/* ---------------- 输入路由回归锁（TUI 专项扫雷 20260904 TUI-2 转正） ----------------
+ * 契约篇 §5.4 钉死 onSubmit 路由序「斜杠命令 > 提问答案 > 普通消息」——命令在
+ * prompt 期可达（/app、/quit 等逃生口不被吞；序曾翻转且有死锁史：挂起的 ask
+ * promise 无人 resolve → 队首永久搁浅、后续 ask 全堵）。修前全仓零测试锁、
+ * 穿网推演实证回归即 3323+ 全绿——本组把扫描探针（testgap-input-probe 七腿）
+ * 转正为回归锁。捕获式终端 = 生产路径等价物（ProcessTerminal.start(onInput)
+ * 把 stdin 字节交给 TuiBase.handleTerminalInput——捕获后 send() 同链）。 */
+
+/** 捕获式假终端：start 捕获 onInput 回调，send() 即真实键盘路径（探针/桌面
+ * FakeTuiTerminal 同款形态——渲染帧照收供回显断言） */
+class CaptureTerminal implements Terminal {
+  readonly frames: string[] = [];
+  private inputHandler?: (data: string) => void;
+  get columns(): number {
+    return 100;
+  }
+  get rows(): number {
+    return 30;
+  }
+  get kittyProtocolActive(): boolean {
+    return false;
+  }
+  start(onInput: (data: string) => void): void {
+    this.inputHandler = onInput;
+  }
+  stop(): void {
+    this.inputHandler = undefined;
+  }
+  async drainInput(): Promise<void> {}
+  write(data: string): void {
+    this.frames.push(data);
+  }
+  moveBy(): void {}
+  hideCursor(): void {}
+  showCursor(): void {}
+  clearLine(): void {}
+  clearFromCursor(): void {}
+  clearScreen(): void {}
+  setTitle(): void {}
+  setProgress(): void {}
+  /** 注入键盘字节（走捕获的生产 onInput 链——非旁路直调） */
+  send(data: string): void {
+    this.inputHandler?.(data);
+  }
+}
+
+/** 记账宿主（strictHost 的宽松版——按用例记账而非恒 unreachable） */
+function makeHost() {
+  const log: string[] = [];
+  return {
+    log,
+    host: {
+      submit: (text: string) => log.push(`submit:${text}`),
+      requestQuit: () => log.push('requestQuit'),
+      interrupt: () => log.push('interrupt'),
+    } satisfies ChannelHost,
+  };
+}
+
+/** 记账命令注册表（dispatch 可编排结果：'ok' / 'unknown' / reject——tui.ts
+ * onSubmit 命令腿三消费面全可断言） */
+function makeCommands(opts: { result?: 'ok' | 'unknown' | 'reject' } = {}) {
+  const log: string[] = [];
+  const result = opts.result ?? 'ok';
+  const registry = {
+    register: () => () => undefined,
+    list: () => [{ name: 'help', description: '帮助', handler: () => {} }],
+    lookup: (name: string) => ({ name, description: '', handler: () => {} }),
+    dispatch: async (text: string): Promise<'ok' | 'unknown'> => {
+      log.push(`dispatch:${text}`);
+      if (result === 'reject') throw new Error('命令腿失败探针');
+      return result;
+    },
+    parse: (t: string) => (t.startsWith('/') ? { name: t.slice(1), args: '' } : null),
+    onChange: () => () => undefined,
+  };
+  return { log, registry: registry as unknown as CommandRegistry };
+}
+
+/** 逐字符键入（Editor 输入节流/组帧安全余量——探针同款 5ms 间隔） */
+async function type(terminal: CaptureTerminal, text: string): Promise<void> {
+  for (const ch of text) {
+    terminal.send(ch);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+describe('输入路由回归锁（契约篇 §5.4 命令>提问>消息序 + quitKeys 拦截——TUI-2）', () => {
+  it('quitKeys 拦截：\\x03 → interrupt、\\x04 → requestQuit（consume 拦截——Editor 不见这两键）', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const tui = createTuiChannel({ host, commands: makeCommands().registry, terminal });
+    tui.start();
+    await flush();
+    terminal.send('\x03'); // Ctrl+C 原始字节（raw mode 下不产信号——S6 形态④分档）
+    terminal.send('\x04'); // Ctrl+D
+    await flush();
+    expect(log).toEqual(['interrupt', 'requestQuit']); // 两键各达其宿主面
+    // 拦截即消费：两键不得漏成 Editor 内容（空提交忽略——submit 零触达）
+    expect(log.filter((e) => e.startsWith('submit:'))).toEqual([]);
+    tui.stop();
+  });
+
+  it('普通文本 + Enter → host.submit（消息腿兜底）', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const cmds = makeCommands();
+    const tui = createTuiChannel({ host, commands: cmds.registry, terminal });
+    tui.start();
+    await flush();
+    await type(terminal, 'hello world');
+    terminal.send('\r');
+    await flush(150);
+    expect(log).toEqual(['submit:hello world']);
+    expect(cmds.log).toEqual([]); // 命令腿零触达（非斜杠前缀）
+    tui.stop();
+  });
+
+  it('空提交忽略：裸 Enter 零路由（submit/dispatch 均零触达——防误触）', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const cmds = makeCommands();
+    const tui = createTuiChannel({ host, commands: cmds.registry, terminal });
+    tui.start();
+    await flush();
+    terminal.send('\r');
+    await flush(150);
+    expect(log).toEqual([]);
+    expect(cmds.log).toEqual([]);
+    tui.stop();
+  });
+
+  it("'/cmd' + Enter → commands.dispatch 优先 + ❯ 回显（host.submit 零触达）", async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const cmds = makeCommands();
+    const tui = createTuiChannel({ host, commands: cmds.registry, terminal });
+    tui.start();
+    await flush();
+    await type(terminal, '/help');
+    terminal.send('\r');
+    await flush(200); // autocomplete 弹层期 Enter 的接受路可能有帧延迟（探针同款余量）
+    expect(cmds.log).toEqual(['dispatch:/help']); // 命令腿命中
+    expect(log).toEqual([]); // 普通消息腿零触达
+    expect(terminal.frames.join('')).toContain('❯ /help'); // 命令本地回显在屏
+    tui.stop();
+  });
+
+  it('unknown 命令回显：dispatch 返回 unknown → ✖ 未知命令行（不崩界面）', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const cmds = makeCommands({ result: 'unknown' });
+    const tui = createTuiChannel({ host, commands: cmds.registry, terminal });
+    tui.start();
+    await flush();
+    await type(terminal, '/nosuch');
+    terminal.send('\r');
+    await flush(200);
+    expect(cmds.log).toEqual(['dispatch:/nosuch']);
+    expect(terminal.frames.join('')).toContain('✖ 未知命令：/nosuch'); // unknown 分档回显
+    tui.stop();
+  });
+
+  it('命令腿异常兜底：dispatch reject → ✖ 命令执行失败行（不崩界面）', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const cmds = makeCommands({ result: 'reject' });
+    const tui = createTuiChannel({ host, commands: cmds.registry, terminal });
+    tui.start();
+    await flush();
+    await type(terminal, '/help');
+    terminal.send('\r');
+    await flush(200);
+    expect(terminal.frames.join('')).toContain('✖ 命令执行失败：命令腿失败探针'); // 异常分档回显
+    tui.stop();
+  });
+
+  it('prompt 消费腿：提问在身时普通文本 + Enter → 答案收场（host.submit 零触达）', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const tui = createTuiChannel({ host, commands: makeCommands().registry, terminal });
+    tui.start();
+    await flush();
+    const answer = tui.ui().input!('服务路问什么？'); // input 类型面可选、TUI 后端实装（探针证）——非空断言
+    await flush();
+    await type(terminal, '我的答案');
+    terminal.send('\r');
+    await flush(150);
+    expect(await answer).toBe('我的答案'); // 消费为答案
+    expect(log).toEqual([]); // 消息腿零触达（非命令输入不落 submit）
+    tui.stop();
+  });
+
+  it('S5 序翻转锁：prompt 在身时 /cmd + Enter 仍派发命令（答案不吞逃生口）——补真答案正常收场', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const cmds = makeCommands();
+    const tui = createTuiChannel({ host, commands: cmds.registry, terminal });
+    tui.start();
+    await flush();
+    const answer = tui.ui().input!('服务路问什么？'); // input 类型面可选、TUI 后端实装（探针证）——非空断言
+    await flush();
+    await type(terminal, '/help');
+    terminal.send('\r');
+    await flush(200);
+    expect(cmds.log).toEqual(['dispatch:/help']); // 命令先行——prompt 在身仍派发
+    // ask promise 仍挂起（'/help' 未被吞为答案——序翻转前形态即此处吞）
+    let stillPending = true;
+    void answer.then(() => {
+      stillPending = false;
+    });
+    await flush(50);
+    expect(stillPending).toBe(true); // 修前红位：序若回翻（prompt 先于命令）此处即 false
+    // 补真答案 → prompt 正常收场（逃生口可达 + 队列不搁浅两面同锁）
+    await type(terminal, '真答案');
+    terminal.send('\r');
+    await flush(150);
+    expect(await answer).toBe('真答案');
+    expect(log).toEqual([]); // 全程零 submit（命令腿与答案腿各归其位）
+    tui.stop();
   });
 });
