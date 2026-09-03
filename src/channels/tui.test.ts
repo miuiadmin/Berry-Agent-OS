@@ -156,7 +156,7 @@ describe('S3 repaint 清屏重画（focus 变化驱动）', () => {
       host: strictHost,
       commands: emptyCommands,
       terminal,
-      history: (sessionId) => (sessionId !== undefined ? (histories.get(sessionId) ?? []) : []),
+      history: (sessionId) => (sessionId === undefined ? [] : (histories.get(sessionId) ?? [])),
     });
     // 聚焦者先落一答
     tui.handle({ type: 'message_start', message: assistantMessage('旧会话正文') });
@@ -183,7 +183,7 @@ describe('S3 repaint 清屏重画（focus 变化驱动）', () => {
     tui.repaint('session-flying'); // 切入正在跑的条目（agent_start 已错过、状态可查）
     await flush();
     const afterRepaint = terminal.frames.join('');
-    expect(afterRepaint).toContain('● 工作中'); // 状态行按 entryStatus 设定
+    expect(afterRepaint).toContain('工作中'); // 状态行按 entryStatus 设定（TUI 完善批：转轮帧时变，只断语义文本）
     // 后续 message_update 的 partial 是全量快照——直推整块替换即自然续流（无需 message_start）
     tui.handle(messageUpdate('在飞会话的续流内容'));
     await flush();
@@ -333,7 +333,7 @@ describe('D4 theme 渲染轻件（focus 换装 + 各归各色 + 起屏一次 + �
     tui.handle({ type: 'agent_start' });
     await flush();
     const focused = terminal.frames.join('');
-    expect(focused).toContain(`${CYAN} ●`); // ● 指示符着聚焦 accent
+    expect(focused).toContain(`${CYAN}⠋`); // 转轮帧着聚焦 accent（TUI 完善批：● → Loader 转轮，色经可变槽同律）
     expect(focused).not.toContain(`${CYAN} 工作中`); // 长文本不着（着色克制律）
     // 非聚焦 session-b：摘要行按归属会话 accent（magenta）各归各色
     tui.handleActivity('session-b', { type: 'agent_start' });
@@ -377,7 +377,7 @@ describe('D4 theme 渲染轻件（focus 换装 + 各归各色 + 起屏一次 + �
     tui.handleActivity('session-b', { type: 'agent_start' });
     await flush();
     const all = terminal.frames.join('');
-    expect(all).toContain(' ● 工作中'); // 素文本照常
+    expect(all).toContain(' 工作中'); // 素文本照常（转轮帧时变只断语义文本）
     expect(all).toContain('⧗ 会话 session- 后台工作中');
     expect(all).not.toContain('\x1b[38;2;'); // 全程零 truecolor（现状回归锁）
   });
@@ -556,6 +556,38 @@ describe('输入路由回归锁（契约篇 §5.4 命令>提问>消息序 + quit
     tui.stop();
   });
 
+  it('kitty 事件类型不双发：release 只算一次动作（E-1——TUI 第十一轮盲区 5）', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const hookLog: string[] = [];
+    const tui = createTuiChannel({
+      host,
+      commands: makeCommands().registry,
+      terminal,
+      // escapeHook 记账不消费——与 quitKeys 同一监听器同缺陷族（Escape 释放形同样双发）
+      escapeHook: () => {
+        hookLog.push('escapeHook');
+        return false;
+      },
+    });
+    tui.start();
+    await flush();
+    // kitty flag 2 形态：CSI u 三腿——press（无事件类型字段）/ repeat（:2）/ release（:3）。
+    // parseKey 剥掉事件类型后三腿解析出同一键 id（\x1b[99;5u 与 \x1b[99;5:3u 都是 'ctrl+c'），
+    // 不滤 release 则一次按键双触发 interrupt/requestQuit/escapeHook。滤 release 不滤
+    // repeat——repeat 是用户长按的真实重发，pi-tui 先例（tui.js 聚焦组件层）同此分档。
+    terminal.send('\x1b[27;1:3u'); // Escape 释放 → escapeHook 不得触发
+    terminal.send('\x1b[99;5u'); // ctrl+c 按下 → interrupt（第一声）
+    terminal.send('\x1b[99;5:3u'); // ctrl+c 释放 → 不得再 interrupt
+    terminal.send('\x1b[99;5:2u'); // ctrl+c 长按重发 → 真实意图，仍 interrupt
+    terminal.send('\x1b[100;5u'); // ctrl+d 按下 → requestQuit（第一声）
+    terminal.send('\x1b[100;5:3u'); // ctrl+d 释放 → 不得再 requestQuit
+    await flush();
+    expect(hookLog).toEqual([]); // Escape 释放不双发桌面 Esc 路由
+    expect(log).toEqual(['interrupt', 'interrupt', 'requestQuit']);
+    tui.stop();
+  });
+
   it('普通文本 + Enter → host.submit（消息腿兜底）', async () => {
     const terminal = new CaptureTerminal();
     const { log, host } = makeHost();
@@ -711,5 +743,162 @@ describe('TUI-8 空表分档（无命令面形态的诚实披露）', () => {
     await flush();
     expect(fullTerm.frames.join('')).toContain('Enter 发送 / / 命令'); // 非空表恒拼段
     fullTui.stop();
+  });
+});
+
+/* ---------------- TUI 彻底完善批（技术栈篇 §4.1 应用视图四增强，2026-09-04） ---------------- */
+
+describe('TUI 彻底完善批（四增强回归锁）', () => {
+  it('增强 1：assistant 终值 Markdown 渲染——标题加粗/代码块青色 SGR 落屏', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    tui.handle({ type: 'agent_start' });
+    tui.handle(messageUpdate('# 标题\n\n`code`'));
+    tui.handle({
+      type: 'message_end',
+      message: assistantMessage('# 标题\n\n正文 `code` 段'),
+    });
+    await flush();
+    const all = terminal.frames.join('');
+    // Markdown 组件路径证据：标题经 heading 着色器（加粗 SGR）而非纯文本直落
+    expect(all).toContain('\x1b[1m'); // heading 加粗
+    expect(all).toContain('\x1b[36m'); // 行内代码青色
+    expect(all).toContain('标题'); // 语义文本在场
+  });
+
+  it('增强 1：历史重画同走 Markdown（repaint 后 assistant 正文带加粗 SGR）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      history: () =>
+        [{ role: 'user', content: '问', timestamp: 1 }, assistantMessage('# 重画标题')] as unknown as AgentMessage[],
+    });
+    tui.repaint('session-x');
+    await flush();
+    expect(terminal.frames.join('')).toContain('\x1b[1m'); // 历史路径同走 Markdown
+  });
+
+  it('增强 1：自定义 assistant 渲染器优先——注册后回落行形态（优先级纪律不变）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      rendererFor: (role) =>
+        role === 'assistant' ? { role: 'assistant', render: () => ['[自定义] 行形态'] } : undefined,
+    });
+    tui.handle({ type: 'message_end', message: assistantMessage('# 不走 Markdown') });
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain('[自定义] 行形态');
+    expect(all).not.toContain('\x1b[1m'); // Markdown 路径未走
+  });
+
+  it('增强 3：tool_execution_start 状态行实时工具名（状态面消费——正文 ⚙ 仍单源）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    tui.handle({ type: 'agent_start' });
+    tui.handle({
+      type: 'tool_execution_start',
+      toolCallId: 'c1',
+      toolName: 'read',
+      args: { path: 'a.ts' },
+    });
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain('⚙ read …'); // 状态行实时工具名
+    // 正文零渲染不变：args 不落屏（正文 ⚙ 行只随 message_end）
+    expect(all).not.toContain('a.ts');
+  });
+
+  it('增强 4：todo 面板渲染——四态记号 + activeForm 优先 + 溢出行 + todo 工具写后即显', async () => {
+    const terminal = fakeTerminal();
+    /** 可变 todo 状态（tool_execution_end 后翻转——验证写后即显触发器） */
+    let items: ReadonlyArray<{
+      content: string;
+      status: 'pending' | 'in_progress' | 'completed' | 'deferred';
+      activeForm?: string;
+    }> = [
+      { content: '第一项', status: 'completed' },
+      { content: '第二项', status: 'in_progress', activeForm: '正在做第二项' },
+      { content: '第三项', status: 'pending' },
+      { content: '第四项', status: 'deferred' },
+    ];
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      todoFor: () => items,
+    });
+    tui.repaint('session-x');
+    await flush();
+    let all = terminal.frames.join('');
+    expect(all).toContain('☑ 第一项'); // 完成态记号
+    expect(all).toContain('◐ 正在做第二项'); // 进行中 activeForm 优先
+    expect(all).not.toContain('◐ 第二项'); // content 不重复出现（activeForm 覆盖）
+    expect(all).toContain('☐ 第三项'); // 待办态
+    expect(all).toContain('⊙ 第四项'); // 缓办态
+    // 写后即显触发器：todo 工具结束后面板刷新（新条目立即可见——无需 agent_end）
+    items = [...items.slice(0, 3), { content: '第五项', status: 'pending' }];
+    tui.handle({
+      type: 'tool_execution_end',
+      toolCallId: 'c2',
+      toolName: 'todo',
+      result: { content: [{ type: 'text', text: 'ok' }] },
+      isError: false,
+    });
+    await flush();
+    all = terminal.frames.join('');
+    expect(all).toContain('☐ 第五项'); // 刷新后新条目
+    // 非 todo 工具不触发刷新（无谓重画）
+    tui.handle({
+      type: 'tool_execution_end',
+      toolCallId: 'c3',
+      toolName: 'bash',
+      result: { content: [{ type: 'text', text: 'ok' }] },
+      isError: false,
+    });
+    await flush();
+    expect(terminal.frames.join('')).not.toContain('bash'); // 状态/面板无泄漏
+  });
+
+  it('增强 4：溢出折叠 + null/空数组清板 + todoFor 缺席零面板', async () => {
+    // 溢出：8 条 → 6 条可见 + 「+ 2 更多」
+    const terminal = fakeTerminal();
+    const eight = Array.from({ length: 8 }, (_, i) => ({ content: `任务${i + 1}`, status: 'pending' as const }));
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal, todoFor: () => eight });
+    tui.repaint('s');
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain('任务6');
+    expect(all).not.toContain('任务7'); // 超帽折叠
+    expect(all).toContain('+ 2 更多');
+    // null 清板
+    const nullTerm = fakeTerminal();
+    let current: ReadonlyArray<{ content: string; status: 'pending' }> | null = [
+      { content: '有表', status: 'pending' },
+    ];
+    const nullTui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal: nullTerm,
+      todoFor: () => current,
+    });
+    nullTui.repaint('s');
+    await flush();
+    expect(nullTerm.frames.join('')).toContain('☐ 有表');
+    const frameMark = nullTerm.frames.length; // 清板断言分界（帧累积——只看新帧）
+    current = null;
+    nullTui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    await flush();
+    expect(nullTerm.frames.slice(frameMark).join('')).not.toContain('☐ 有表'); // 清板（新帧零面板行）
+    // todoFor 缺席：agent_end 后零变化（面板从未渲染）
+    const plainTerm = fakeTerminal();
+    const plainTui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal: plainTerm });
+    plainTui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    await flush();
+    expect(plainTerm.frames.join('')).not.toContain('☐');
   });
 });

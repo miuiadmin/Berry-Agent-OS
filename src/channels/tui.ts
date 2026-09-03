@@ -19,12 +19,16 @@ import {
   CombinedAutocompleteProvider,
   Container,
   Editor,
+  Loader,
+  Markdown,
   Text,
   TuiMainScreen,
+  isKeyRelease,
   matchesKey,
   parseKey,
   type AutocompleteProvider,
   type EditorTheme,
+  type MarkdownTheme,
   type SlashCommand,
   type Terminal,
   type TUI,
@@ -117,6 +121,15 @@ export interface TuiChannelOptions {
    * = 无弹层不回委托（真源在远端，本地行走是错工作区）。
    */
   readonly filesFor?: FilesFace;
+  /**
+   * todo 折叠查询面（TUI 彻底完善批增强 4，技术栈篇 §4.1）：传入即在输入框上方
+   * 渲染紧凑 todo 面板（四态记号 + 帽 6 条 + 溢出行）；刷新触发 = repaint /
+   * tool_execution_end(toolName=todo) / agent_end。结构类型注入——通道不 import
+   * chat 模块（拓扑边零新增）；undefined/null/空数组 = 面板清空。tui-main 装配
+   * 接 builtin-deps 同名面（webui SPA 呈现同源折叠产物）；attach 纯客户端形态
+   * 不注入 = 面板缺席零变化。
+   */
+  readonly todoFor?: (sessionId?: string) => readonly TodoItemFace[] | null | undefined;
 }
 
 /** TUI 通道面（app 组合根持有） */
@@ -173,6 +186,43 @@ const EDITOR_THEME: EditorTheme = {
 /** 级别 → 通知行前缀（success 档 2026-08-27 第三十三批 P2-1 新增） */
 const NOTIFY_PREFIX: Record<NotifyLevel, string> = { info: 'ℹ', success: '✔', warn: '⚠', error: '✖' };
 
+/* ---- TUI 彻底完善批（技术栈篇 §4.1 应用视图四增强，2026-09-04）---- */
+
+/**
+ * Markdown 渲染主题（增强 1——assistant 终值正文）：中性 ANSI 配色，暗亮底皆可辨。
+ * 刻意不接 highlightCode（语法高亮库零新依赖纪律——规范同条）；accent 着色仍专属
+ * 焦点指示面（边框/页脚/转轮/●），内容正文不混用主题色（着色克制律延伸）。
+ */
+const DIM = (text: string): string => `\x1b[2m${text}\x1b[0m`;
+const MD_THEME: MarkdownTheme = {
+  heading: (t) => `\x1b[1m${t}\x1b[0m`, // 标题加粗
+  link: (t) => `\x1b[4m${t}\x1b[0m`, // 链接下划线
+  linkUrl: DIM,
+  code: (t) => `\x1b[36m${t}\x1b[0m`, // 行内代码青色
+  codeBlock: (t) => `\x1b[36m${t}\x1b[0m`,
+  codeBlockBorder: DIM,
+  quote: DIM,
+  quoteBorder: DIM,
+  hr: DIM,
+  listBullet: (t) => `\x1b[1m${t}\x1b[0m`,
+  bold: (t) => `\x1b[1m${t}\x1b[0m`,
+  italic: (t) => `\x1b[3m${t}\x1b[0m`,
+  strikethrough: (t) => `\x1b[9m${t}\x1b[0m`,
+  underline: (t) => `\x1b[4m${t}\x1b[0m`,
+};
+
+/**
+ * todo 条目展示面（增强 4——结构类型：通道不 import chat 模块〔拓扑边零新增〕，
+ * 字段 = TodoItem 的呈现子集；宿主注入折叠产物，面板只管呈现）。
+ */
+export interface TodoItemFace {
+  readonly content: string;
+  readonly status: 'pending' | 'in_progress' | 'completed' | 'deferred';
+  readonly activeForm?: string;
+}
+
+/** todo 面板可见条目帽（超帽折叠为「+ N 更多」一行——紧凑面板纪律） */
+const TODO_PANEL_MAX = 6;
 /* ---- 终端态复原（TUI-1，第十轮 TUI 专项扫雷 20260904；骨架篇 §1.3 终端态复原条款） ---- */
 
 /** 已武装复原钩子的解除器（模块级单例——一进程一真终端；重复武装先解除旧的） */
@@ -223,7 +273,18 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   /** 消息流内容（逐条 append Text；超屏走终端原生 scrollback——TuiMainScreen 主屏无自有滚动面） */
   const messages = new Container();
   /** 状态行（setStatus 更新；空串 = 空） */
-  const statusText = new Text('');
+  /**
+   * 状态行（TUI 彻底完善批增强 3）：静态 Text → Loader 动画组件——agent_start 启
+   * 转轮、tool_execution_start 实时显示工具名（状态面消费，正文单源纪律不变）、
+   * agent_end 停轮。Loader.render 前置空行天然分隔消息流与状态区。转轮色经
+   * 可变槽闭包随主题换装（Loader 构造后 colorFn 私有不可直换）。
+   */
+  const loaderSpinnerColor: { fn: (text: string) => string } = { fn: identity };
+  const statusLoader = new Loader(tui, (s: string) => loaderSpinnerColor.fn(s), identity, '');
+  /** todo 面板容器（增强 4）：状态行与输入框之间；todoFor 未注入或空表恒空容器 */
+  const todoPanel = new Container();
+  /** 最近聚焦会话键（增强 4——todoFor 查询参数；repaint 显式带键时更新，起屏路 undefined = 当前聚焦） */
+  let trackedSessionId: string | undefined;
   const editor = new Editor(tui, EDITOR_THEME);
   // M4 补全接线（2026-08-27 第三十三批）：workspace 传入即武装 autocomplete——
   // 命令名补全 + 参数补全 + `@` 文件补全三合一（pi-tui CombinedAutocompleteProvider，
@@ -239,9 +300,10 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       opts.commands.list().map((cmd) => ({
         name: cmd.name, // pi-tui 匹配用裸名（不含 '/' 前缀——输入侧已剥离）
         description: cmd.description,
-        ...(cmd.argumentHint !== undefined ? { argumentHint: cmd.argumentHint } : {}),
-        ...(cmd.getArgumentCompletions !== undefined
-          ? {
+        ...(cmd.argumentHint === undefined ? {} : { argumentHint: cmd.argumentHint }),
+        ...(cmd.getArgumentCompletions === undefined
+          ? {}
+          : {
               // 参数回调实时查注册表（/reload 后重注册的命令体即取即用）；readonly
               // 数组转 mutable（pi-tui 面非 readonly）
               getArgumentCompletions: async (
@@ -251,8 +313,7 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
                 const items = await current?.getArgumentCompletions?.(prefix);
                 return items && items.length > 0 ? items.map((item) => ({ ...item })) : null;
               },
-            }
-          : {}),
+            }),
       }));
     /** 重装 provider（构造时一次 + 每次 onChange；setAutocompleteProvider 为可选 API 防御调用）。
      *  刀 B：symbolsFor 在场时外包组合委托 provider（@-mention 符号段拦截；
@@ -307,6 +368,8 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const applyTheme = (sessionId: string | undefined): void => {
     focusColorize = accentColorizer(opts.themeFor?.(sessionId));
     editor.borderColor = focusColorize;
+    // 增强 3：转轮色槽同步换装（Loader colorFn 私有——经可变槽闭包行使）
+    loaderSpinnerColor.fn = focusColorize;
     footerText.setText(focusColorize(footerTitlePart) + footerRestText());
     footerText.invalidate();
     // 保底请求重绘：起屏空历史路（renderHistoryInto 零追加行）无其他渲染触发，
@@ -326,7 +389,8 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   // 锚定——TUI-3 收正：原 VStack 布局根 + setLayoutRoot 条件安装是 alt-screen
   // 分支的死对象〔'setLayoutRoot' in tui 恒 false〕，连同假注释一并删除）
   tui.addChild(messages);
-  tui.addChild(statusText);
+  tui.addChild(statusLoader);
+  tui.addChild(todoPanel);
   tui.addChild(editorContainer);
   tui.addChild(footerText);
 
@@ -372,13 +436,31 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     tui.requestRender();
   };
 
-  /** 定稿流式块（终值文本 + 工具调用行；无流式块则直接落行——如重放） */
+  /**
+   * 定稿流式块（终值文本 + 工具调用行；无流式块则直接落行——如重放）。
+   * 增强 1：终值正文走 Markdown 组件（流式期纯文本直推，定稿换装——性能与观感
+   * 兼得）；工具/错误行仍走行形态（appendLines）。
+   */
   const closeStreaming = (finalText: string, toolLines: readonly string[]): void => {
     if (streaming) {
       messages.removeChild(streaming.container);
       streaming = null;
     }
-    appendLines([...finalText.split('\n').filter((l) => l !== ''), ...toolLines]);
+    if (finalText.trim() !== '') appendMarkdown(finalText);
+    appendLines(toolLines.filter((l) => l !== ''));
+  };
+
+  /**
+   * 追加 assistant 正文 Markdown 块（增强 1）：一个 Markdown 组件 = 一子行
+   * （滚动帽语义随组件化 = 组件数帽——一个代码块再长也是一子行；与 appendLines
+   * 同款溢出剪枝，最新恒保留）。
+   */
+  const appendMarkdown = (text: string): void => {
+    messages.addChild(new Markdown(text, 1, 0, MD_THEME));
+    const overflow = messages.children.length - maxMessageLines;
+    if (overflow > 0) messages.children.splice(0, overflow);
+    messages.invalidate();
+    tui.requestRender();
   };
 
   /* ---- 提问队列（prompt 模式占输入框） ---- */
@@ -403,6 +485,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   editor.onSubmit = (text: string): void => {
     const trimmed = text.trim();
     if (!trimmed) return; // 空提交忽略（防误触；退出走 Ctrl+D）
+    // 增强 2：输入历史（↑/↓ 翻阅、连续去重、百条帽——pi-tui Editor 内建行为，
+    // 成功提交路径统一入史：命令/提问答案/普通消息三者皆可翻回
+    editor.addToHistory(trimmed);
     // 命令在通道本地派发（命令错误兜底为通知，不崩界面）；命令无时间线事件，本地回显
     if (trimmed.startsWith('/')) {
       appendLines([`❯ ${trimmed}`]);
@@ -437,6 +522,13 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   // escapeHook 消费即吞——编辑器 Esc 语义仅在纯对话形态保留）
   const quitKeys = new Set(['ctrl+d', 'ctrl+c']);
   tui.addInputListener((data) => {
+    // kitty flag 2 事件类型早滤（E-1，TUI 第十一轮盲区 5）：本监听器跑在 pi-tui
+    // 聚焦组件层之前（tui.js inputListeners → focusedComponent 序），而 parseKey
+    // 剥掉 CSI u 事件类型字段——release 与 press 解析出同一键 id，不滤则一次按键
+    // 双触发 interrupt/requestQuit/escapeHook。只滤 release 不滤 repeat：repeat 是
+    // 用户长按的真实重发（pi-tui 聚焦组件层同此分档）；返回 undefined = 不消费，
+    // release 事件沿链流至聚焦组件层由 pi-tui 自行丢弃。
+    if (isKeyRelease(data)) return undefined;
     if (opts.escapeHook !== undefined && matchesKey(data, 'escape')) {
       if (opts.escapeHook()) return { consume: true };
     }
@@ -448,23 +540,66 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     }
     return undefined;
   });
-  /* ---- 活体事件入口（骨架篇 §2.5 十型） ---- */
+  /* ---- todo 面板（增强 4，技术栈篇 §4.1）---- */
+  /** 四态记号（☐ 待办 / ◐ 进行中 / ☑ 已完成 / ⊙ 缓办） */
+  const TODO_MARKERS: Record<TodoItemFace['status'], string> = {
+    pending: '☐',
+    in_progress: '◐',
+    completed: '☑',
+    deferred: '⊙',
+  };
+  /**
+   * 刷新 todo 面板：todoFor 查询（键 = trackedSessionId；起屏路 undefined = 当前
+   * 聚焦，宿主闭包解析）→ 清板重画。进行中条目 accent 着色 + activeForm 优先、
+   * 完成/缓办暗淡、超帽折叠「+ N 更多」。null/undefined/空数组 = 清板（注入侧
+   * 视同无表，裁决⑧同源）。查询异常吞为清板（面板是呈现面不炸通道）。
+   */
+  const refreshTodo = (): void => {
+    if (opts.todoFor === undefined) return;
+    let items: readonly TodoItemFace[] | null | undefined;
+    try {
+      items = opts.todoFor(trackedSessionId);
+    } catch {
+      items = undefined;
+    }
+    todoPanel.clear();
+    if (items !== undefined && items !== null && items.length > 0) {
+      for (const item of items.slice(0, TODO_PANEL_MAX)) {
+        const marker = TODO_MARKERS[item.status] ?? '☐';
+        // 进行中条目 activeForm（现在进行时描述）优先于 content；着 accent
+        const body = item.status === 'in_progress' && item.activeForm !== undefined ? item.activeForm : item.content;
+        const styled =
+          item.status === 'in_progress'
+            ? focusColorize(`${marker} ${body}`)
+            : item.status === 'completed' || item.status === 'deferred'
+              ? DIM(`${marker} ${body}`)
+              : `${marker} ${body}`;
+        todoPanel.addChild(new Text(` ${styled}`, 1));
+      }
+      if (items.length > TODO_PANEL_MAX) {
+        todoPanel.addChild(new Text(` ${DIM(`+ ${items.length - TODO_PANEL_MAX} 更多`)}`, 1));
+      }
+    }
+    todoPanel.invalidate();
+    tui.requestRender();
+  };
+
   const handle = (event: AgentEvent): void => {
     switch (event.type) {
       case 'agent_start':
-        // D4 theme：● 指示符着聚焦 accent（focusColorize——repaint/起屏时点已重算）；
+        // 增强 3：状态行 Loader 化——转轮启转（色经 loaderSpinnerColor 槽随主题）；
         // 「工作中」长文本不着（着色克制律）
-        statusText.setText(`${focusColorize(' ●')} 工作中`);
-        statusText.invalidate();
-        tui.requestRender();
+        statusLoader.setMessage(' 工作中');
+        statusLoader.start();
         break;
       case 'agent_end':
         // 防漏关（S3）：在飞占位槽开着一轮无 message_end 即结束（abort 中断路）
         // ——空终值关槽（closeStreaming 内 filter 空串，零追加行）
         if (streaming) closeStreaming('', []);
-        statusText.setText('');
-        statusText.invalidate();
-        tui.requestRender();
+        // 增强 3：停轮清状态；todo 面板随收场刷新（增强 4 第三触发时点——廉价）
+        statusLoader.stop();
+        statusLoader.setMessage('');
+        refreshTodo();
         break;
       case 'turn_start':
       case 'turn_end':
@@ -485,24 +620,40 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         break;
       case 'message_end':
         if (isStandardMessage(event.message) && event.message.role === 'assistant') {
-          // 失败行随流式收尾一并落屏（#42）：content 空的失败 run 也有 ✖ [错误] 一行
-          closeStreaming(assistantText(event.message), [
-            ...assistantToolLines(event.message),
-            ...assistantErrorLine(event.message),
-          ]);
+          const custom = opts.rendererFor?.('assistant');
+          if (custom === undefined) {
+            // Built-in path: final body text goes through Markdown component (enhancement 1) + tool/error lines (failure lines
+            // land on screen along with stream wrap-up, #42: failed runs with empty content also have ✖ [error] one line)
+            closeStreaming(assistantText(event.message), [
+              ...assistantToolLines(event.message),
+              ...assistantErrorLine(event.message),
+            ]);
+          } else {
+            // Custom renderer priority (live-path alignment fix——custom assistant also takes line form in live-path, same priority as repaint path;
+            // renderer exception isolation same contract as renderAgentMessage: fall back to builtin line form on throw + leave trace)
+            let lines: string[];
+            try {
+              lines = custom.render(event.message);
+            } catch (err) {
+              opts.onRendererError?.(err, 'assistant');
+              lines = renderAgentMessage(event.message, undefined, undefined);
+            }
+            closeStreaming('', lines);
+          }
         }
-        // user/toolResult/自定义角色在 message_start 已渲染，这里不重复
+        // user/toolResult/custom roles already rendered at message_start, no duplication here
         break;
       case 'tool_execution_start':
-        // 不渲染（直播路单源，20260901-d #5）：⚙ 行随 assistant message_end 的
-        // assistantToolLines 落（时点更早——message_end 先于执行发出）；本事件
-        // 是执行层锚点（webui 直播卡等消费面照用事件扇出），TUI 不双源双帧
+        // 增强 3（状态面消费——正文零渲染不变）：状态行实时显示正在执行的工具名，
+        // 转轮持续（agent_start 已启）。正文 ⚙ 行仍随 assistant message_end 单源落
+        statusLoader.setMessage(` ⚙ ${event.toolName} …`);
         break;
       case 'tool_execution_update':
         break; // 工具进度 M1 不展示（进度渲染随 Web 通道形态定稿再补）
       case 'tool_execution_end':
-        // 不渲染（#5 同批）：↳ 行随 toolResult message_start 的 renderAgentMessage
-        // 落——与历史投影（repaint）同一渲染器，直播/重画行集恒一致
+        // 增强 4：todo 工具写后即显——面板刷新触发器（非渲染）；↳ 正文行仍随
+        // toolResult message_start 的 renderAgentMessage 单源落（历史投影同款）
+        if (event.toolName === 'todo') refreshTodo();
         break;
     }
   };
@@ -515,9 +666,8 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       appendLines([`${prefix} ${message}`]);
     },
     setStatus(status) {
-      statusText.setText(status ? ` ${status}` : '');
-      statusText.invalidate();
-      tui.requestRender();
+      // 增强 3：经 Loader 静态更新（不启转轮——应用态状态非运行态）
+      statusLoader.setMessage(status ? ` ${status}` : '');
     },
     async confirm(message, opts?: UiAskOptions) {
       // priority 随链取数（S5 后台 run 的确认降级排队——契约篇 §5.4）；取消收场
@@ -569,14 +719,29 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   };
 
   /* ---- 清屏重画（S3 focus 变化驱动信号） ---- */
-  /** 按会话键拉历史并渲染（repaint 重画与 start 起屏两路共用——单一历史渲染路径） */
+  /**
+   * 按会话键拉历史并渲染（repaint 重画与 start 起屏两路共用——单一历史渲染路径）。
+   * 增强 1：内置 assistant 路径正文走 Markdown 组件（自定义渲染器优先——注册了
+   * assistant 渲染器的应用回落行形态，优先级纪律不变）；其余角色照旧行形态。
+   */
   const renderHistoryInto = (sessionId: string | undefined): void => {
     const history = opts.history ? opts.history(sessionId) : [];
-    for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
+    for (const message of history) {
+      if (isStandardMessage(message) && message.role === 'assistant' && opts.rendererFor?.('assistant') === undefined) {
+        const body = assistantText(message);
+        if (body.trim() !== '') appendMarkdown(body);
+        const tail = [...assistantToolLines(message), ...assistantErrorLine(message)];
+        if (tail.length > 0) appendLines(tail);
+      } else {
+        appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
+      }
+    }
   };
   const repaint = (sessionId: string | undefined): void => {
-    // D4 theme：换装先行（清屏重画时点按目标会话重算聚焦着色器——边框/页脚
-    // 随之换装；后续 statusText 写点读新 focusColorize）
+    // 增强 4：追踪会话键（todoFor 查询参数——显式键路更新）
+    trackedSessionId = sessionId;
+    // D4 theme：换装先行（清屏重画时点按目标会话重算聚焦着色器——边框/页脚/
+    // 转轮槽随之换装；后续写点读新 focusColorize）
     applyTheme(sessionId);
     // 复位顺序先于清空：streaming 槽引用的容器随 messages.clear() 一并摘除，
     // 先置 null 防孤儿引用继续 setText 到已弃容器
@@ -589,10 +754,17 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     // 任何投影里都不存在）——开空流式占位槽，后续 message_update 的 partial 是
     // 全量快照、直推整块替换即自然续流（无需 message_start）
     const running = sessionId !== undefined && opts.entryStatus?.(sessionId) === 'running';
-    if (running) openStreaming();
-    // D4 theme：● 指示符随本会话 accent（applyTheme 已在 repaint 开头重算）
-    statusText.setText(running ? `${focusColorize(' ●')} 工作中` : '');
-    statusText.invalidate();
+    if (running) {
+      openStreaming();
+      // 增强 3：切入在飞会话——转轮续转
+      statusLoader.setMessage(' 工作中');
+      statusLoader.start();
+    } else {
+      statusLoader.stop();
+      statusLoader.setMessage('');
+    }
+    // 增强 4：面板随聚焦会话重画（第一触发时点）
+    refreshTodo();
     tui.requestRender();
   };
 
@@ -623,11 +795,15 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       // 在此显式应用；undefined = 当前聚焦，与 history 同款语义）
       applyTheme(undefined);
       renderHistoryInto(undefined);
+      // 增强 4：起屏拉一次当前聚焦 todo（trackedSessionId 起屏路 undefined——宿主闭包解析聚焦）
+      refreshTodo();
       tui.setFocus(editor);
       tui.start();
     },
     stop(options) {
       tui.stop(options);
+      // 增强 3：停轮（interval 清理——停屏期转轮空转纯噪声）
+      statusLoader.stop();
       // 正常停屏解除复原钩子（TUI-1）：tui.stop() 已做全部复位，退出时不再重复写
       disarmTerminalRestore?.();
     },
