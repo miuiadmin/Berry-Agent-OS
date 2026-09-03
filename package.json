@@ -1,6 +1,6 @@
 {
   "name": "berry-agent-os",
-  "version": "1.0.0-alpha.0",
+  "version": "1.0.0-alpha.1",
   "codename": "Peiligang",
   "description": "Berry Agent OS — 跑 AI 应用的操作系统",
   "license": "MIT",
@@ -50,7 +50,7 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.84.2",
     "@earendil-works/pi-tui": "0.84.2",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "13.0.3",
     "ignore": "^7.0.6",
     "jiti": "^2",
     "typebox": "1.3.7",
