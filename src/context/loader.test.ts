@@ -10,9 +10,17 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createContext } from './context.js';
 import { createAppJiti, importAppEntry, loadApps } from './loader.js';
+import { assertExperimentalDeclared } from '../contracts/api.js';
+/* 就绪度审计 20260903 P0 回归锁基建：裁决核 passthrough spy——真实现照常执法
+ * （stable 键放行/实验键拒载语义不变），只观察「必经裁决核」；修复前红 =
+ * 门禁静默放行（gate 缺席时守卫前置跳过，assert 根本未被调——fail-open 铁证） */
+vi.mock('../contracts/api.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../contracts/api.js')>();
+  return { ...actual, assertExperimentalDeclared: vi.fn(actual.assertExperimentalDeclared) };
+});
 import { chainCaller } from './chain.js';
 import type { AppSkillsInfo } from './loader.js';
 import type { ContextScope } from './types.js';
@@ -1392,5 +1400,72 @@ describe('装载器 apply 边界的 caller 链（应用身份已知的第一写�
     // 装载器自身（激活完成后宿主侧读）：不在链上——注册回调/生命周期 emit 不落应用账
     expect(chainCaller()).toBeUndefined();
     expect(root.tryGet('fx/probe-result')).toEqual({ applyTime: 'row-caller-id' });
+  });
+});
+
+/* ---------------- 实验键声明门禁送达链（§6.13.4 执法点①——就绪度审计 20260903 P0 回归锁） ---------------- */
+
+describe('实验键声明门禁送达链（gate 窗 + 行字段）', () => {
+  /** 裁决核 spy（vi.fn 包装真实现——断言「必经裁决核」而非篡改结果） */
+  const gateSpy = () => vi.mocked(assertExperimentalDeclared);
+
+  it('fail-closed 缺省：gate 缺席（builtin 行/防御路径/清单不可读）也必经裁决核——空声明集 + 未名应用（修复前红：门禁静默放行）', async () => {
+    gateSpy().mockClear();
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'gate-uncaged.ts',
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'gate-uncaged';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    // 无第三参（gate 缺席）直载——berryagent/llm 是 stable 键放行，但必经裁决核
+    await importAppEntry(createAppJiti(), entry);
+    expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), undefined);
+  });
+
+  it('行 apiGate 送达装载窗：loadApps 从计划行构造门上下文（数组声明→Set + 应用归因；修复前红：行字段无消费方）', async () => {
+    gateSpy().mockClear();
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'gate-row.ts',
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'gate-row';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadApps(root, [{ id: 'gated', entry, apiGate: { appId: 'demo-app', experimental: [] } }]);
+    expect(result.failed).toEqual([]);
+    expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), 'demo-app');
+  });
+
+  it('声明集原样过界：experimental 数组随行进装载窗（worker lite 载荷同形直通的前提形状锁）', async () => {
+    gateSpy().mockClear();
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'gate-declared.ts',
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'gate-declared';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    // 现役六键全 stable——键名是任意探针值（不触发拒载语义），锁的是声明集形状过界
+    const result = await loadApps(root, [
+      {
+        id: 'gated2',
+        entry,
+        apiGate: { appId: 'demo-app', experimental: ['berryagent/future-x'] },
+      },
+    ]);
+    expect(result.failed).toEqual([]);
+    expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(['berryagent/future-x']), 'demo-app');
   });
 });

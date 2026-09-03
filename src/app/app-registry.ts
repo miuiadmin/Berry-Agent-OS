@@ -22,7 +22,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { AppError, APP_DUPLICATE, APP_INVALID, APP_NOT_FOUND } from '../contracts/errors.js';
+import { AppError, API_VERSION_MISMATCH, APP_DUPLICATE, APP_INVALID, APP_NOT_FOUND } from '../contracts/errors.js';
 import { validateAppManifest, type AppManifest } from '../contracts/app.js';
 import { adjudicateApiGate } from '../contracts/api.js';
 import { CHAT_APP_ID } from '../chat/app.js';
@@ -125,6 +125,49 @@ export function loadOfficialApps(
    * 按 id 定序后装载表序只随 id 走，文件名怎么改都不外露。 */
   const ordered = [...apps.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return new Map(ordered.map((m) => [m.id, m]));
+}
+
+/**
+ * 从装机构件根读取 API 声明门（API 治理 §6.13.4 装载门送达链——就绪度审计
+ * 20260903 P0 接通）：单层发现 `*.app.yaml` → 解析校验 → `adjudicateApiGate`
+ * 四出口单源裁决。消费方两腿：
+ * - 组合树合成期（composition 第三方行填充 `AppPlanRow.apiGate`）；
+ * - 装载词表收割面（assembly loadEntry——入口目录即构件根的标准布局）。
+ *
+ * 错误语义两分：
+ * - **min 地板拒载**（宿主 apiVersion < 清单 min）：原样抛出
+ *   `API_VERSION_MISMATCH`（fail-loud 三段消息自带升级指引）——合成方捕转
+ *   unresolved 行 / 收割方直接失败，不静默；
+ * - **清单缺席/不可解析/校验失败**：返回 undefined（装载期实验键按空声明集
+ *   拒——fail-closed）。坏清单属诊断面（apps check / dump-config）职，不在此
+ *   炸合成面。
+ *
+ * 官方 builtin 行不经此（宿主函数件不 jiti——装载期 loadOfficialApps 已裁决）。
+ * 根目录公式与 resolveAppEntry 同源（composition 侧 `resolveAppRoot` 单源）。
+ */
+export function readApiGateAtRoot(root: string): { appId: string; experimental: readonly string[] } | undefined {
+  let entries: string[];
+  try {
+    entries = readdirSync(root);
+  } catch {
+    return undefined; // 根不可读 = 无清单可达 → fail-closed 空门
+  }
+  const manifestName = entries.find((name) => name.endsWith(MANIFEST_SUFFIX));
+  if (manifestName === undefined) return undefined;
+  const path = join(root, manifestName);
+  try {
+    const doc = parseYaml(readFileSync(path, 'utf8'));
+    const manifest = validateAppManifest(doc, path);
+    // 裁决单源（§6.13.4 四出口——min 地板拒载在此抛出，由调用方定失败面）
+    const gate = adjudicateApiGate(manifest.api, readHostVersionFields().apiVersion, manifest.id);
+    // 数组形 = 跨桥 JSON 直通面（AppPlanRow.apiGate 契约注记）
+    return { appId: manifest.id, experimental: [...gate.experimentalKeys] };
+  } catch (err) {
+    // min 地板拒载穿透（fail-loud——上抛调用方定失败面）；其余（yaml 解析/
+    // schema 校验失败）= 坏清单降级为 fail-closed 空门，不炸合成面
+    if (err instanceof AppError && err.code === API_VERSION_MISMATCH) throw err;
+    return undefined;
+  }
 }
 
 /**

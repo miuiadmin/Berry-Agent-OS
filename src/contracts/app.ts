@@ -657,6 +657,15 @@ export interface AppPlanRow {
    * 解除）、builtin 行携块防御性拒载〔第二执法点〕）。
    */
   sandbox?: RowSandbox;
+  /**
+   * API 声明门上下文（API 治理 §6.13.4 装载门送达链——就绪度审计 20260903 P0
+   * 接通：组合树合成期从装机清单 api 块读出的裁决产物）。数组形 = 跨桥 JSON
+   * 直通面（worker/external 域 lite 载荷携带；loader 侧转 Set 进装载窗）。
+   * undefined = 官方 builtin 行（宿主函数件不 jiti）/ 清单缺席或不可读（legacy
+   * 容忍态）——装载期实验键按空声明集恒拒（fail-closed）。min 地板拒载在
+   * 合成期即响（转 unresolved 行——boot 断言拒启，dump-config 诊断面可见）。
+   */
+  apiGate?: { readonly appId: string; readonly experimental: readonly string[] };
 }
 
 /**

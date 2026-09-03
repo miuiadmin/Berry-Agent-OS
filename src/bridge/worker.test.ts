@@ -15,7 +15,15 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { assertExperimentalDeclared } from '../contracts/api.js';
+/* 就绪度审计 20260903 P0 回归锁基建：裁决核 passthrough spy（真实现照常执法，
+ * 只观察「必经裁决核」）——realm 与宿主同进程同模块图，loader 的 import 被
+ * 此 mock 拦截（worker realm 在线程内经 MessageChannel 起跑，模块实例共享） */
+vi.mock('../contracts/api.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../contracts/api.js')>();
+  return { ...actual, assertExperimentalDeclared: vi.fn(actual.assertExperimentalDeclared) };
+});
 import {
   AppError,
   BRIDGE_CANCELLED,
@@ -556,5 +564,47 @@ describe('startWorkerRealm — sub 帧单发与退订对称面（O-1 worker 半�
     // 修复后：warn 日志上行留痕（「看不见的 bug 不允许靠进程日志独扛」——warn 即可见面）
     await until(async () => rejectCh.logs.some((l) => l.level === 'warn' && l.message.includes('过界注册迟到失败')));
     expect(rejectCh.registered).toEqual([]);
+  });
+});
+
+/* ---------------- svc.load apiGate 过桥（就绪度审计 20260903 P0 回归锁） ---------------- */
+
+describe('startWorkerRealm — svc.load 载荷 apiGate 过桥（API 声明门分域同面执法）', () => {
+  /** 裁决核 spy（vi.fn 包装真实现——断言「必经裁决核」而非篡改结果） */
+  const gateSpy = () => vi.mocked(assertExperimentalDeclared);
+
+  it('lite 载荷门上下文进装载窗：声明集数组→Set + 应用归因（bootstrap/external domain.load 投影同形；修复前红：载荷字段无消费方）', async () => {
+    gateSpy().mockClear();
+    const { ch, dir } = setup();
+    const entry = writeApp(
+      dir,
+      'fx-gate.ts',
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'fx-gate';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const meta = (await ch.host.call('svc', 'load', [
+      { id: 'g1', entry, apiGate: { appId: 'demo-app', experimental: [] } },
+    ])) as { name: string };
+    expect(meta.name).toBe('fx-gate');
+    expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), 'demo-app');
+  });
+
+  it('载荷 apiGate 缺席 = 空门 fail-closed：裁决核仍必经（空声明集 + 未名应用；修复前红：门禁静默放行）', async () => {
+    gateSpy().mockClear();
+    const { ch, dir } = setup();
+    const entry = writeApp(
+      dir,
+      'fx-gate2.ts',
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'fx-gate2';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    await ch.host.call('svc', 'load', [{ id: 'g2', entry }]);
+    expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), undefined);
   });
 });

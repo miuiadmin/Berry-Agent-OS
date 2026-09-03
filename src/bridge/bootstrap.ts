@@ -464,12 +464,14 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
     endpoint,
     worker,
     load(row) {
-      // 只投影克隆面字段（builtin 函数引用绝不进消息——worker 行恒无 builtin）
+      // 只投影克隆面字段（builtin 函数引用绝不进消息——worker 行恒无 builtin）；
+      // apiGate 随行过桥（就绪度审计 20260903 P0 送达链：worker 域同面执法——
+      // undefined 经 JSON 克隆自然缺席）
       return endpoint
         .call<WorkerModuleMeta>(
           'svc',
           'load',
-          [{ id: row.id, entry: row.entry, config: row.config, sandbox: row.sandbox }],
+          [{ id: row.id, entry: row.entry, config: row.config, sandbox: row.sandbox, apiGate: row.apiGate }],
           { timeoutMs: opts.loadTimeoutMs ?? 60_000 },
         )
         .then((meta) => {

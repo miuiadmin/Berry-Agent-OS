@@ -971,3 +971,66 @@ describe('partitionPlan：装载计划分区', () => {
     expect(part.zoneRows.get('chat')!.map((r) => r.id)).toEqual(['mountable']);
   });
 });
+
+/* ---------------- API 声明门填充（就绪度审计 20260903 P0 送达链源点） ---------------- */
+
+describe('loadComposition：第三方行 API 声明门（apiGate 随计划行）', () => {
+  /** 建装机第三方包（入口 + 可选清单），返回数据目录 */
+  function makeInstalledApp(manifest?: string): string {
+    const dataDir = makeDataDir();
+    const pkgDir = join(dataDir, 'apps', 'node_modules', 'demo-pkg');
+    mkdirSync(pkgDir, { recursive: true });
+    // npm 目录形入口走约定候选（index.ts——entry.ts 不在 resolvePackageEntry 候选面）
+    writeEntryFile(pkgDir, 'index.ts');
+    if (manifest !== undefined) writeFileSync(join(pkgDir, 'demo-pkg.app.yaml'), manifest);
+    writeOverlay(dataDir, '  - id: p1\n    pkg: demo-pkg\n    apps: [chat]\n');
+    return dataDir;
+  }
+
+  /** 从计划里按行 id 取行（不按 plan[0]——免疫兄弟在飞的默认层行增删） */
+  function rowById(dataDir: string): Record<string, unknown> {
+    const plan = loadUserComposition(dataDir).plan as Array<Record<string, unknown>>;
+    return plan.find((row) => row['id'] === 'p1')!;
+  }
+
+  it('装机清单声明实验键：apiGate 随行（appId 归因 + 声明集数组形——跨桥直通前提形状）', () => {
+    // experimental 键域 invariant ∈ VIRTUAL_API_KEYS——现役六键全 stable，此处
+    // 借 stable 键测「声明集随行送达」的传输面（tier 语义非本测靶）
+    const dataDir = makeInstalledApp(
+      [
+        'id: vendor/demo',
+        'label: 演示',
+        'components:',
+        '  - builtin:chat',
+        'api:',
+        '  minApiVersion: "1.0"',
+        '  experimental:',
+        '    - berryagent/llm',
+      ].join('\n'),
+    );
+    const p1 = rowById(dataDir);
+    expect(p1['entry']).toBeTruthy();
+    expect(p1['apiGate']).toEqual({ appId: 'vendor/demo', experimental: ['berryagent/llm'] });
+  });
+
+  it('min 地板拒载：转 unresolved 行（消息带装载门归因——boot 断言拒启 / dump-config 行级可见）', () => {
+    const dataDir = makeInstalledApp(
+      ['id: vendor/demo', 'label: 演示', 'components:', '  - builtin:chat', 'api:', '  minApiVersion: "99.0"'].join(
+        '\n',
+      ),
+    );
+    const p1 = rowById(dataDir);
+    expect(p1['unresolved']).toContain('装载门拒载');
+    expect(p1['unresolved']).toContain('API 面版本');
+    expect('entry' in p1).toBe(false);
+    expect('apiGate' in p1).toBe(false);
+  });
+
+  it('清单缺席（legacy 容忍态）：apiGate 键缺席（空门由 loader fail-closed 兜底——两半各司其职）', () => {
+    const dataDir = makeInstalledApp();
+    const p1 = rowById(dataDir);
+    expect(p1['entry']).toBeTruthy();
+    expect('apiGate' in p1).toBe(false);
+    expect(p1['unresolved']).toBeUndefined();
+  });
+});

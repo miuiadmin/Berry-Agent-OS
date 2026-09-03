@@ -372,12 +372,30 @@ export function startWorkerRealm(port: BridgePort, workerId: string): BridgeEndp
     /* svc.load：jiti import + 形状/事件校验（worker 半的全部装载职责），
      * 元数据过界回宿主（结构化克隆——schema 是纯数据对象，PoC 实证无损） */
     .handle('svc', 'load', async ([row]) => {
-      const lite = row as { id: string; entry?: string };
+      // lite 载荷 = bootstrap/external-domain domain.load 的投影克隆面（apiGate
+      // 随行过桥——就绪度审计 20260903 P0 送达链；undefined 经 JSON 克隆缺席）
+      const lite = row as {
+        id: string;
+        entry?: string;
+        apiGate?: { appId: string; experimental: readonly string[] };
+      };
       if (typeof lite.id !== 'string' || typeof lite.entry !== 'string') {
         throw new AppError(APP_LOAD_FAILED, 'svc.load 载荷缺 id/entry（装载管线不变量被破坏）');
       }
+      if (
+        lite.apiGate !== undefined &&
+        (typeof lite.apiGate.appId !== 'string' || !Array.isArray(lite.apiGate.experimental))
+      ) {
+        throw new AppError(APP_LOAD_FAILED, 'svc.load 载荷 apiGate 形状非法（装载管线不变量被破坏）');
+      }
       realmJiti ??= createAppJiti();
-      const mod = await importAppEntry(realmJiti, lite.entry);
+      // 数组形门上下文 → Set 形装载窗（AppPlanRow.apiGate 契约注记——主域
+      // loadApps 同一转换，两域同面执法）
+      const gate =
+        lite.apiGate === undefined
+          ? undefined
+          : { appId: lite.apiGate.appId, experimental: new Set(lite.apiGate.experimental) };
+      const mod = await importAppEntry(realmJiti, lite.entry, gate);
       const module = validateModuleShape(mod, lite.id);
       validateEventDefs(module.events, lite.id);
       modules.set(lite.id, module);

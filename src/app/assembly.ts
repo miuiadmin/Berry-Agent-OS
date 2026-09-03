@@ -149,6 +149,7 @@ import {
   resolveApp,
   mergeRequestForApp,
   resolveDefaultApp,
+  readApiGateAtRoot,
 } from './app-registry.js';
 import { buildHostFace } from './host-face.js';
 import type { FormFactor } from '../contracts/api.js';
@@ -172,7 +173,7 @@ import { registerBuiltinCommands } from './commands.js';
 import { AllowlistStore } from './allowlist-store.js';
 import { formatUsagePanel } from './usage.js';
 import { readFileSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 // ChildRegistry = mcp 子进程登记簿机制（契约篇 §6.6 子进程治理条 exec 腿复用，
 // 2026-08-29 critic #1：exec 结构上不见 mcp——组合根注入，killTree 闭包同款先例）
 import { ChildRegistry } from '../mcp/index.js';
@@ -1361,7 +1362,10 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * persistence/virtualFaces/registry 均在本行之后才声明——TDZ 安全（闭包只在
    * install/update/uninstall 运行期被调，彼时装配已完成全部初始化）。
    * - loadEntry：词表账本收割面——与装载管线同一 jiti 工厂同一 import 门禁
-   *   （virtualFaces + guardTransform），一次性装载读 name/events 词名；
+   *   （virtualFaces + guardTransform），一次性装载读 name/events 词名；API
+   *   声明门随行（就绪度审计 20260903 P0 送达链——入口目录即构件根的标准
+   *   布局下读清单 api 块；min 地板拒载在收割面即响〔fail-loud〕，嵌套入口
+   *   布局读不到清单 = 空门 fail-closed——首个实验键应用落地时按需收口）；
    * - affectedSessionCounts：受影响会话计数取数面——flush 屏障内嵌（write-behind
    *   尾部对查询不可见）+ Store 全库精确聚合（latestSessionId 同族宿主侧直查）；
    * - emitUninstalled：卸载成功尾双落地——总线广播 + 当前会话流落账
@@ -1372,7 +1376,18 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    *   ReloadResult → ReloadOutcome 映射在此（三态投影：queued/done/error）。 */
   const appsService = createAppsService({
     dataDir: compositionDir,
-    loadEntry: (entry) => importAppEntry(createAppJiti(virtualFaces), entry),
+    // 装载门随行（就绪度审计 20260903 P0 送达链第四消费面）：装配根 harvest 闭包
+    // 读构件根清单 → 数组形转 Set 进装载窗（与 loadApps/worker 域同律）；嵌套入口
+    // 根无清单 = 空门 fail-closed（loader 侧兜底）
+    loadEntry: (entry) =>
+      importAppEntry(
+        createAppJiti(virtualFaces),
+        entry,
+        (() => {
+          const gate = readApiGateAtRoot(dirname(entry));
+          return gate === undefined ? undefined : { appId: gate.appId, experimental: new Set(gate.experimental) };
+        })(),
+      ),
     // persist:false 诊断装配不注入——服务面按缺省省略受影响会话计数（queryEvents 空降级同款）
     ...(persistEnabled
       ? {

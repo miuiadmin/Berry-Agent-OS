@@ -5,16 +5,17 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AppError, APP_DUPLICATE, APP_INVALID, APP_NOT_FOUND } from '../contracts/errors.js';
+import { AppError, API_VERSION_MISMATCH, APP_DUPLICATE, APP_INVALID, APP_NOT_FOUND } from '../contracts/errors.js';
 import { validateAppManifest } from '../contracts/app.js';
 import {
   assertAppComponents,
   loadOfficialApps,
   mergeRequestForApp,
   OFFICIAL_APPS_DIR,
+  readApiGateAtRoot,
   resolveApp,
   resolveDefaultApp,
 } from './app-registry.js';
@@ -431,5 +432,81 @@ describe('mergeRequestForApp：delegable 委派请求合并钩子（与 agents/*
     const narrowed = merge({ ...request, toolFilter: ['read', 'write'], persona: '请求人格' } as typeof request);
     expect(narrowed.toolFilter).toEqual(['read']); // 交集；write 不在清单即被裁
     expect(narrowed.persona).toBe('应用人格'); // persona 钉死——请求人格被清单覆盖
+  });
+});
+
+/* ---------------- readApiGateAtRoot：装机清单声明门读取（就绪度审计 20260903 P0 回归锁） ---------------- */
+
+describe('readApiGateAtRoot：构件根 → API 声明门（§6.13.4 装载门送达链源点）', () => {
+  /** 建临时构件根 + 写清单（返回根目录） */
+  function makeArtifactRoot(manifest?: string): string {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-gate-')));
+    if (manifest !== undefined) writeFileSync(join(root, 'demo.app.yaml'), manifest);
+    return root;
+  }
+
+  it('api 块在场且声明实验键：裁决产物数组形返回（appId 归因 + 声明集）', () => {
+    const root = makeArtifactRoot(
+      [
+        'id: vendor/demo',
+        'label: 演示',
+        'components:',
+        '  - builtin:chat',
+        'api:',
+        '  minApiVersion: "1.0"',
+        '  experimental:',
+        '    - berryagent/llm',
+      ].join('\n'),
+    );
+    expect(readApiGateAtRoot(root)).toEqual({
+      appId: 'vendor/demo',
+      experimental: ['berryagent/llm'],
+    });
+  });
+
+  it('api 块在场无 experimental：空声明集门（fail-closed 同效形）', () => {
+    const root = makeArtifactRoot(
+      ['id: vendor/demo', 'label: 演示', 'components:', '  - builtin:chat', 'api:', '  minApiVersion: "1.0"'].join(
+        '\n',
+      ),
+    );
+    expect(readApiGateAtRoot(root)).toEqual({ appId: 'vendor/demo', experimental: [] });
+  });
+
+  it('api 块缺席（legacy 容忍态）：空声明集门（不拒不静默漏门）', () => {
+    const root = makeArtifactRoot(['id: vendor/demo', 'label: 演示', 'components:', '  - builtin:chat'].join('\n'));
+    expect(readApiGateAtRoot(root)).toEqual({ appId: 'vendor/demo', experimental: [] });
+  });
+
+  it('min 地板拒载穿透：宿主 apiVersion < 清单 min → API_VERSION_MISMATCH 原样抛（合成方捕转 unresolved）', () => {
+    // 宿主包根 apiVersion 恒 1.0（readHostVersionFields 真读）——99.0 地板确定性低于宿主
+    const root = makeArtifactRoot(
+      ['id: vendor/demo', 'label: 演示', 'components:', '  - builtin:chat', 'api:', '  minApiVersion: "99.0"'].join(
+        '\n',
+      ),
+    );
+    expectCode(() => readApiGateAtRoot(root), API_VERSION_MISMATCH);
+  });
+
+  it('清单缺席 / 根不可读 / 坏 yaml / schema 违规：undefined（fail-closed 空门，不炸合成面）', () => {
+    expect(readApiGateAtRoot(makeArtifactRoot())).toBeUndefined();
+    expect(readApiGateAtRoot(join(realpathSync(tmpdir()), 'no-such-root-xyz'))).toBeUndefined();
+    const badYaml = makeArtifactRoot('id: [unclosed');
+    expect(readApiGateAtRoot(badYaml)).toBeUndefined();
+    const badSchema = makeArtifactRoot('id: vendor/demo\nlabel: 演示\ncomponents: []\n');
+    expect(readApiGateAtRoot(badSchema)).toBeUndefined();
+  });
+
+  it('目录信任零介入：任一根可读（路径形 ref 的开发目录同面）——apiGate 与装载位无关纯读', () => {
+    const nested = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-gate-nested-')));
+    const root = join(nested, 'pkg');
+    mkdirSync(root);
+    writeFileSync(
+      join(root, 'other.app.yaml'),
+      ['id: vendor/other', 'label: 二号', 'components:', '  - builtin:chat', 'api:', '  minApiVersion: "1.0"'].join(
+        '\n',
+      ),
+    );
+    expect(readApiGateAtRoot(root)).toEqual({ appId: 'vendor/other', experimental: [] });
   });
 });

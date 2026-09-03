@@ -116,15 +116,21 @@ let currentTreeRoot: string | undefined;
 /**
  * 当前装载窗的 API 装载门上下文（API 治理 §6.13.4 执法点①，第八十七批）：
  * 与 currentTreeRoot 同生命周期（装载排队链窗内设置/finally 清空）——装载行的
- * 清单 api 块裁决产物（应用 id + 已声明实验键集）。undefined = 无声明可达
- * （builtin 行/防御路径）——实验键 import 恒拒（fail-closed；现役六键全 stable，
- * 空集与缺席同效）。模块实例级（worker realm 自持实例同律）。
+ * 清单 api 块裁决产物（应用 id + 已声明实验键集）。undefined = 官方 builtin 行
+ * （宿主函数件不 jiti）/ 防御路径 / 清单缺席或不可读——实验键 import 按**空
+ * 声明集**恒拒（真 fail-closed；就绪度审计 20260903 P0 修死：原码守卫前置
+ * 跳过 = fail-open，与注释宣称相反）。模块实例级（worker realm 自持实例同律）。
  */
 let gateWindow: ImportGateContext | undefined;
 
+/** 空声明集（gate 缺席时的 fail-closed 缺省——模块级单例免逐说明符重建） */
+const EMPTY_EXPERIMENTAL: ReadonlySet<string> = new Set<string>();
+
 /**
- * API 装载门上下文（装载门裁决结果在装载窗内的形态）：loadApps 经
- * experimentalByRow seam 自组合根取得（组合根闭包读 app-registry 裁决产物）。
+ * API 装载门上下文（装载门裁决结果在装载窗内的形态）：来源两腿——主域
+ * loadApps 从计划行 `AppPlanRow.apiGate` 构造（组合树合成期从装机清单读出）；
+ * worker/external 域 svc.load 载荷过桥重建（数组形→Set，就绪度审计 20260903
+ * P0 送达链接通）。
  */
 export interface ImportGateContext {
   /** 行属应用 id（错误消息归因用） */
@@ -253,9 +259,12 @@ function guardTransform(opts: TransformOptions): TransformResult {
     for (const specifier of extractSpecifiers(opts.source ?? '')) {
       // 实验键门禁（API 治理 §6.13.4 执法点①，第八十七批）：说明符属虚拟键且
       // 键表 tier = experimental 而装载行未声明 → API_EXPERIMENTAL_UNDECLARED
-      // 拒载（契约即知情）。现役六键全 stable 故恒放行——门禁先行、键随后到。
-      if (gateWindow !== undefined && (VIRTUAL_MODULE_KEYS as readonly string[]).includes(specifier)) {
-        assertExperimentalDeclared(specifier, gateWindow.experimental, gateWindow.appId);
+      // 拒载（契约即知情）。gate 缺席（builtin 行/防御路径/清单不可读）= 空声明
+      // 集仍必经裁决核——fail-closed 真身（就绪度审计 20260903 P0：原码
+      // gateWindow !== undefined 前置跳过 = fail-open 静默放行，修死）。现役六键
+      // 全 stable 故放行——门禁先行、键随后到。
+      if ((VIRTUAL_MODULE_KEYS as readonly string[]).includes(specifier)) {
+        assertExperimentalDeclared(specifier, gateWindow?.experimental ?? EMPTY_EXPERIMENTAL, gateWindow?.appId);
       }
       const violation = adjudicateImport(specifier, dirname(opts.filename), treeRoot);
       if (violation !== undefined) {
@@ -706,14 +715,6 @@ export interface LoadAppsOptions {
    * 装载管线对载体差异零感知）。缺注入时 external 行 fail-closed 拒载同语义。
    */
   workerLoader?: WorkerRowLoader;
-  /**
-   * 行级 API 装载门上下文 seam（API 治理 §6.13.4 执法点①，第八十七批）：
-   * 组合根闭包回查（装载门裁决产物按行 id 取——官方件随包无 api 块声明，现役
-   * 恒 undefined；第三方 npm 应用装机态经 install 管线绑定行后填）。undefined =
-   * 无声明可达——实验键 import 恒拒（fail-closed；现役六键全 stable 空档零差）。
-   * 回调契约与 registerSkills 同律：不得抛错（查无行返回 undefined 即可）。
-   */
-  importGateByRow?: (rowId: string) => ImportGateContext | undefined;
 }
 
 /**
@@ -833,8 +834,16 @@ export async function loadApps(
       if (row.builtin === undefined) {
         // import 门禁树根 = 入口所在目录（realpath 归一）——设置/求值/清空三步
         // 收口在 importAppEntry（第二十七批刀二：worker 半同用此件）；API 装载门
-        // 上下文（实验键声明集）随第三参同窗传入
-        mod = await importAppEntry(jiti, row.entry!, opts?.importGateByRow?.(row.id));
+        // 上下文自计划行 apiGate 字段构造（就绪度审计 20260903 P0 送达链接通：
+        // 组合树合成期从装机清单读出随行携带——数组形→Set；原 importGateByRow
+        // seam 退役——产码零供方的断链 seam 由行字段取代）
+        mod = await importAppEntry(
+          jiti,
+          row.entry!,
+          row.apiGate === undefined
+            ? undefined
+            : { appId: row.apiGate.appId, experimental: new Set(row.apiGate.experimental) },
+        );
       } else {
         // 官方件（契约篇 §6.1 `builtin:` 前缀）：宿主随包函数引用，不经 jiti、
         // 不受应用零 import 约束——包成模块记录后与文件应用走**完全同轨**的形状

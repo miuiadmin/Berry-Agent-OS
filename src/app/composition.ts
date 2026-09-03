@@ -21,6 +21,7 @@ import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
 import { canonicalWorkspaceRoot } from '../context/workspace.js';
 import type { BuiltinAppModule, CompositionRow, AppPlanRow, AppSkipReason, RowSandbox } from '../contracts/app.js';
 import { AppIdPattern, exclusiveAppOf } from '../contracts/app.js';
+import { readApiGateAtRoot } from './app-registry.js';
 
 /** overlay 文件名（<数据目录>/overlay.yaml，契约篇 §5.2） */
 export const OVERLAY_FILENAME = 'overlay.yaml';
@@ -568,15 +569,21 @@ function resolvePackageEntry(pkgDir: string): string | undefined {
 }
 
 /**
+ * 解析应用引用 → 构件根目录（入口解析与 API 声明门读取共用的根公式单源——
+ * 路径形 = 引用本身；npm 形 = `<数据目录>/apps/node_modules/<包名>`）。
+ */
+function resolveAppRoot(ref: string, dataDir: string): string {
+  return isPathReference(ref) ? resolve(process.cwd(), ref) : join(dataDir, 'apps', 'node_modules', ...ref.split('/'));
+}
+
+/**
  * 解析应用引用 → 入口绝对路径。
  * 路径形态（./ ../ 或绝对）：相对 cwd 直引文件或目录（local 源——开发迭代用）。
  * 裸名：`<数据目录>/apps/node_modules/<包名>`（npm 装机子树，§6.1）。
  * @returns 入口绝对路径；无法解析返回 undefined（→ unresolved 行进启动断言——加载器永不自动安装）
  */
 export function resolveAppEntry(ref: string, dataDir: string): string | undefined {
-  const target = isPathReference(ref)
-    ? resolve(process.cwd(), ref)
-    : join(dataDir, 'apps', 'node_modules', ...ref.split('/'));
+  const target = resolveAppRoot(ref, dataDir);
   if (!existsSync(target)) return undefined;
   if (statSync(target).isFile()) return target; // 直指入口文件
   if (statSync(target).isDirectory()) return resolvePackageEntry(target);
@@ -714,16 +721,31 @@ export function loadComposition(
       continue;
     }
     const entry = resolveAppEntry(ref, dataDir);
+    // API 声明门读取（就绪度审计 20260903 P0 送达链接通）：入口已解析才读
+    //（未解析行不装载无门可言）。min 地板拒载（API_VERSION_MISMATCH）转
+    // unresolved 行——与入口解析失败同面拒绝式即响（boot 断言拒启 / dump-config
+    // 诊断面行级归因），消息自带升级指引；清单缺席/坏清单 = 空门（fail-closed，
+    // 见 readApiGateAtRoot 错误语义两分）。
+    let gateUnresolved: string | undefined;
+    let apiGate: { appId: string; experimental: readonly string[] } | undefined;
+    if (entry !== undefined) {
+      try {
+        apiGate = readApiGateAtRoot(resolveAppRoot(ref, dataDir));
+      } catch (err) {
+        gateUnresolved = `应用「${ref}」装载门拒载：${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+    const unresolved =
+      entry === undefined
+        ? `应用「${ref}」入口无法解析（<数据目录>/apps/node_modules/ 下未安装或无入口文件）——加载器永不自动安装，请先安装`
+        : gateUnresolved;
     plan.push({
       id: row.id,
       // 引用透传（装载身份串）：应用内存预算 join 键——激活/未解析两态都带
       //（未解析行不装载无消费面，带上无妨且归因完整）
       pkg: ref,
-      ...(entry === undefined
-        ? {
-            unresolved: `应用「${ref}」入口无法解析（<数据目录>/apps/node_modules/ 下未安装或无入口文件）——加载器永不自动安装，请先安装`,
-          }
-        : { entry }),
+      ...(unresolved !== undefined ? { unresolved } : { entry }),
+      ...(apiGate === undefined ? {} : { apiGate }),
       ...(row.config === undefined ? {} : { config: row.config }),
       ...(row.sandbox === undefined ? {} : { sandbox: row.sandbox }),
       ...(row.apps === undefined ? {} : { apps: row.apps }),
