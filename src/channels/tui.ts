@@ -131,6 +131,21 @@ export interface TuiChannelOptions {
    * 不注入 = 面板缺席零变化。
    */
   readonly todoFor?: (sessionId?: string) => readonly TodoItemFace[] | null | undefined;
+  /**
+   * 忙态外源（增强 7 终端外显——attach 纯客户端形态注入）：在场 = 进度态由
+   * 本闭包派生（attach 侧 = runningBySession 登记簿任一 true 即忙——种子/增量
+   * 单源，重连漏 start 的结构性盲区由清单种子自愈，不另设计数器）；缺席 =
+   * 本地 TUI 形态走通道内两路净计数（聚焦 handle + 非聚焦 handleActivity——
+   * 进程内事件无错过窗）。两形态分源单写点 syncProgress。
+   */
+  readonly busyFor?: () => boolean;
+  /**
+   * 当前聚焦会话 id 活取值（增强 7 起屏一次同解析——D4 theme「+起屏一次同
+   * 解析」先例同款）：起屏 title 缀短 id 用（boot 路 focus 通知早于订阅，首绘
+   * 不走 repaint——聚焦 id 由宿主闭包活取）。缺席 = 起屏 title 纯基线，首次
+   * repaint 起（显式带键）自然补短 id。
+   */
+  readonly focusIdFor?: () => string | undefined;
 }
 
 /** TUI 通道面（app 组合根持有） */
@@ -240,12 +255,18 @@ let disarmTerminalRestore: (() => void) | null = null;
  * 复位写幂等镜像 tui.stop() 的全部设备态写：对未激活模式即终端缺省值复位，恒
  * 安全（空 kitty 栈弹栈合法）。生命周期 = channel start() 武装 → stop() 解除，
  * 钩子只活在〔start, stop）崩溃窗内（正常停屏的复位归 tui.stop() 单源）。
+ *
+ * @param baselineTitle 外显标题基线（增强 7——opts.title；在场时复原写 OSC 0
+ *   镜像 stop() 末写「title 复原到基线」；缺席 = 该形态零标题管理，不写）
  */
-function armTerminalRestore(): void {
+function armTerminalRestore(baselineTitle: string | undefined): void {
   disarmTerminalRestore?.();
   const restore = (): void => {
     try {
       process.stdout.write('\x1b]9;4;0\x07'); // OSC 9;4 进度态清零（镜像 stop() 首写）
+      if (baselineTitle !== undefined) {
+        process.stdout.write(`\x1b]0;${baselineTitle}\x07`); // 增强 7：title 复原到基线（镜像 stop() 末写）
+      }
       process.stdout.write('\x1b[?2004l'); // 括号粘贴模式关闭
       process.stdout.write('\x1b[<u'); // kitty 键盘协议弹栈（空栈弹栈合法）
       process.stdout.write('\x1b[>4;0m'); // modifyOtherKeys 复位缺省
@@ -671,9 +692,54 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     return ` ✓ 用量 ${fmtTokens(usageAcc.totalTokens)}（入 ${fmtTokens(usageAcc.input)} · 出 ${fmtTokens(usageAcc.output)}）${costSeg}`;
   };
 
+  /* ---- 终端外显（增强 7：setTitle/setProgress 接线——pi-tui 内建件零自研） ---- */
+  /**
+   * 外显忙态净计数（本地形态）：聚焦 handle() 与非聚焦 handleActivity() 两路
+   * agent_start/end 共用一本账 +1/-1——进度态语义 = 任一会话在飞即忙（终端
+   * 标签页注意力模型，非聚焦后台 run 同样占忙态）。进程内事件无错过窗；防御
+   * 位 clamp ≥ 0（错序/重复 end 不下探负值——负计数会让后到的单 start 误判
+   * 闲）。attach 形态不消费本账（busyFor 外源单源，计数停拨——重连漏 start
+   * 的结构性盲区由清单种子自愈，不另设计数器）。
+   */
+  let busyCount = 0;
+  /** 进度态去重镜像（上次写下的态——OSC 重写噪声抑制；stop() 强制清零除外） */
+  let progressShown = false;
+  /** 标题去重镜像（同串不重写——OSC 重写噪声抑制；stop() 强制回基线除外） */
+  let titleShown: string | undefined;
+  /**
+   * 进度态统一写点（增强 7）：两形态分源——busyFor 在场（attach 纯客户端）=
+   * 登记簿派生活取（任一 true 即忙）；缺席（本地 TUI）= 净计数 > 0。经 pi-tui
+   * setProgress 写 OSC 9;4（内建件自持 keepalive interval——进程内零自研）。
+   * 写点 = handle/handleActivity 的 agent_start/end、repaint、start、stop。
+   */
+  const syncProgress = (): void => {
+    const busy = opts.busyFor !== undefined ? opts.busyFor() : busyCount > 0;
+    if (busy === progressShown) return;
+    progressShown = busy;
+    terminal.setProgress(busy);
+  };
+  /**
+   * 标题统一写点（增强 7）：基线 = opts.title（页脚同源——`Berry <版本>` /
+   * attach 形态 `Berry attach <版本>`；缺席 = 零标题管理档，进度态照常）；
+   * 聚焦在案 = 基线 + ` · <短id>`（slice(0,8) 非聚焦摘要行同款——会话身份
+   * 通道已在案，不引应用身份注入）。写点 = start（focusIdFor 活取——起屏
+   * 聚焦在案即缀）与 repaint（显式键）。
+   */
+  const syncTitle = (sessionId: string | undefined): void => {
+    if (opts.title === undefined) return;
+    const next = sessionId === undefined ? opts.title : `${opts.title} · ${sessionId.slice(0, 8)}`;
+    if (next === titleShown) return;
+    titleShown = next;
+    terminal.setTitle(next);
+  };
+
   const handle = (event: AgentEvent): void => {
     switch (event.type) {
       case 'agent_start':
+        // 增强 7：忙态记账（本地形态净计数 +1；attach 形态账不消费但写点同路
+        // ——busyFor 活取单源）+ 进度态外显同步
+        busyCount += 1;
+        syncProgress();
         // 增强 3：状态行 Loader 化——转轮启转（色经 loaderSpinnerColor 槽随主题）；
         // 「工作中」长文本不着（着色克制律）
         statusLoader.setMessage(' 工作中');
@@ -683,6 +749,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         usageAcc = null;
         break;
       case 'agent_end':
+        // 增强 7：忙态记账（clamp ≥ 0——错序/重复 end 不下探负值）+ 进度态外显同步
+        busyCount = Math.max(0, busyCount - 1);
+        syncProgress();
         // 防漏关（S3）：在飞占位槽开着一轮无 message_end 即结束（abort 中断路）
         // ——空终值关槽（closeStreaming 内 filter 空串，零追加行）
         if (streaming) closeStreaming('', []);
@@ -830,9 +899,15 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     const colorize = accentColorizer(opts.themeFor?.(sessionId));
     switch (event.type) {
       case 'agent_start':
+        // 增强 7：非聚焦腿同账（本地形态净计数 +1——后台 run 同样占忙态）+ 外显同步
+        busyCount += 1;
+        syncProgress();
         appendLines([`${colorize(`⧗ 会话 ${short}`)} 后台工作中`]);
         break;
       case 'agent_end':
+        // 增强 7：非聚焦腿同账（clamp ≥ 0）+ 外显同步
+        busyCount = Math.max(0, busyCount - 1);
+        syncProgress();
         // 收场三档（#42）：修前恒显「✓ 后台完成」——失败/中止 run 被伪装成
         // 成功，后台炸了用户毫不知情。三档与 RunStatus 一一对应（agent/events）
         appendLines([
@@ -873,6 +948,10 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     // D4 theme：换装先行（清屏重画时点按目标会话重算聚焦着色器——边框/页脚/
     // 转轮槽随之换装；后续写点读新 focusColorize）
     applyTheme(sessionId);
+    // 增强 7：外显随聚焦换装（title 缀目标会话短 id；进度态分源重估——attach
+    // 形态重连 repull 时点的清单种子经此写点反映到进度态）
+    syncTitle(sessionId);
+    syncProgress();
     // 复位顺序先于清空：streaming 槽引用的容器随 messages.clear() 一并摘除，
     // 先置 null 防孤儿引用继续 setText 到已弃容器
     streaming = null;
@@ -913,8 +992,14 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     },
     start() {
       // 终端态复原钩子武装（TUI-1）：真终端判据（instanceof）防测试注入终端污染
-      // exit 钩子清单；复起路同样重挂（arm 幂等——先解除旧钩子再挂新的）
-      if (terminal instanceof ProcessTerminal) armTerminalRestore();
+      // exit 钩子清单；复起路同样重挂（arm 幂等——先解除旧钩子再挂新的）；增强 7
+      // 起传标题基线（退出钩子镜像 stop() 末写的 title 复原）
+      if (terminal instanceof ProcessTerminal) armTerminalRestore(opts.title);
+      // 增强 7：外显起屏同步（首起与复起两路同过——title 聚焦在案即缀短 id
+      // 〔focusIdFor 活取，D4「起屏一次同解析」先例同款〕；进度态分源重估——
+      // attach 形态真握手清单种子先于 start 落簿，busyFor 首写即真值）
+      syncTitle(opts.focusIdFor?.());
+      syncProgress();
       // 复起路（批 C 桌面换防——stop 后再 start）：组件树跨停屏保连续，不重拉
       // 历史（重拉即重复行）；桌面引擎曾在屏上绘过，差分基线（previousLines）
       // 已失真——force 复位渲染状态强制全帧重画
@@ -940,6 +1025,16 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       tui.stop(options);
       // 增强 3：停轮（interval 清理——停屏期转轮空转纯噪声）
       statusLoader.stop();
+      // 增强 7：外显复原写点①（stop——换防去系统桌面栈）：进度态清零（pi-tui
+      // setProgress(false) 清 OSC 9;4 + keepalive interval）+ 标题回基线（与
+      // armTerminalRestore 退出钩子两写点同复原——正常停屏归本写点单源，崩溃
+      // 窗归钩子镜像）；强制写位（不去重——跨 stop/start 周期的镜像一致）
+      progressShown = false;
+      terminal.setProgress(false);
+      if (opts.title !== undefined && titleShown !== opts.title) {
+        titleShown = opts.title;
+        terminal.setTitle(opts.title);
+      }
       // 正常停屏解除复原钩子（TUI-1）：tui.stop() 已做全部复位，退出时不再重复写
       disarmTerminalRestore?.();
     },

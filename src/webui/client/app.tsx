@@ -55,6 +55,8 @@ export interface LiveTool {
   name: string;
   /** 参数 JSON 串预览（start 帧携带） */
   argsText?: string;
+  /** partial 输出尾行（update 帧携带——增强 5 SPA 同源腿；定稿后让位 output） */
+  tail?: string;
   /** 输出预览（end 帧携带；start→end 窗口期缺省） */
   output?: string;
   /** 错误旗（end 帧） */
@@ -118,6 +120,32 @@ export function previewOf(result: unknown): string | undefined {
     }
   }
   return String(result);
+}
+
+/** partial 尾行截断帽（码点计——TUI 活动面板同值 100，两呈现面同截断观感） */
+const TAIL_MAX = 100;
+
+/**
+ * partial 输出取尾行（增强 5 SPA 同源腿——语义与 TUI activityTail 同源）：
+ * AgentToolResult.content 文本块倒扫末条非空行（工具流式输出通常尾部追加——
+ * bash 逐行吐出，尾行即最新进度）；码点安全截断（Array.from 切片防孤代理）；
+ * 无文本块/非对象载荷 = 空串（摘要行右缀退化为纯省略态）。导出为单测锚。
+ */
+export function tailOf(partial: unknown): string {
+  if (typeof partial !== 'object' || partial === null) return '';
+  const blocks = (partial as { content?: unknown }).content;
+  if (!Array.isArray(blocks)) return '';
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i] as { type?: unknown; text?: unknown } | null;
+    if (block === null || block.type !== 'text' || typeof block.text !== 'string') continue;
+    const lines = block.text.split('\n').filter((line) => line.trim() !== '');
+    if (lines.length > 0) {
+      // 码点切片再接回（截断不劈代理对——emoji 尾行安全）
+      const last = lines[lines.length - 1]!;
+      return Array.from(last).slice(0, TAIL_MAX).join('');
+    }
+  }
+  return '';
 }
 
 /** epoch 毫秒 → 相对时长短文案（清单行用；缺省值容缺） */
@@ -509,6 +537,24 @@ export function App() {
             });
             return;
           }
+          case 'tool_execution_update': {
+            // 增强 5 SPA 同源腿（技术栈 §4.1）：partial 输出尾行入活体工具卡
+            //（定稿前摘要行右缀）；partialResult 是累积快照——整体替换非追加，
+            // 尾行提取语义与 TUI activityTail 同源（文本块倒扫末条非空行）
+            const callId = String(ev.toolCallId);
+            const tail = tailOf(ev.partialResult);
+            setLive((prev) => {
+              const tools = new Map(prev?.tools ?? []);
+              // start 先到的常态形 = 原位覆盖保 argsText；update 先到的防御形
+              // = 缺席补卡（帧序错乱/中途接线不炸——name 以帧透传为准、未收束态）
+              tools.set(callId, {
+                ...(tools.get(callId) ?? { name: String(ev.toolName), done: false }),
+                tail,
+              });
+              return { ...(prev ?? emptyLive()), tools };
+            });
+            return;
+          }
           case 'tool_execution_end': {
             const callId = String(ev.toolCallId);
             const name = String(ev.toolName);
@@ -516,13 +562,14 @@ export function App() {
             const isError = ev.isError === true;
             setLive((prev) => {
               const tools = new Map(prev?.tools ?? []);
+              // 定稿即让位：tail 不再保留（end 帧载荷含全量输出——尾行使命已尽）
               tools.set(callId, { name, output, isError, done: true });
               return { ...(prev ?? emptyLive()), tools };
             });
             return;
           }
           default:
-            return; // turn_*/tool_execution_update v1 不消费
+            return; // turn_* v1 不消费（tool_execution_update 已入活体工具卡——增强 5 同源腿）
         }
       }
       if (env.kind === 'notify') {

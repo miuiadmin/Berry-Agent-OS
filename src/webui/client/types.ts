@@ -76,9 +76,11 @@ interface DisplayMessage {
 }
 
 /**
- * display 族活体事件（锚 AgentEvent 十型——只窄 SPA 消费的五型 + agent_start
+ * display 族活体事件（锚 AgentEvent 十型——只窄 SPA 消费型 + agent_start
  * 复位信号，判别键外字段透传）。message_update.message 是**累积快照**（partial
  * 就地替换后整发，非 token delta——渲染侧整体替换，CR-13）。
+ * tool_execution_update.partialResult 同为累积快照（工具 partial 输出整体
+ * 替换——尾行提取见 app 侧，强化批 2 增强 5 SPA 同源腿）。
  */
 export type DisplayEvent =
   | { readonly type: 'agent_start' }
@@ -90,7 +92,13 @@ export type DisplayEvent =
       readonly toolName: string;
       readonly args?: unknown;
     }
-  | { readonly type: 'tool_execution_update'; readonly toolCallId: string; readonly toolName: string }
+  | {
+      readonly type: 'tool_execution_update';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      /** partial 输出累积快照（AgentToolResult——文本块倒扫取尾行） */
+      readonly partialResult?: unknown;
+    }
   | {
       readonly type: 'tool_execution_end';
       readonly toolCallId: string;

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // 仅 ApiError 值导入（:204 构造用——vi.mock 工厂同源类；其余十一件只在 mock 工厂内
 // 出现，测试体零直接引用，不导入——noUnusedLocals 绿）
 import { ApiError } from './api';
-import { App, previewOf, relTime } from './app';
+import { App, previewOf, relTime, tailOf } from './app';
 import type { ProjectedMessage, SessionSummary } from './types';
 
 /* ---------------- mock 边界 ---------------- */
@@ -393,6 +393,88 @@ describe('App 活体尾部多消息（A10——run 内第二条消息流式时�
     const second = screen.getByText(/第二条流式中/);
     expect(first.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(tool.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe('App 活体工具卡 partial 尾行（强化批 2 增强 5 SPA 同源腿——tool_execution_update 第四消费点）', () => {
+  it('start → update 流尾行 → 摘要行右缀末条非空行；end 落定即让位输出（修前红：update 帧整丢——尾行永不现）', async () => {
+    render(<App />);
+    await untilLoaded();
+    const es = FakeEventSource.instances[0]!;
+    sendFrame(es, {
+      kind: 'display',
+      sessionId: 'live-1',
+      payload: { type: 'tool_execution_start', toolCallId: 'c1', toolName: 'bash', args: {} },
+    });
+    sendFrame(es, {
+      kind: 'display',
+      sessionId: 'live-1',
+      payload: {
+        type: 'tool_execution_update',
+        toolCallId: 'c1',
+        toolName: 'bash',
+        // 累积快照形：多行文本块——尾行是最新进度（空行不计）
+        partialResult: { content: [{ type: 'text', text: '已到第 1 行\n\n已到第 3 行' }] },
+      },
+    });
+    // 修前红位：tool_execution_update 落 default 整丢——'已到第 3 行' 永不上屏
+    expect(screen.getByText('已到第 3 行')).toBeTruthy();
+    expect(screen.queryByText('已到第 1 行')).toBeNull(); // 只取末条非空行非全量
+    // 定稿：尾行让位输出预览、卡片转完成态
+    sendFrame(es, {
+      kind: 'display',
+      sessionId: 'live-1',
+      payload: { type: 'tool_execution_end', toolCallId: 'c1', toolName: 'bash', result: { output: '全部完成' } },
+    });
+    expect(screen.queryByText('已到第 3 行')).toBeNull(); // 尾行使命已尽
+    expect(screen.getByText('全部完成')).toBeTruthy();
+    expect(screen.getByText('完成')).toBeTruthy();
+  });
+
+  it('update 先到的防御形：缺席补卡不炸（帧序错乱/中途接线——name 以帧透传为准）', async () => {
+    render(<App />);
+    await untilLoaded();
+    const es = FakeEventSource.instances[0]!;
+    sendFrame(es, {
+      kind: 'display',
+      sessionId: 'live-1',
+      payload: {
+        type: 'tool_execution_update',
+        toolCallId: 'c-early',
+        toolName: 'bash',
+        partialResult: { content: [{ type: 'text', text: '早到流尾' }] },
+      },
+    });
+    expect(screen.getByText('早到流尾')).toBeTruthy();
+    expect(screen.getByText('bash')).toBeTruthy(); // 补卡工具名来自帧（非 undefined 炸读）
+  });
+});
+
+describe('tailOf（partial 输出尾行提取——增强 5 SPA 同源腿纯函数）', () => {
+  it('文本块倒扫末条非空行 + 跳过非文本块；无文本块/非对象载荷 = 空串', () => {
+    // 多块倒扫：末块非文本（image）跳过、取前块文本
+    const partial = {
+      content: [
+        { type: 'text', text: '行一\n行二' },
+        { type: 'image', data: 'x' },
+      ],
+    };
+    expect(tailOf(partial)).toBe('行二');
+    expect(tailOf({ content: [{ type: 'text', text: '\n \n' }] })).toBe(''); // 全空行
+    expect(tailOf({ content: [] })).toBe('');
+    expect(tailOf({})).toBe(''); // 无 content 键
+    expect(tailOf(undefined)).toBe(''); // 载荷缺席（防御）
+    expect(tailOf('raw')).toBe(''); // 非对象
+  });
+
+  it('码点安全截断帽 100：emoji 不劈代理对（TUI 活动面板同值同语义）', () => {
+    // 断言用 Array.from 计码点（.length 是 UTF-16 单元——emoji 双单元假长）
+    const tail = '🎉'.repeat(60); // 60 码点 120 UTF-16 单元——码点计在帽内不截
+    expect(tailOf({ content: [{ type: 'text', text: tail }] })).toBe(tail);
+    const over = '🎉'.repeat(120); // 码点截到 100——末 20 个弃，无孤代理
+    const cut = tailOf({ content: [{ type: 'text', text: over }] });
+    expect(Array.from(cut)).toHaveLength(100);
+    expect(cut.endsWith('🎉')).toBe(true);
   });
 });
 

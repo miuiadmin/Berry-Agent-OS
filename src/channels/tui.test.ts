@@ -1039,3 +1039,121 @@ describe('TUI 强化批 2 增强 6——usage 状态行（run 级累计，状态
     expect(terminal.frames.slice(mark2).join('')).not.toContain('用量');
   });
 });
+
+/* ---------------- 终端外显（增强 7——setTitle/setProgress 接线） ---------------- */
+
+/** 外显记录终端（增强 7）：fakeTerminal 的 setTitle/setProgress 记录化——断言面 */
+function chromeTerminal(): Terminal & { frames: string[]; titles: string[]; progress: boolean[] } {
+  const base = fakeTerminal();
+  /** setTitle 写下的标题串序（OSC 0 载荷） */
+  const titles: string[] = [];
+  /** setProgress 写下的进度态序（true = OSC 9;4;3 / false = OSC 9;4;0） */
+  const progress: boolean[] = [];
+  return Object.assign(base, {
+    setTitle(title: string) {
+      titles.push(title);
+    },
+    setProgress(active: boolean) {
+      progress.push(active);
+    },
+    titles,
+    progress,
+  });
+}
+
+describe('增强 7 终端外显（进度态两形态分源 + 标题随聚焦换装）', () => {
+  it('本地形态忙态：聚焦与非聚焦两路净计数驱动进度态——任一会话在飞即忙（后台 run 同占）', async () => {
+    const terminal = chromeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    // 非聚焦后台 run 开跑 → 忙（终端标签页注意力模型——非聚焦后台 run 同样占忙态）
+    tui.handleActivity('session-xxxx-background', { type: 'agent_start' });
+    expect(terminal.progress).toEqual([true]);
+    // 聚焦 run 并行开跑 → 净计数 2 仍忙（去重镜像——同态不重写 OSC）
+    tui.handle({ type: 'agent_start' });
+    expect(terminal.progress).toEqual([true]);
+    // 后台先收 → 净计数 1 → 仍忙
+    tui.handleActivity('session-xxxx-background', { type: 'agent_end', status: 'completed', messages: [] });
+    expect(terminal.progress).toEqual([true]);
+    // 聚焦收 → 净计数 0 → 闲
+    tui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    expect(terminal.progress).toEqual([true, false]);
+    await flush();
+  });
+
+  it('计数防御位 clamp ≥ 0：错序/重复 end 不下探（负计数会让后到单 start 误判闲）', async () => {
+    const terminal = chromeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    // 错序：end 先到（无对应 start）——计数 clamp 在 0；false 是缺省态（去重零写）
+    tui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    expect(terminal.progress).toEqual([]);
+    // 单 start 后必须忙：若错序 end 把计数推到 -1，本 start 只回到 0——忙态漏报即红
+    tui.handle({ type: 'agent_start' });
+    expect(terminal.progress).toEqual([true]);
+    await flush();
+  });
+
+  it('attach 形态 busyFor 外源单源：登记簿派生活取——通道内计数停拨（SSE 错过窗免疫）', async () => {
+    const terminal = chromeTerminal();
+    // 登记簿替身（attach-main 的 runningBySession 同构——种子/增量单源）
+    const registry = new Map<string, boolean>([['sess-remote', true]]);
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      busyFor: () => {
+        for (const running of registry.values()) if (running) return true;
+        return false;
+      },
+    });
+    // 起屏写点：busyFor 首写即真值（清单种子先于 start 落簿形态——零事件零计数）
+    tui.start();
+    expect(terminal.progress).toEqual([true]);
+    // 登记簿翻闲（远端收场经 SSE 入簿）——repaint 写点重估即翻
+    registry.set('sess-remote', false);
+    tui.repaint('sess-remote');
+    expect(terminal.progress).toEqual([true, false]);
+    // 计数停拨证明：聚焦 agent_start 计 +1 但 busyFor false 仍闲——两形态分源执法
+    tui.handle({ type: 'agent_start' });
+    expect(terminal.progress).toEqual([true, false]);
+    tui.stop();
+    await flush();
+  });
+
+  it('title 三写点：起屏缀短 id（focusIdFor 活取）+ repaint 换聚焦换装 + stop 回基线', async () => {
+    const terminal = chromeTerminal();
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      title: 'Berry 1.0.0',
+      focusIdFor: () => 'session-abcd1234',
+    });
+    // 起屏：聚焦在案即缀短 id（slice(0,8) 非聚焦摘要行同款——D4 起屏一次同解析先例）
+    tui.start();
+    expect(terminal.titles).toEqual(['Berry 1.0.0 · session-']);
+    // repaint（显式键）：换聚焦换装
+    tui.repaint('another-99zz');
+    expect(terminal.titles).toEqual(['Berry 1.0.0 · session-', 'Berry 1.0.0 · another-']);
+    // stop：复原写点①——title 回基线 + 进度清零（强制写位不去重）
+    tui.stop();
+    expect(terminal.titles).toEqual(['Berry 1.0.0 · session-', 'Berry 1.0.0 · another-', 'Berry 1.0.0']);
+    expect(terminal.progress).toEqual([false]);
+    await flush();
+  });
+
+  it('title 缺席 = 零标题管理档：setTitle 零调用，进度态照常', async () => {
+    const terminal = chromeTerminal();
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      focusIdFor: () => 's-anything',
+    });
+    tui.start();
+    tui.handle({ type: 'agent_start' });
+    tui.stop();
+    expect(terminal.titles).toEqual([]); // 零标题管理——title 键缺席不写 OSC 0
+    expect(terminal.progress).toEqual([true, false]); // 进度态独立于标题档
+    await flush();
+  });
+});

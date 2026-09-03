@@ -131,6 +131,10 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
       const entry = id === undefined ? undefined : runtime.drivers.entries.get(id);
       return entry === undefined ? undefined : runtime.apps.get(entry.appId)?.theme?.accent;
     },
+    // 增强 7 起屏聚焦一次同解析（D4 先例同款——技术栈篇 §4.1 终端外显）：起屏
+    // title 缀短 id 用；boot 路 focus 通知早于订阅、首绘不走 repaint，聚焦 id
+    // 由宿主闭包活取（与 history/themeFor 的「undefined = 当前聚焦」同源锚）
+    focusIdFor: () => front.focus.sessionId,
     // todo 折叠查询面（TUI 彻底完善批增强 4，技术栈篇 §4.1）：与 webui SPA 呈现
     // 同源——builtin-deps todoFor 同款两腿（活条目内存真相 ∪ 已闭 store 兜底 +
     // goal 段锚活取）；结构类型注入（TodoItem ⊇ TodoItemFace 呈现子集），通道不

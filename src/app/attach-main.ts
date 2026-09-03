@@ -297,6 +297,17 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
     history: () => historyCache,
     entryStatus: (sessionId) => (runningBySession.get(sessionId) === true ? 'running' : 'idle'),
     themeFor: (sessionId) => accentBySession.get(sessionId ?? focusId),
+    // 增强 7 attach 形态忙态外源（技术栈篇 §4.1）：runningBySession 登记簿派生
+    // （任一 true 即忙——种子/增量单源，与 entryStatus 同簿；不另设计数器：
+    // 重连漏 start 的结构性盲区由清单种子自愈，通道内净计数在 SSE 单源形态
+    // 有错过窗故弃用）
+    busyFor: () => {
+      for (const running of runningBySession.values()) if (running) return true;
+      return false;
+    },
+    // 增强 7 起屏聚焦一次同解析（D4 先例同款）：起屏 title 缀短 id 用——单聚焦
+    // 形态恒 focusId
+    focusIdFor: () => focusId,
   });
 
   /** 通知行便捷面（收尾期静音） */

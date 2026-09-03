@@ -357,4 +357,18 @@ describe('attach 连接面真 pty 锁（首连静默 / 401 退出码 / repull �
     },
     180_000,
   );
+
+  it.skipIf(!hasPtyRelay())(
+    '刀四 attach 形态进度态外显修前红：清单 running:true → 起屏 OSC 9;4 进度态（busyFor 登记簿派生——修前零外显）',
+    async () => {
+      // 真终端形态锁：ProcessTerminal.setProgress(true) 写 OSC 9;4;3（pi-tui
+      // 内建件）——pty 中继透传原字节，输出串可断言。修前 attach 全链零
+      // setProgress 调用（waitFor 超时即红）；清单种子先于 start 落簿 → 起屏
+      // 写点首估即忙（busyFor 首写真值）
+      const lock = await spawnAttach({ sse: 'steady', running: true });
+      await lock.done;
+      await waitFor('OSC 9;4 进度态', 30_000, () => lock.output().includes('\x1b]9;4;3'), lock.output);
+    },
+    180_000,
+  );
 });

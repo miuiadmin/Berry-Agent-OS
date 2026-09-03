@@ -287,12 +287,22 @@ function ApprovalCard({ approval, deciding, onDecide }: ApprovalCardProps) {
 interface ToolCardProps {
   readonly call: ProjectedToolCall;
   readonly result: ToolResultMessage | undefined;
-  readonly liveTool: { name: string; argsText?: string; output?: string; isError?: boolean; done: boolean } | undefined;
+  readonly liveTool:
+    | {
+        name: string;
+        argsText?: string;
+        tail?: string;
+        output?: string;
+        isError?: boolean;
+        done: boolean;
+      }
+    | undefined;
 }
 
 /**
  * 工具调用卡（pending → done/error 三态）。输出与状态双源合并：投影 result
  * 为真值优先，活体帧补窗口期（result 未落账但 tool_execution_end 已到）。
+ * 运行中卡片摘要行右缀 partial 尾行（增强 5 SPA 同源腿——定稿即让位输出）。
  */
 function ToolCard({ call, result, liveTool }: ToolCardProps) {
   const isError = result?.isError ?? liveTool?.isError ?? false;
@@ -307,6 +317,10 @@ function ToolCard({ call, result, liveTool }: ToolCardProps) {
         <span className={`font-mono ${stateColor}`}>{glyph}</span>
         <span className="font-mono text-neutral-300">{call.toolName}</span>
         <span className="text-xs text-neutral-600">{done ? (isError ? '出错' : '完成') : '执行中…'}</span>
+        {/* partial 尾行右缀（折叠态可见的实时进度——truncate 单行溢出省略） */}
+        {!done && liveTool?.tail !== undefined && liveTool.tail !== '' && (
+          <span className="ml-auto min-w-0 truncate font-mono text-xs text-neutral-500">{liveTool.tail}</span>
+        )}
       </summary>
       <div className="border-t border-neutral-800 px-3 py-2">
         {argsText !== '' && (
