@@ -933,6 +933,72 @@ describe('loadApps import 来源门禁', () => {
     expect(result.failed[0]!.message).toContain('secret2.cjs');
     expect(result.failed[0]!.message).toContain('无父模块'); // fail-closed 腿标注可分辨
   });
+
+  // 窗外懒件二跳（第十一轮遗漏大扫 20260904-b A18）：装载窗（currentTreeRoot）
+  // 在 importAppEntry 返回即清——apply 期/事件回调里动态 import 拉入的**树内懒件**
+  // 首次 transform 落窗外，修前字面量扫描与前置守卫注入双双缺席；TS/ESM 懒件
+  // jiti 直接求值不经 Module._load——行寿命补丁也失明。三腿全盲 = 树外说明符
+  // （字面量与计算）全数逃逸。修死 = 字面量腿树根锚回查活动树根集（行寿命执法
+  // 同律）：被转译文件落在任一活动树内即以该树根同跑扫描 + 注入同根守卫。
+  it('运行期兜底·窗外懒件二跳：apply 期动态拉入的树内懒件同受辖（修前：树外字面量与计算说明符全数逃逸——第十一轮遗漏大扫 20260904-b A18）', async () => {
+    // 布局：同一父目录下 app/（应用树）+ outside/（树外诱饵）——固定相对字面量
+    // '../outside/evil.ts' 可写进懒件源码（transform 期字面量腿的执法对象）
+    const parent = makeFixtureDir();
+    const dir = join(parent, 'app');
+    mkdirSync(dir);
+    mkdirSync(join(parent, 'outside'));
+    writeFileSync(join(parent, 'outside', 'evil.ts'), 'export const secret = "host-secret-lazy";\n');
+    // 树内净腿对照：懒件静态引树内兄弟——修后窗外扫描不得误伤合法树内导入
+    // 注：夹具源码里的 from 关键字拆字拼——check-topology 的静态扫描器正则会把
+    // 测试源码字符串里的完整静态导入误当测试文件自身的导入来解析（与 im+"port"
+    // 拆字同因；说明符内拆字无效——正则 ['"] 两种引号都吞）
+    writeFileSync(join(dir, 'sibling-value.ts'), 'export const fortyTwo = 42;\n');
+    writeFileSync(
+      join(dir, 'lazy-clean.ts'),
+      'import { fortyTwo } fro' + "m './sibling-value.ts';\nexport const value = () => fortyTwo;\n",
+    );
+    // 懒件①（字面量逃逸形）：说明符是引号字面量——修前窗外 transform 零扫描放行
+    writeFileSync(
+      join(dir, 'lazy-literal.ts'),
+      'export async function jump() { const m = await im' + "port('../outside/evil.ts'); return m.secret; }\n",
+    );
+    // 懒件②（计算说明符逃逸形）：拼串说明符——字面量扫描结构性看不见，修后靠
+    // 窗外注入的前置守卫在求值期拦
+    writeFileSync(
+      join(dir, 'lazy-computed.ts'),
+      "const parts = ['../', 'outside/', 'evil.ts'];\nexport async function jump() { const m = await im" +
+        'port(parts.join("")); return m.secret; }\n',
+    );
+    const entry = writeApp(
+      dir,
+      'lazy-jump.ts',
+      [
+        'export const name = "lazy-jump";',
+        'export default async function apply(ctx) {',
+        '  const out = {};',
+        // apply 期（装载窗已清）动态拉懒件——二跳形态本体；入口自身的字面量在
+        // 窗内扫描合法（树内）放行，懒件的 transform 全部落在窗外
+        '  try { const m = await im' + "port('./lazy-literal.ts'); out.literal = await m.jump(); }",
+        '  catch (e) { out.literal = e && e.code ? e.code : String(e); out.literalMsg = String(e && e.message ? e.message : ""); }',
+        '  try { const m = await im' + "port('./lazy-computed.ts'); out.computed = await m.jump(); }",
+        '  catch (e) { out.computed = e && e.code ? e.code : String(e); out.computedMsg = String(e && e.message ? e.message : ""); }',
+        '  try { const m = await im' + "port('./lazy-clean.ts'); out.clean = m.value(); }",
+        '  catch (e) { out.clean = e && e.code ? e.code : String(e); }',
+        '  ctx.provide("fx/lazy-jump-marker", out);',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadApps(root, [{ id: 'lazy-jump', entry }]);
+
+    expect(result.failed).toEqual([]); // 全部逃逸被 try 捕获记账——行照常激活，标记面断言
+    const marker = root.tryGet<Record<string, unknown>>('fx/lazy-jump-marker')!;
+    expect(marker['literal']).toBe(APP_IMPORT_FORBIDDEN); // 修前 'host-secret-lazy'（字面量逃逸）
+    expect(String(marker['literalMsg'])).toContain('evil.ts'); // 字面量腿点名树外目标
+    expect(marker['computed']).toBe(APP_IMPORT_FORBIDDEN); // 修前 'host-secret-lazy'（计算说明符逃逸）
+    expect(String(marker['computedMsg'])).toContain('运行期兜底'); // 前置守卫腿标注可分辨
+    expect(marker['clean']).toBe(42); // 树内净腿零误伤（修前修后同值——防过度拦截对照）
+  });
 });
 
 /* ---------------- apply 抛错回卷与生命周期事件 ---------------- */

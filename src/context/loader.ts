@@ -245,8 +245,16 @@ function importForbiddenError(specifier: string, violation: string, originNote: 
  * 执法 transform（§1.2 执法面②，spike 实证形态）：jiti 全依赖图每文件过检
  * （moduleCache:false 保证无缓存旁路）——先扫说明符，违规即抛
  * APP_IMPORT_FORBIDDEN（transform 抛错先于 eval——模块永不求值，副作用零触达）；
- * 合法后链 plainJiti 默认转译。currentTreeRoot undefined（builtin 行/防御路径）
- * 时不拦照转——真实文件装载路径必设。
+ * 合法后链 plainJiti 默认转译。
+ *
+ * **树根锚两源（第十一轮遗漏大扫 20260904-b A18）**：装载窗变量（currentTreeRoot）
+ * 优先——窗内恒见己根；窗外（装载窗 finally 已清——apply 期/定时器/事件回调里
+ * 动态 import 拉入的树内懒件，其 transform 落窗外）**回查活动树根集**：被转译
+ * 文件实路径落在任一活动树内即以该树根执法（修前窗外懒件字面量扫描与前置守卫
+ * 注入双双缺席，而 TS/ESM 懒件 jiti 直接求值不经 Module._load——行寿命补丁同
+ * 失明，三腿全盲即树外说明符全数逃逸）。回查与窗内路径同码同出口；不在任何
+ * 活动树内（宿主自身/builtin 行/防御路径/已剪枝行）不拦照转——与 ensureNodeLoadGate
+ * 的集合镜像纪律同律。
  *
  * 运行期兜底第一腿（全面复盘 20260902 S-1，契约篇 §1.2 注记⑤勘正）：字面量
  * 扫描只认引号字面量，**计算说明符**（拼串变量求值出的绝对路径/裸包名）结构性
@@ -254,7 +262,18 @@ function importForbiddenError(specifier: string, violation: string, originNote: 
  * injectRuntimeGuardPrelude），每次调用运行期复跑同一三道裁决。
  */
 function guardTransform(opts: TransformOptions): TransformResult {
-  const treeRoot = currentTreeRoot;
+  let treeRoot = currentTreeRoot;
+  if (treeRoot === undefined && opts.filename !== undefined && activeTreeRoots.size > 0) {
+    // 窗外懒件二跳回查（A18）：按被转译文件实路径落树判定——树根互斥（各自的
+    // 行目录），首个包含即裁决树
+    const realFile = realpathIfPossible(opts.filename);
+    for (const root of activeTreeRoots) {
+      if (insideTree(realFile, root)) {
+        treeRoot = root;
+        break;
+      }
+    }
+  }
   if (treeRoot !== undefined && opts.filename !== undefined) {
     for (const specifier of extractSpecifiers(opts.source ?? '')) {
       // 实验键门禁（API 治理 §6.13.4 执法点①，第八十七批）：说明符属虚拟键且
