@@ -37,6 +37,13 @@ const ARTIFACT_FILES = ['COMPATIBILITY.md', 'docs/API参考.md'];
 const VERDICT_LABEL_RE = /^(?:api-break|api-deprecate|api-add):/;
 
 /**
+ * 剥离 GIT_* 前缀环境（git 钩子泄漏面防线）：本闸若在 git 钩子环境内被调（CI 之外
+ * 的本地方便门），宿主 git 导出的 GIT_DIR/GIT_INDEX_FILE 会让下方 `git diff` 读错
+ * 仓——剥净后按 cwd 解析目标仓（与 check-api-pr-gate.test.mjs 的 cleanGitEnv 同律）。
+ */
+const cleanGitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+
+/**
  * PR 裁决判定（纯函数——测试面直锁）。两道红条件：
  * ① 面文件触碰而无裁决标签（宣告缺席）；
  * ② 快照在 diff 而两生成物零 diff（漏再生——重跑 `npm run build` 即愈）。
@@ -89,8 +96,8 @@ if (process.argv[1] !== undefined && import.meta.url === new URL(`file://${proce
   const baseSha = baseIdx >= 0 ? argv[baseIdx + 1] : process.env.BASE_SHA;
   let changedFiles;
   if (baseSha !== undefined) {
-    // 三点形 diff = merge-base 语义（PR 面而非两条分支的全量差）
-    const r = spawnSync('git', ['diff', '--name-only', `${baseSha}...HEAD`], { encoding: 'utf8' });
+    // 三点形 diff = merge-base 语义（PR 面而非两条分支的全量差）；env 剥 GIT_* 防钩子泄漏错仓
+    const r = spawnSync('git', ['diff', '--name-only', `${baseSha}...HEAD`], { encoding: 'utf8', env: cleanGitEnv() });
     if (r.status !== 0) throw new Error(`git diff ${baseSha}...HEAD 失败：${r.stderr}`);
     changedFiles = r.stdout.split('\n').filter((l) => l !== '');
   } else if (filesIdx >= 0 && argv[filesIdx + 1] !== undefined) {

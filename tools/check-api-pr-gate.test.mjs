@@ -27,6 +27,15 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** 被测脚本（cwd=ROOT 相对路径） */
 const SCRIPT = join('tools', 'check-api-pr-gate.mjs');
 
+/**
+ * 剥离 GIT_* 前缀环境（git 钩子泄漏面防线）。git 运行 pre-commit 钩子时向子进程
+ * 导出 GIT_DIR/GIT_INDEX_FILE/GIT_AUTHOR_* 等环境——穿 npm→vitest→spawnSync 传递
+ * 后，本测试内 spawn 的 git 会错写宿主仓而非目标临时目录（2026-09-03 演习实证：
+ * 临时仓的 base/face-change 两 commit 落进宿主 worktree、user.email t@t 漏写
+ * 主仓 .git/config——batch53 GIT_INDEX_FILE 教训的泛化形态）。凡 spawn git 处必剥。
+ */
+const cleanGitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+
 describe('adjudicatePrApiGate：面变更裁决三态（纯核心）', () => {
   it('面文件零触碰 → 恒绿（非面 PR 零打扰）', () => {
     const verdict = adjudicatePrApiGate({ changedFiles: ['src/app/main.ts', 'docs/使用指南.md'], labels: [] });
@@ -112,7 +121,9 @@ describe('check-api-pr-gate CLI：红/绿探针（spawn 真脚本）', () => {
 describe('check-api-pr-gate CLI：BASE_SHA diff 路（三点形 merge-base 语义实证）', () => {
   it('临时仓两 commit——base 后触面文件的 PR diff 命中，base 前的触碰不计', () => {
     const dir = mkdtempSync(join(tmpdir(), 'berry-pr-gate-'));
-    const git = (args, opts = {}) => spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', ...opts });
+    // env 必剥 GIT_*：钩子环境泄漏会让 -C 失效错写宿主仓（见 cleanGitEnv 注释）
+    const git = (args, opts = {}) =>
+      spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', env: cleanGitEnv(), ...opts });
     try {
       // 基座 commit：面文件先在场（base 前的触碰不属本 PR 的 diff 面）
       mkdirSync(join(dir, 'src/contracts'), { recursive: true });
@@ -131,13 +142,18 @@ describe('check-api-pr-gate CLI：BASE_SHA diff 路（三点形 merge-base 语�
       git(['add', '.']);
       git(['commit', '-q', '-m', 'face change']);
 
-      const red = spawnSync(process.execPath, [join(ROOT, SCRIPT), '--base', base], { cwd: dir, encoding: 'utf8' });
+      const red = spawnSync(process.execPath, [join(ROOT, SCRIPT), '--base', base], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: cleanGitEnv(),
+      });
       expect(red.status).toBe(1); // 面触碰无标签 → 红（第一刀）
       expect(red.stderr).toContain('api-surface.json');
 
       const green = spawnSync(process.execPath, [join(ROOT, SCRIPT), '--base', base, '--label', 'api-add: v2'], {
         cwd: dir,
         encoding: 'utf8',
+        env: cleanGitEnv(),
       });
       expect(green.status).toBe(0); // 宣告即绿
     } finally {
