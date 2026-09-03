@@ -267,9 +267,11 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
     quitHint: 'Ctrl+C 打断 / Ctrl+D 退出 attach',
     workspace: cwd,
     // 刀二 filesFor 注入键：@ 文件段远程路由（真源在 daemon 工作区——不吃
-    // attach 本地 cwd 漂移）；face undefined = 无弹层（不回本地 fd 发现序）
-    filesFor: (prefix) => fetchWorkspaceFiles(port, token, prefix),
-    symbolsFor: (path) => fetchWorkspaceSymbols(port, token, path),
+    // attach 本地 cwd 漂移）；face undefined = 无弹层（不回本地 fd 发现序）。
+    // signal 透传（TUI-9）：编辑器补全换代即中止在飞取数（attachRequest 与
+    // 总 deadline 组合——两 face 同笔）
+    filesFor: (prefix, signal) => fetchWorkspaceFiles(port, token, prefix, signal),
+    symbolsFor: (path, signal) => fetchWorkspaceSymbols(port, token, path, signal),
     // 缓存闭包（通道 start/repaint 同步拉——远程预拉后整代换缓存）
     history: () => historyCache,
     entryStatus: (sessionId) => (runningBySession.get(sessionId) === true ? 'running' : 'idle'),

@@ -175,3 +175,41 @@ describe('MentionInput 候选来源键（全面复盘 20260903 #13——陈旧�
     expect(screen.queryByText('alphaA')).toBeNull(); // 修前红：陈旧符号仍在列表
   });
 });
+
+describe('MentionInput 候选形对齐（TUI-7，20260904——与 TUI 侧 channels/mention.ts 同笔同形）', () => {
+  it('目录候选（携尾 /）：接受不补尾空格 + 值即 token 续走钻取（修前必红——尾空格断 token）', async () => {
+    api.fetchFiles.mockResolvedValue(['src/']); // 服务端目录条目携尾 /（webui/files.ts 同批）
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@sr'); // 前缀 'sr' → 服务端返回 src/（前缀命中）
+    expect(api.fetchFiles).toHaveBeenCalledWith('sr');
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByText('src/')); // mousedown（不夺焦点）
+    });
+    expect(input.value).toBe('@src/'); // 修前红：'@src/ '（尾空格击穿 token——目录无法续钻）
+    // 续钻：代换值即新 token（光标落末尾），重解析命中 → 防抖后再取数
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150);
+    });
+    expect(api.fetchFiles).toHaveBeenLastCalledWith('src/'); // 目录内层继续补全
+  });
+
+  it('含空格路径：接受采 @"…" 引号形 + 尾空格（修前必红——裸形 `@my notes.md ` 尾空格击穿 token 判据）', async () => {
+    api.fetchFiles.mockResolvedValue(['my notes.md']); // 服务端全路径前缀命中（'my'）
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '@my'); // 裸形 token 只能到 '@my'（空格断判据）
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByText('my notes.md'));
+    });
+    expect(input.value).toBe('@"my notes.md" '); // 引号形 + 尾空格（token 收弹）
+  });
+
+  it('引号 token 续钻：键入 @"my dir/s 剥引号取数（修前必红——判据不识别引号形）', async () => {
+    api.fetchFiles.mockResolvedValue([]);
+    render(<Harness />);
+    const input = screen.getByPlaceholderText('输入消息') as HTMLInputElement;
+    await typePastDebounce(input, '看 @"my dir/s'); // 未闭合引号形（闭引在光标后场景同形）
+    expect(api.fetchFiles).toHaveBeenCalledWith('my dir/s'); // 引号剥净进取数
+  });
+});

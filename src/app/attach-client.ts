@@ -76,6 +76,10 @@ export interface AttachHttpResponse {
  * daemon.ts 探针族同批同语义）：旧形 `RequestOptions.timeout` 是 socket
  * 空闲计时器，慢滴流应答者使超时永不至；改挂 `AbortSignal.timeout` 总
  * 预算，abort 错误幂等吸收为 undefined。
+ *
+ * 可选 signal（TUI-9，20260904）：调用方外部取消信号（补全换代即中止在飞
+ * 取数）——与总 deadline 经 AbortSignal.any 组合，任一触发即断请求，abort
+ * 同幂等吸收为 undefined。
  */
 export function attachRequest(opts: {
   readonly port: number;
@@ -84,6 +88,7 @@ export function attachRequest(opts: {
   readonly path: string;
   readonly body?: unknown;
   readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
 }): Promise<AttachHttpResponse | undefined> {
   return new Promise((resolve) => {
     const payload = opts.body === undefined ? undefined : JSON.stringify(opts.body);
@@ -98,8 +103,11 @@ export function attachRequest(opts: {
           ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload).toString() }
           : {}),
       },
-      // 总 deadline（非 socket idle——见函数 JSDoc）
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+      // 总 deadline 与外部取消信号组合（TUI-9——见函数 JSDoc；任一触发即断）
+      signal: AbortSignal.any([
+        AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+        ...(opts.signal !== undefined ? [opts.signal] : []),
+      ]),
     };
     const req = httpRequest(options, (res) => {
       const chunks: Buffer[] = [];
@@ -263,11 +271,16 @@ export function decideApproval(
   );
 }
 
-/** @ 文件段补全数据源（GET /api/workspace/files?prefix=——404/失败 = undefined 无弹层） */
+/**
+ * @ 文件段补全数据源（GET /api/workspace/files?prefix=——404/失败 = undefined
+ * 无弹层）。signal（TUI-9）：编辑器补全换代中止信号——随行断在飞请求（可
+ * 选参，缺席 = 仅总 deadline）。
+ */
 export function fetchWorkspaceFiles(
   port: number,
   token: string,
   prefix: string,
+  signal?: AbortSignal,
 ): Promise<{ readonly files: readonly string[] } | undefined> {
   return attachRequest({
     port,
@@ -275,6 +288,7 @@ export function fetchWorkspaceFiles(
     method: 'GET',
     path: `/api/workspace/files?prefix=${encodeURIComponent(prefix)}`,
     timeoutMs: 5_000,
+    signal,
   }).then((res) => {
     if (res === undefined || res.status !== 200) return undefined;
     const files = (res.json as { files?: readonly string[] } | undefined)?.files;
@@ -282,11 +296,15 @@ export function fetchWorkspaceFiles(
   });
 }
 
-/** @ 符号段补全数据源（GET /api/workspace/symbols?path=——404/失败/warming = undefined） */
+/**
+ * @ 符号段补全数据源（GET /api/workspace/symbols?path=——404/失败/warming =
+ * undefined）。signal（TUI-9，同 fetchWorkspaceFiles）：换代中止信号随行。
+ */
 export function fetchWorkspaceSymbols(
   port: number,
   token: string,
   path: string,
+  signal?: AbortSignal,
 ): Promise<WebuiSymbolQuery | undefined> {
   return attachRequest({
     port,
@@ -294,6 +312,7 @@ export function fetchWorkspaceSymbols(
     method: 'GET',
     path: `/api/workspace/symbols?path=${encodeURIComponent(path)}`,
     timeoutMs: 5_000,
+    signal,
   }).then((res) => {
     if (res === undefined || res.status !== 200) return undefined;
     return res.json as WebuiSymbolQuery | undefined;

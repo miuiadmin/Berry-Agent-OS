@@ -431,12 +431,15 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
   it('GET /api/workspace/files?prefix=：真树前缀过滤 + gitignore 剪枝 + 空前缀全量', async () => {
     const all = await send(port, { method: 'GET', path: '/api/workspace/files' });
     expect(all.status).toBe(200);
-    // .gitignore 自身不被自身样式命中（真 git 语义同款）——在列
-    expect(JSON.parse(all.text)).toEqual({ files: ['.gitignore', 'alpha.ts', 'beta.md', 'src', 'src/gamma.ts'] });
+    // .gitignore 自身不被自身样式命中（真 git 语义同款）——在列；目录条目携
+    // 尾 '/'（TUI-7：与 pi-tui 本地腿目录形一致）
+    expect(JSON.parse(all.text)).toEqual({
+      files: ['.gitignore', 'alpha.ts', 'beta.md', 'src/', 'src/gamma.ts'],
+    });
     const scoped = await send(port, { method: 'GET', path: '/api/workspace/files?prefix=al' });
     expect(JSON.parse(scoped.text)).toEqual({ files: ['alpha.ts'] });
     const dir = await send(port, { method: 'GET', path: '/api/workspace/files?prefix=src' });
-    expect(JSON.parse(dir.text)).toEqual({ files: ['src', 'src/gamma.ts'] });
+    expect(JSON.parse(dir.text)).toEqual({ files: ['src/', 'src/gamma.ts'] });
   });
 
   it('GET /api/workspace/symbols?path=：三档（有符号 200 / warming 200 / 无路由 404）', async () => {

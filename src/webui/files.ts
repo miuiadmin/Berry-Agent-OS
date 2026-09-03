@@ -27,7 +27,8 @@ const HARD_SKIP_DIRS = new Set(['.git', 'node_modules']);
  * 列工作区文件（前缀过滤 + gitignore 语义 + 双帽）。
  * @param root 工作区根（绝对路径——deps.workspaceRoot 产物）
  * @param prefix 前缀（用户 @ 后已输入的路径片段；空串 = 全部）
- * @returns 命中条目（root 相对 POSIX 风格路径，前缀序 ≤50 条）
+ * @returns 命中条目（root 相对 POSIX 风格路径，前缀序 ≤50 条；目录条目携尾
+ *   '/'——TUI-7 与 pi-tui 本地腿目录形一致，接受侧据此不补尾空格以续走钻取）
  */
 export async function listWorkspaceFiles(root: string, prefix: string): Promise<string[]> {
   // 根 .gitignore 装载（缺席 = 仅硬跳名生效；读失败容错——补全面不因权限面炸）
@@ -63,7 +64,10 @@ export async function listWorkspaceFiles(root: string, prefix: string): Promise<
       if (ignored) continue;
       if (ent.isDirectory()) {
         if (HARD_SKIP_DIRS.has(ent.name)) continue;
-        if (rel.startsWith(prefix)) hits.push(rel); // 目录也可补全（@path 导航面）
+        // 目录也可补全（@path 导航面）——携尾 '/'（TUI-7：与 pi-tui 本地腿
+        // 目录形一致，TUI/webui 接受侧据此不补尾空格以续走钻取）；递归仍以
+        // 裸 rel 传（子条目路径不叠双斜杠）
+        if (rel.startsWith(prefix)) hits.push(`${rel}/`);
         if (depth + 1 <= MAX_DEPTH) await walkDir(join(absDir, ent.name), rel, depth + 1);
       } else if (ent.isFile() && rel.startsWith(prefix)) {
         hits.push(rel);

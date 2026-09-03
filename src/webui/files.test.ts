@@ -32,7 +32,7 @@ describe('工作区文件补全行走', () => {
       put(root, 'src/util/helper.ts');
       const files = await listWorkspaceFiles(root, '');
       expect(files).toContain('README.md');
-      expect(files).toContain('src'); // 目录也可补全（@path 导航面）
+      expect(files).toContain('src/'); // 目录也可补全（@path 导航面）——携尾 '/'（TUI-7：接受侧不补尾空格以续走钻取）
       expect(files).toContain('src/main.ts');
       expect(files).toContain('src/util/helper.ts');
     } finally {
@@ -47,7 +47,7 @@ describe('工作区文件补全行走', () => {
       put(root, 'src/main.ts');
       const files = await listWorkspaceFiles(root, 'src');
       expect(files.every((f) => f.startsWith('src'))).toBe(true);
-      expect(files).toContain('src');
+      expect(files).toContain('src/'); // 目录条目尾斜杠形
       expect(files).toContain('src/main.ts');
     } finally {
       rmSync(root, { recursive: true, force: true });

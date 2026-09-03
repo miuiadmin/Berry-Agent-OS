@@ -1,8 +1,13 @@
 /**
- * L4 channels — @-mention 符号段补全 provider 测试（channels 批刀 B，契约篇 §6.8）。
+ * L4 channels — @-mention 补全 provider 测试（channels 批刀 B，契约篇 §6.8；
+ * 文件段 = daemon 刀二 attach 通道契约）。
  *
  * 验收判据 e/f/g/h：两段 token 拦截与条目形状 / 非两段语境三面原样委托 /
  * face undefined 委托腿回归 + warming 无弹层 / 组合下 inner 重获全权。
+ *
+ * 第十轮 TUI 专项扫雷三笔锁（TUI-4/7/9，20260904）：非文件段语境分流
+ * （force Tab/路径前缀收窄、斜杠命令放行）/ 候选形对齐（引号形 + 目录不补
+ * 尾空格）/ face 拒绝收弹不崩 + signal 透传。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -39,6 +44,19 @@ function scriptedFace(result: Awaited<ReturnType<SymbolsFace>>) {
     return result;
   };
   return { face, paths };
+}
+
+/** 可脚本化 filesFor 桩：记录被查询前缀；返回值由用例切换（文件段族共用） */
+function scriptedFiles() {
+  const prefixes: string[] = [];
+  const state: { result: { readonly files: readonly string[] } | undefined } = {
+    result: { files: ['src/app.ts', 'src/api.ts'] },
+  };
+  const face: FilesFace = async (prefix) => {
+    prefixes.push(prefix);
+    return state.result;
+  };
+  return { face, prefixes, state };
 }
 
 /** getSuggestions 第四参的标准形态（signal 必带——与编辑器实调同形） */
@@ -181,19 +199,6 @@ describe('createMentionProvider 判据 (g)+(h)：face 档位与委托腿回归',
 /* ---------------- 文件段注入 provider（daemon 刀二：attach 通道契约） ---------------- */
 
 describe('createFileSegmentProvider：单段 @ token 拦截 + undefined 无弹层不回委托', () => {
-  /** 可脚本化 filesFor 桩：记录被查询前缀；返回值由用例切换 */
-  function scriptedFiles() {
-    const prefixes: string[] = [];
-    const state: { result: { readonly files: readonly string[] } | undefined } = {
-      result: { files: ['src/app.ts', 'src/api.ts'] },
-    };
-    const face: FilesFace = async (prefix) => {
-      prefixes.push(prefix);
-      return state.result;
-    };
-    return { face, prefixes, state };
-  }
-
   it('判据命中：光标前 `@src/ap` 收尾 → filesFor(路径前缀) + 防御过滤 + 条目 value=`@文件`、prefix=全 token', async () => {
     const { inner, calls } = recordingInner();
     const { face, prefixes } = scriptedFiles();
@@ -229,22 +234,15 @@ describe('createFileSegmentProvider：单段 @ token 拦截 + undefined 无弹�
     expect(calls).toEqual([]); // 关键：inner 未被触——诚实收窄
   });
 
-  it('空命中 = null；非文件段语境（含 # / 命令 / 无 @ / 两段 token）→ 委托 inner', async () => {
+  it('空命中 = null；两段 token（# 在场）→ 收窄 null 不委托（TUI-4：外层符号段 404 委托腿穿透到此处，内层 @ 模糊腿是 fd 本地行走 = 错工作区）', async () => {
     const { inner, calls } = recordingInner();
     const face: FilesFace = async () => ({ files: [] }); // 空命中
     const provider = createFileSegmentProvider(inner, face);
     expect(await provider.getSuggestions(['@nope'], 0, 5, OPTS)).toBeNull();
-    // '#' 在场 = 符号段语境（两段式）→ 委托
-    expect(await provider.getSuggestions(['@a.ts#f'], 0, 7, OPTS)).toEqual({
-      items: [{ value: '/cmd', label: 'cmd' }],
-      prefix: '/cm',
-    });
-    // 行中 '@x@y'（'@' 紧跟非空白）不命中 → 委托；命令语境 → 委托
-    expect(await provider.getSuggestions(['/he'], 0, 3, OPTS)).toEqual({
-      items: [{ value: '/cmd', label: 'cmd' }],
-      prefix: '/cm',
-    });
-    expect(calls.map((c) => c.face)).toEqual(['getSuggestions', 'getSuggestions']); // 空命中的那次是拦截
+    // '#' 在场 = 两段符号 token：file wrap 判据不命中且非斜杠语境 → null
+    //（修前此处委托 inner——错工作区本地腿，TUI-4 探针 C 案）
+    expect(await provider.getSuggestions(['@a.ts#f'], 0, 7, OPTS)).toBeNull();
+    expect(calls).toEqual([]); // 空命中那次是拦截（face 判据命中）——全程零委托
   });
 
   it('applyCompletion：整 token 代换（@ 起点到光标）+ 尾空格 + 光标推进；非文件段语境 → 委托', () => {
@@ -275,5 +273,141 @@ describe('createFileSegmentProvider：单段 @ token 拦截 + undefined 无弹�
     const bare = recordingInner({ shouldTriggerFileCompletion: undefined });
     const providerB = createFileSegmentProvider(bare.inner, scriptedFiles().face);
     expect(providerB.shouldTriggerFileCompletion).toBeUndefined();
+  });
+});
+
+/* ---------------- 第十轮 TUI 专项扫雷三笔（TUI-4/7/9，20260904） ---------------- */
+
+describe('TUI-4 非文件段语境分流：force Tab/路径前缀收窄，斜杠命令放行', () => {
+  it('force Tab（探针 B 案）与路径前缀语境 → null 不委托（内层本地腿 = 错工作区）', async () => {
+    const { inner, calls } = recordingInner();
+    const { face, prefixes } = scriptedFiles();
+    const provider = createFileSegmentProvider(inner, face);
+    // force Tab：内层 extractPathPrefix(force) 恒返前缀 → 本地 readdir 行走
+    // 拿 attach 客户端 cwd 冒充 daemon 工作区（修前此腿委托出本地候选）
+    expect(await provider.getSuggestions(['hello wor'], 0, 9, { ...OPTS, force: true })).toBeNull();
+    // 路径前缀自然触发（'./x' 形）：内层本地路径补全同属错工作区 → null
+    expect(await provider.getSuggestions(['看 ./sr'], 0, 8, OPTS)).toBeNull();
+    // 无 @ 的普通文本：内层本来也返回 null（extractPathPrefix 自然态不命中）
+    // ——收窄与委托等价，锁死「不为普通文本私放行」的边界
+    expect(await provider.getSuggestions(['普通文本'], 0, 4, OPTS)).toBeNull();
+    expect(calls).toEqual([]); // 三腿全程零委托
+    expect(prefixes).toEqual([]); // face 未被触（判据未命中，分流在 face 之前）
+  });
+
+  it('斜杠命令语境放行委托（判据镜像 Combined：非 force + 光标前行首 /）；force + 斜杠不放行', async () => {
+    const { inner, calls } = recordingInner();
+    const provider = createFileSegmentProvider(inner, scriptedFiles().face);
+    // 非 force + 行首 '/'：命令补全是客户端本地数据面（无工作区漂移）→ 委托
+    expect(await provider.getSuggestions(['/he'], 0, 3, OPTS)).toEqual({
+      items: [{ value: '/cmd', label: 'cmd' }],
+      prefix: '/cm',
+    });
+    // force + 斜杠：Combined 此时不走命令腿（force 越过命令分支）——不放行
+    expect(await provider.getSuggestions(['/he'], 0, 3, { ...OPTS, force: true })).toBeNull();
+    expect(calls.map((c) => c.face)).toEqual(['getSuggestions']); // 仅命令腿一次委托
+  });
+});
+
+describe('TUI-7 候选形对齐：引号形 + 目录不补尾空格（与 pi-tui 本地腿同形）', () => {
+  it('含空格路径 value 采 @"…" 引号形；无空格路径保持裸形', async () => {
+    const { inner } = recordingInner();
+    const face: FilesFace = async () => ({ files: ['my notes.md', 'plain.ts'] });
+    const provider = createFileSegmentProvider(inner, face);
+    // 前缀空串 = 全量（防御过滤对空串恒真）
+    const suggestions = await provider.getSuggestions(['@'], 0, 1, OPTS);
+    expect(suggestions?.items).toEqual([
+      { value: '@"my notes.md"', label: 'my notes.md' }, // 含空白 → 引号形（闭引在场）
+      { value: '@plain.ts', label: 'plain.ts' }, // 无空白 → 裸形
+    ]);
+  });
+
+  it('引号 token 续钻判据命中：`@"my dir/sub`（闭引在光标后）剥引号进 face', async () => {
+    const { inner } = recordingInner();
+    const prefixes: string[] = [];
+    // 候选带命中项（防御过滤 `my dir/su` 前缀真命中——否则空命中收弹 null）
+    const face: FilesFace = async (prefix) => {
+      prefixes.push(prefix);
+      return { files: ['my dir/sub.ts'] };
+    };
+    const provider = createFileSegmentProvider(inner, face);
+    // 接受引号形目录后光标落闭引前——续钻时闭引在光标后（未闭合形）
+    const suggestions = await provider.getSuggestions(['看 @"my dir/su'], 0, 13, OPTS);
+    expect(prefixes).toEqual(['my dir/su']); // 引号剥净进 face
+    expect(suggestions?.prefix).toBe('@"my dir/su'); // token 保留用户实打引号形
+    // 光标行至闭引后（闭合形）同样命中（引号双剥）
+    await provider.getSuggestions(['看 @"my dir/su"'], 0, 14, OPTS);
+    expect(prefixes).toEqual(['my dir/su', 'my dir/su']);
+  });
+
+  it('applyCompletion：目录候选不补尾空格（token 不断——续走钻取）+ 引号形目录光标落闭引前', () => {
+    const { inner } = recordingInner();
+    const face: FilesFace = async () => ({ files: [] });
+    const provider = createFileSegmentProvider(inner, face);
+    // 裸形目录：'看 @my'（光标 5 = 行尾）→ '@my dir/' 无尾空格，光标落 '/' 后
+    const dir = provider.applyCompletion(['看 @my'], 0, 5, { value: '@my dir/', label: 'my dir/' }, '@my');
+    expect(dir).toEqual({ lines: ['看 @my dir/'], cursorLine: 0, cursorCol: 10 });
+    // 引号形目录（闭合形 token）：光标落闭引前（续输入继续落在引号内——
+    // pi-tui 本地腿同形：cursorOffset = value.length - 1）
+    const quoted = provider.applyCompletion(
+      ['看 @"my dir/"'],
+      0,
+      12, // 光标在行尾（闭引后）——闭合形 token 整段代换
+      { value: '@"my dir/sub/"', label: 'my dir/sub/' },
+      '@"my dir/"',
+    );
+    expect(quoted).toEqual({ lines: ['看 @"my dir/sub/"'], cursorLine: 0, cursorCol: 15 }); // 闭引前一位
+    // 引号形文件：光标落闭引后 + 尾空格（token 收弹）
+    const file = provider.applyCompletion(
+      ['看 @"my no'],
+      0,
+      9, // 行尾
+      { value: '@"my notes.md"', label: 'my notes.md' },
+      '@"my no',
+    );
+    expect(file).toEqual({ lines: ['看 @"my notes.md" '], cursorLine: 0, cursorCol: 17 });
+  });
+});
+
+describe('TUI-9 face 拒绝收弹不崩 + signal 透传（两 wrap 各证）', () => {
+  it('filesFor reject → null 不冒泡（编辑器 fire-and-forget——rejection 即 unhandledRejection 崩进程）', async () => {
+    const { inner, calls } = recordingInner();
+    const face: FilesFace = async () => {
+      throw new Error('face 拒绝探针');
+    };
+    const provider = createFileSegmentProvider(inner, face);
+    // 修前此调用产 rejected promise（fire-and-forget 语境 = unhandledRejection
+    // → signals.ts exit(1)）；修后收弹 null
+    await expect(provider.getSuggestions(['@src'], 0, 4, OPTS)).resolves.toBeNull();
+    expect(calls).toEqual([]); // 拒绝不退委托（与 undefined 档同形：无弹层）
+  });
+
+  it('symbolsFor reject → null 不冒泡（同律）', async () => {
+    const { inner, calls } = recordingInner();
+    const face: SymbolsFace = async () => {
+      throw new Error('face 拒绝探针');
+    };
+    const provider = createMentionProvider(inner, face);
+    await expect(provider.getSuggestions(['@a.ts#f'], 0, 7, OPTS)).resolves.toBeNull();
+    expect(calls).toEqual([]); // 拒绝不退委托
+  });
+
+  it('options.signal 透传 face（filesFor/symbolsFor 第二参——编辑器换代即中止在飞取数）', async () => {
+    const { inner } = recordingInner();
+    /** 收到的信号记录（两 wrap 各一腿） */
+    const seen: Array<AbortSignal | undefined> = [];
+    const filesFace: FilesFace = async (_prefix, signal) => {
+      seen.push(signal);
+      return { files: ['a.ts'] };
+    };
+    const symbolsFace: SymbolsFace = async (_path, signal) => {
+      seen.push(signal);
+      return { symbols: [] };
+    };
+    const fileProvider = createFileSegmentProvider(inner, filesFace);
+    await fileProvider.getSuggestions(['@a'], 0, 2, OPTS);
+    const symbolProvider = createMentionProvider(inner, symbolsFace);
+    await symbolProvider.getSuggestions(['@a.ts#f'], 0, 7, OPTS);
+    expect(seen).toEqual([OPTS.signal, OPTS.signal]); // 编辑器给的信号原样到 face
   });
 });

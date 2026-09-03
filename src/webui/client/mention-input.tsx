@@ -9,8 +9,15 @@
  *   = 语言服务器预热中——fire-and-forget，不等待拉起）。
  *
  * 触发判据 = 光标前的末 token 形态（`@片段` / `@路径#片段`）；选中断言代换
- * 该 token（文件段代换后补尾空格、符号段代换 `@path#name `）。键盘：↑↓ 移动
+ * 该 token（符号段代换后补尾空格、文件段代换 `@path#name `）。键盘：↑↓ 移动
  * 高亮、Enter/Tab 接受、Esc 关闭（弹层开时 Enter 不触发提交——补全优先）。
+ *
+ * 候选形（TUI-7，20260904——与 TUI 侧 channels/mention.ts 同笔同形）：文件段
+ * 候选的目录条目携尾 '/'（服务端 webui/files.ts 同批）——目录接受不补尾空格
+ * （token 不断，续走钻取）、文件接受补尾空格（token 收弹）；含空白的路径
+ * 上屏采 `@"路径"` 引号形（裸形尾空格会击穿 token 判据字符类）；引号形目录
+ * 接受后光标落闭引前（续输入继续落在引号内，续钻不断链——pi-tui 本地腿
+ * 同形）。token 判据引号感知（`@"my dir/sub` 闭合/未闭合两形都命中）。
  *
  * 候选来源键（契约篇 §6.8 补裁，全面复盘 20260903 #13）：候选数组永远记生成
  * 它的查询身份（档位+pathPrefix）；取数落定与查询换代竞速、消费面读前键比对
@@ -37,6 +44,10 @@ interface MentionQuery {
 /**
  * 解析光标前文本的末 token（`@xxx` 文件段 / `@xxx#yyy` 符号段）。
  * '@' 必须紧跟行首或空白（邮箱样误触不触发）；段内字符禁空白与 '@' '#'。
+ *
+ * 文件段引号感知（TUI-7，与 TUI 侧 FILE_SEGMENT_TOKEN 同笔同形）：路径段可
+ * 为 `@"含空格路径` 引号形（闭引可有可无——引号形目录接受后光标落闭引前，
+ * 续钻时闭引在光标后）。
  */
 function parseMention(before: string): MentionQuery | null {
   // 符号段先试（更长的形态）：@path#sym
@@ -49,10 +60,12 @@ function parseMention(before: string): MentionQuery | null {
       symbolPrefix: sym[3]!,
     };
   }
-  // 文件段：@path
-  const file = /(^|\s)@([^@\s#]*)$/.exec(before);
+  // 文件段：@path（引号形 `"…` 剥引号取真实前缀——闭引开引各至多一枚）
+  const file = /(^|\s)@("[^"]*"?|[^@\s#]*)$/.exec(before);
   if (file !== null) {
-    return { start: file.index + file[1]!.length, end: before.length, pathPrefix: file[2]! };
+    const seg = file[2]!;
+    const pathPrefix = seg.startsWith('"') ? seg.replace(/^"|"$/g, '') : seg;
+    return { start: file.index + file[1]!.length, end: before.length, pathPrefix };
   }
   return null;
 }
@@ -177,14 +190,29 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, disabled]);
 
-  /** 接受候选：代换 token（@path / @path#name）+ 尾空格 + 光标归位 */
-  function accept(insertion: string): void {
+  /** 文件候选上屏形（TUI-7）：含空白路径采 `@"路径"` 引号形（裸形尾空格击穿
+   *  token 判据字符类，含空格路径无法正确上屏）；与 TUI 侧 mentionValue 同笔同形 */
+  function fileInsertion(file: string): string {
+    return file.includes(' ') ? `@"${file}"` : `@${file}`;
+  }
+
+  /** 文件候选接受后缀（TUI-7）：目录不补尾空格（token 不断——续走钻取），
+   *  文件补尾空格（token 收弹——再 @ 再触发） */
+  function fileSuffix(file: string): string {
+    return file.endsWith('/') ? '' : ' ';
+  }
+
+  /** 接受候选：代换 token（@path / @path#name）+ 尾空格 + 光标归位。
+   *  引号形目录（后缀空）光标落闭引前——续输入继续落在引号内，续钻不断链
+   *  （TUI-7，pi-tui 本地腿同形：caretOffset = insertion.length - 1） */
+  function accept(insertion: string, suffix: string = ' '): void {
     const q = query;
     const input = inputRef.current;
     if (q === null || input === null) return;
-    const next = `${value.slice(0, q.start)}${insertion} ${value.slice(q.end)}`;
+    const next = `${value.slice(0, q.start)}${insertion}${suffix}${value.slice(q.end)}`;
     onChange(next);
-    const caret = q.start + insertion.length + 1;
+    const caretInsideQuote = insertion.endsWith('"') && suffix === '';
+    const caret = q.start + insertion.length + suffix.length - (caretInsideQuote ? 1 : 0);
     // caretRef 同步先行（遗漏大扫 20260902 #10 测试暴露的真缺陷）：value 变化
     // 触发的重解析 effect（宏任务）先于 rAF（render 阶段）跑——若 caretRef 仍
     // 是旧光标位，新值按旧位切片（如 '@s'）重命中 token，弹层立即重开 +
@@ -195,7 +223,7 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
     requestAnimationFrame(() => {
       input.setSelectionRange(caret, caret);
     });
-    setQuery(null); // 代换即收弹（尾空格断 token——再 @ 再触发）
+    setQuery(null); // 代换即收弹（尾空格断 token——再 @ 再触发；目录续钻走 parseMention 重开）
   }
 
   /** 键盘编舞：弹层开时 ↑↓/Enter/Tab/Esc 全截（Enter 不冒泡成提交） */
@@ -219,8 +247,10 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
         // 接受读键门数组：count>0 已保证非空，?? '' 仅防御位（active 循环界内）
-        if (query.symbolPrefix === undefined) accept(`@${filesShown[active] ?? ''}`);
-        else accept(`@${query.pathPrefix}#${symbolsShown[active]?.name ?? ''}`);
+        if (query.symbolPrefix === undefined) {
+          const f = filesShown[active] ?? '';
+          accept(fileInsertion(f), fileSuffix(f)); // 目录不补尾空格（TUI-7 续钻）
+        } else accept(`@${query.pathPrefix}#${symbolsShown[active]?.name ?? ''}`);
         return;
       }
     }
@@ -271,7 +301,7 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
                   onMouseEnter={() => setActive(i)}
                   onMouseDown={(e) => {
                     e.preventDefault(); // 不夺输入焦点（mousedown 先于 blur）
-                    accept(`@${f}`);
+                    accept(fileInsertion(f), fileSuffix(f)); // 目录不补尾空格（TUI-7 续钻）
                   }}
                   title={f}
                 >
