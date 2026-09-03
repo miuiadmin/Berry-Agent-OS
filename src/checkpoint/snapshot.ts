@@ -21,15 +21,18 @@ import { canonicalize, serializeWrites } from '../tools/fs.js';
 import {
   MAX_SNAPSHOT_FILE_BYTES,
   hashContent,
+  listAllManifests,
   listSessionManifests,
   newManifestId,
+  registerInflightCaptureBlob,
+  unregisterInflightCaptureBlobs,
   writeBlob,
   writeManifest,
   sweepOrphanBlobs,
   deleteManifest,
   type CheckpointManifest,
-  type ManifestInventory,
 } from './store.js';
+import type { AppLogger } from '../contracts/app.js';
 
 /** 硬剪枝表（与检索族 PRUNE_DIRS 同值——node_modules/.git 永不可入快照：装机物与 git 对象体量毁快照面；exclude 配置在此之上叠加） */
 const PRUNE_DIRS = new Set(['node_modules', '.git']);
@@ -193,49 +196,64 @@ export async function captureSnapshot(cx: CaptureContext, meta: CaptureMeta): Pr
   const skipped: string[] = [];
   let newBytes = 0;
   let totalBytes = 0;
-  for (const fp of fingerprints) {
-    if (fp.size > MAX_SNAPSHOT_FILE_BYTES) {
-      skipped.push(fp.rel); // 体量上限跳过（披露面——不静默）
-      continue;
+  // 本捕获的在飞登记面（全面复盘 20260903 #1）：decision 时点逐 hash 登记（早于
+  // writeBlob），manifest 落盘或异常收尾统一注销（finally 单点——真孤儿照常可回收）
+  const inflightHashes: string[] = [];
+  try {
+    for (const fp of fingerprints) {
+      if (fp.size > MAX_SNAPSHOT_FILE_BYTES) {
+        skipped.push(fp.rel); // 体量上限跳过（披露面——不静默）
+        continue;
+      }
+      totalBytes += fp.size;
+      const prevEntry = prevByRel.get(fp.rel);
+      if (prevEntry !== undefined && prevEntry.size === fp.size && prevEntry.mtimeMs === fp.mtimeMs) {
+        // stat 快径命中：指纹未变引用既有 blob（零读零写）。快径引用同样入登记面
+        //——旧 manifest 可能恰被并发裁掉，此 blob 的存亡此刻只靠注册表护住
+        registerInflightCaptureBlob(cx.dataRoot, prevEntry.hash);
+        inflightHashes.push(prevEntry.hash);
+        files.push({ rel: fp.rel, hash: prevEntry.hash, size: fp.size, mtimeMs: fp.mtimeMs, mode: fp.mode });
+        continue;
+      }
+      // 捕获读入写串行链（遗漏大扫 20260902-b #4，会话篇 §5.3 捕获读条款）：兄弟
+      // 会话的工具写正 truncate-then-write 到一半时，链外裸读会把撕裂中间态 hash
+      // 进 blob 仓永固——`/rewind` 恢复出从未存在过的半截文件（读侧 sha256 校验
+      // 只验 blob 自身完整，防不住源面撕裂）。逐路径短临界段与工具写/恢复写同键
+      // 同链互斥（canonical 化与工具写同源；不锁未变化路径——与「不设全工作区
+      // 互斥」立场一致）。
+      const content = await serializeWrites([await canonicalize(join(cx.workspaceRoot, fp.rel))], () =>
+        readFile(join(cx.workspaceRoot, fp.rel)),
+      );
+      const hash = hashContent(content);
+      // decision 时点先登记再落盘：并发的清孤在此刻起即认得这是「正在写」的引用
+      registerInflightCaptureBlob(cx.dataRoot, hash);
+      inflightHashes.push(hash);
+      if (await writeBlob(cx.dataRoot, hash, content)) {
+        newBytes += fp.size; // 实际落盘才计新写（既有 blob 命中零新增）
+      }
+      files.push({ rel: fp.rel, hash, size: fp.size, mtimeMs: fp.mtimeMs, mode: fp.mode });
     }
-    totalBytes += fp.size;
-    const prevEntry = prevByRel.get(fp.rel);
-    if (prevEntry !== undefined && prevEntry.size === fp.size && prevEntry.mtimeMs === fp.mtimeMs) {
-      // stat 快径命中：指纹未变引用既有 blob（零读零写）
-      files.push({ rel: fp.rel, hash: prevEntry.hash, size: fp.size, mtimeMs: fp.mtimeMs, mode: fp.mode });
-      continue;
-    }
-    // 捕获读入写串行链（遗漏大扫 20260902-b #4，会话篇 §5.3 捕获读条款）：兄弟
-    // 会话的工具写正 truncate-then-write 到一半时，链外裸读会把撕裂中间态 hash
-    // 进 blob 仓永固——`/rewind` 恢复出从未存在过的半截文件（读侧 sha256 校验
-    // 只验 blob 自身完整，防不住源面撕裂）。逐路径短临界段与工具写/恢复写同键
-    // 同链互斥（canonical 化与工具写同源；不锁未变化路径——与「不设全工作区
-    // 互斥」立场一致）。
-    const content = await serializeWrites([await canonicalize(join(cx.workspaceRoot, fp.rel))], () =>
-      readFile(join(cx.workspaceRoot, fp.rel)),
-    );
-    const hash = hashContent(content);
-    if (await writeBlob(cx.dataRoot, hash, content)) {
-      newBytes += fp.size; // 实际落盘才计新写（既有 blob 命中零新增）
-    }
-    files.push({ rel: fp.rel, hash, size: fp.size, mtimeMs: fp.mtimeMs, mode: fp.mode });
-  }
 
-  const manifest: CheckpointManifest = {
-    id: newManifestId(),
-    sessionId: meta.sessionId,
-    time: Date.now(),
-    triggerTool: meta.triggerTool,
-    guard: meta.guard,
-    forkSeq: meta.forkSeq,
-    triggerText: meta.triggerText,
-    files,
-    skipped,
-    newBytes,
-    totalBytes,
-  };
-  await writeManifest(cx.dataRoot, manifest);
-  return manifest;
+    const manifest: CheckpointManifest = {
+      id: newManifestId(),
+      sessionId: meta.sessionId,
+      time: Date.now(),
+      triggerTool: meta.triggerTool,
+      guard: meta.guard,
+      forkSeq: meta.forkSeq,
+      triggerText: meta.triggerText,
+      files,
+      skipped,
+      newBytes,
+      totalBytes,
+    };
+    await writeManifest(cx.dataRoot, manifest);
+    return manifest;
+  } finally {
+    // 注销必达：成功（manifest 已落盘，后续清孤由时点重读接管）与失败（真孤儿
+    // 语义——后续清孤照常回收其 blob）同格收尾
+    unregisterInflightCaptureBlobs(cx.dataRoot, inflightHashes);
+  }
 }
 
 /** 裁剪配置（prunePlan 入参——缺省值由件本体填充） */
@@ -309,28 +327,25 @@ export function prunePlan(
 }
 
 /**
- * 执行裁剪：删 manifest + 全量引用计数清孤 blob（幸存 = 活集 ∖ drop）。
+ * 执行裁剪：删 manifest + 全量引用计数清孤 blob。
  * 捕获后单入口调用（不设第二触发点）。
  *
- * 清孤保护（复盘 E-1，会话篇 §5.3 裁剪条勘正）：清单视图存在损坏 manifest
- * 时本轮清孤整体跳过——不可解析 manifest 的 blob 引用面不可知，「解析失败」
- * 不得等价于「可删」（否则每次捕获必触发的裁剪把损坏从「一条快照不可见」
- * 升格为「快照数据被永久销毁」）。保护代价如实承受：孤儿 blob 暂留、软帽
- * 可超，直至损坏文件人工处置（读侧 warn 每次捕获重申）；manifest 删除照常
- * 执行（活集内的正常裁剪与损坏保护正交）。
+ * 清孤竞速收口（全面复盘 20260903 #1，会话篇 §5.3 裁剪条）：幸存集**不采信调用
+ * 时点的清单快照**——删完弃项后**时点重读**全局清单视图取当下全集（并发捕获后落
+ * 的新 manifest，其引用即时可见），清孤白名单 = 重读幸存集 ∪ 在飞捕获注册表
+ * （注册表在 sweepOrphanBlobs 内并——「blob 已落、manifest 未落」窗口的唯一护栏）。
+ * 损坏账以重读为准（复盘 E-1 保护形态不变：解析失败 ≠ 可删）。
  */
 export async function executePrune(
   dataRoot: string,
-  inventory: ManifestInventory,
   drop: readonly CheckpointManifest[],
+  logger?: Pick<AppLogger, 'warn'>,
 ): Promise<void> {
-  const dropped = new Set(drop.map((m) => m.id));
   for (const m of drop) {
     await deleteManifest(dataRoot, m.sessionId, m.id);
   }
-  if (inventory.corruptFiles.length > 0) return; // 清孤保护模式（解析失败 ≠ 可删）
-  await sweepOrphanBlobs(
-    dataRoot,
-    inventory.manifests.filter((m) => !dropped.has(m.id)),
-  );
+  // 时点重读：幸存面 = 当下盘面全集（弃项已删不在内；并发新落 manifest 即时入册）
+  const fresh = await listAllManifests(dataRoot, logger);
+  if (fresh.corruptFiles.length > 0) return; // 清孤保护模式（解析失败 ≠ 可删）
+  await sweepOrphanBlobs(dataRoot, fresh.manifests);
 }

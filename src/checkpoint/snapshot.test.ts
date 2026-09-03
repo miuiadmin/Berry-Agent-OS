@@ -7,7 +7,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureSnapshot, executePrune, prunePlan, type PruneOptions } from './snapshot.js';
@@ -335,7 +335,7 @@ describe('executePrune：删 manifest + 引用计数清孤 blob', () => {
       // 裁剪：每会话只保 1 条（最新 m3）
       const drop = prunePlan(all, opts(1, 1e9), new Set(['sess-prune']));
       expect(drop.map((m) => m.id).sort()).toEqual([m1.id, m2.id].sort());
-      await executePrune(store, await listAllManifests(store), drop);
+      await executePrune(store, drop);
       // manifest 面：只剩 m3
       const survivors = await listSessionManifests(store, 'sess-prune');
       expect(survivors.map((m) => m.id)).toEqual([m3.id]);
@@ -373,15 +373,103 @@ describe('executePrune：删 manifest + 引用计数清孤 blob', () => {
       expect(inventory.corruptFiles).toHaveLength(1);
       // 裁剪掉 m1：损坏在场 → manifest 照删但 v1 独占 blob 必须幸存（保护模式——
       // 修复前此处红：清孤把损坏 manifest 引用面外的 blob 一律当孤儿销毁）
-      await executePrune(store, inventory, prunePlan(inventory.manifests, opts(1, 1e9), new Set(['sess-prot'])));
+      await executePrune(store, prunePlan(inventory.manifests, opts(1, 1e9), new Set(['sess-prot'])));
       await expect(readBlob(store, hashV1)).resolves.toBeTruthy();
       // 人工处置（删除损坏文件）后：保护解除，下轮清孤恢复正常（v1 blob 此刻成真孤儿）
       rmSync(manifestPath(store, 'sess-prot', 'cp-rot00001'));
       const clean = await listAllManifests(store);
       expect(clean.corruptFiles).toHaveLength(0);
-      await executePrune(store, clean, []);
+      await executePrune(store, []);
       await expect(readBlob(store, hashV1)).rejects.toThrow();
     } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(store, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('executePrune：清孤竞速收口（全面复盘 20260903 #1）', () => {
+  /** 本组捷径捕获（独立 ws/store 对——不与共享 workspace 互染） */
+  const snapAt = (ws: string, store: string, sessionId: string) =>
+    captureSnapshot(
+      { dataRoot: store, workspaceRoot: ws, exclude: ['node_modules/', '.git/'] },
+      { sessionId, triggerTool: 'write', guard: false, forkSeq: null, triggerText: null },
+    );
+
+  it('时点重读：调用时点清单看不见的并发新 manifest，其 blob 不被清孤（修前红=签名缺位 TypeError）', async () => {
+    const ws = join(root, 'ws-race1');
+    const store = join(root, 'store-race1');
+    mkdirSync(ws, { recursive: true });
+    try {
+      // 会话 A 两连拍（v1 → v2 各独占 blob）：v1 是本轮裁剪的弃项、v2 幸存
+      writeFileSync(join(ws, 'a.txt'), 'race1-v1', 'utf8');
+      await snapAt(ws, store, 'sess-a');
+      await tick();
+      writeFileSync(join(ws, 'a.txt'), 'race1-v2-longer', 'utf8');
+      await snapAt(ws, store, 'sess-a');
+      // 调用时点清单：此刻看不见 B 的 manifest（并发捕获「blob 先落、manifest 后落」
+      // 竞速窗口的另一半——A 的 listAllManifests 恰在 B manifest 落盘前读）
+      const stale = await listAllManifests(store);
+      expect(stale.manifests).toHaveLength(2);
+      // B 的 manifest「后落」：引用 a.txt 同 blob + 新 b.txt blob
+      writeFileSync(join(ws, 'b.txt'), 'race1-b-new', 'utf8');
+      const mB = await snapAt(ws, store, 'sess-b');
+      // A 的顺手裁剪按陈旧清单执行（弃 A 旧快照；幸存集采信 stale = 空）
+      const drop = prunePlan(stale.manifests, opts(1, 1e9), new Set(['sess-a']));
+      expect(drop).toHaveLength(1);
+      await executePrune(store, drop);
+      // 修前真形（探针 /tmp/berry-scan9/probes/storage/sweep-race.mts 已证）：清孤
+      // 幸存集 = 陈旧清单 ∖ 弃项 = 空 → B 的 blob 全判孤删 → manifest 悬空 /
+      // /rewind ENOENT。修后：sweep 前时点重读全局清单，B 的 manifest 引用即时可见
+      for (const f of mB.files) {
+        await expect(readBlob(store, f.hash)).resolves.toBeTruthy();
+      }
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(store, { recursive: true, force: true });
+    }
+  });
+
+  it('在飞保护注册表：捕获进行中（blob 已落、manifest 未落）的 blob 不被清孤（修前红=签名缺位 TypeError）', async () => {
+    const ws = join(root, 'ws-race2');
+    const store = join(root, 'store-race2');
+    mkdirSync(ws, { recursive: true });
+    // 在飞捕获 promise（try 外声明——finally 块要等它落定再清场）
+    let capture: Promise<CheckpointManifest> | undefined;
+    try {
+      // 四个 6MiB 大文件：首 blob 落盘后余下文件的读+hash 拉出真时长中窗（毫秒级，
+      // 1ms 轮询必命中——窗口内任何清单视图都看不见 B 的 manifest，只有注册表能护）
+      const sixMiB = (b: number) => Buffer.alloc(6 * 1024 * 1024, b);
+      writeFileSync(join(ws, 'b0.bin'), sixMiB(0x61));
+      for (let i = 1; i <= 3; i++) writeFileSync(join(ws, `b${i}.bin`), sixMiB(0x60 + i));
+      capture = snapAt(ws, store, 'sess-b2');
+      // 中窗探测：blobs/ 已出现实文件 && B 的 manifest 目录仍缺席（真形中窗 =
+      // 探针形态「hX 落盘、M_B 未落」——修前清孤在此窗删 blob 即真数据丢失）
+      const blobsRoot = join(store, 'blobs');
+      const manifestDir = join(store, 'manifests', 'sess-b2');
+      for (;;) {
+        // blobs/ 未建（首 blob 未落）＝ ENOENT 视作零落地
+        let count = 0;
+        try {
+          count = readdirSync(blobsRoot, { recursive: true }).filter((n) => !n.includes('.')).length;
+        } catch {
+          count = 0;
+        }
+        if (count > 0 && !existsSync(manifestDir)) break;
+        if (existsSync(manifestDir)) break; // 窗口已过（防御——此形态下测试退化为平凡绿）
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      // 窗口内他方顺手裁剪：此刻执行清孤，唯一护栏 = 在飞捕获注册表
+      await executePrune(store, []);
+      const mB = await capture;
+      // 修前真形：注册表缺席 → B 已落 blob 判孤删除 → manifest 悬空。修后：decision
+      // 时点登记的 hash 全集进清孤白名单，manifest 落盘即注销（真孤儿照常回收）
+      for (const f of mB.files) {
+        await expect(readBlob(store, f.hash)).resolves.toBeTruthy();
+      }
+    } finally {
+      // 先等在飞捕获落定再清场（否则 finally 拆工作区引爆未决 readFile——红跑同样守序）
+      await capture?.catch(() => {});
       rmSync(ws, { recursive: true, force: true });
       rmSync(store, { recursive: true, force: true });
     }

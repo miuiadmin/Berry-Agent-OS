@@ -255,11 +255,13 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
           });
         }
         // 顺手裁剪（单入口不设第二触发点——捕获后即裁；失败 warn 下次重试）。
-        // 清单视图携带损坏账（复盘 E-1）：损坏文件非空即本轮清孤保护跳过
+        // 清孤竞速收口（全面复盘 20260903 #1）：executePrune 内时点重读幸存面 +
+        // 在飞捕获注册表白名单——并发捕获（blob 先落/manifest 后落）的引用不被
+        // 陈旧清单误判孤删；损坏账（复盘 E-1）以重读为准，非空即清孤保护跳过
         //（解析失败 ≠ 可删）；损坏面在读侧 warn 点名（logger 传入）
         try {
           const inventory = await listAllManifests(dataRoot, ctx.logger);
-          await executePrune(dataRoot, inventory, prunePlan(inventory.manifests, cfg, deps.activeSessions()));
+          await executePrune(dataRoot, prunePlan(inventory.manifests, cfg, deps.activeSessions()), ctx.logger);
         } catch (err) {
           ctx.logger.warn('checkpoint 裁剪失败（下次捕获重试）', { error: String(err) });
         }
