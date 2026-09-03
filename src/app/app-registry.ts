@@ -130,20 +130,24 @@ export function loadOfficialApps(
 /**
  * 从装机构件根读取 API 声明门（API 治理 §6.13.4 装载门送达链——就绪度审计
  * 20260903 P0 接通）：单层发现 `*.app.yaml` → 解析校验 → `adjudicateApiGate`
- * 四出口单源裁决。消费方两腿：
- * - 组合树合成期（composition 第三方行填充 `AppPlanRow.apiGate`）；
- * - 装载词表收割面（assembly loadEntry——入口目录即构件根的标准布局）。
+ * 四出口单源裁决。消费方两腿（根公式各按其形——遗漏大扫 20260904 #2/#3 勘正：
+ * 文件形 ref 与 extensions/ 约定布局两缺陷修死后的如实形态）：
+ * - 组合树合成期（composition 第三方行填充 `AppPlanRow.apiGate`）——根 =
+ *   `resolveAppRoot(ref)` 产物，文件形取其目录（与 resolveAppEntry 两分同律）；
+ * - 装载词表收割面（assembly loadEntry）——根 = 入口目录起单层上爬
+ *   （extensions/ 布局清单在包根）。
  *
  * 错误语义两分：
  * - **min 地板拒载**（宿主 apiVersion < 清单 min）：原样抛出
  *   `API_VERSION_MISMATCH`（fail-loud 三段消息自带升级指引）——合成方捕转
- *   unresolved 行 / 收割方直接失败，不静默；
+ *   unresolved 行拒启（即响）；收割消费面吞账（refreshLedger 记 null 档 /
+ *   mount config 校验面记不可得）不阻断装机，configure 面异常上抛拒写
+ *   ——最终执法位 = boot 合成面（遗漏大扫 20260904 #8 注释如实收窄）；
  * - **清单缺席/不可解析/校验失败**：返回 undefined（装载期实验键按空声明集
  *   拒——fail-closed）。坏清单属诊断面（apps check / dump-config）职，不在此
  *   炸合成面。
  *
  * 官方 builtin 行不经此（宿主函数件不 jiti——装载期 loadOfficialApps 已裁决）。
- * 根目录公式与 resolveAppEntry 同源（composition 侧 `resolveAppRoot` 单源）。
  */
 export function readApiGateAtRoot(root: string): { appId: string; experimental: readonly string[] } | undefined {
   let entries: string[];

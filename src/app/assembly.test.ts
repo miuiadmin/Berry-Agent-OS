@@ -1754,6 +1754,38 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
     expect(failedRow?.message).toMatch(/技能来源注册被拒/);
   });
 
+  it('extensions 布局收割腿：包根清单经单层爬找进收割装载窗——min 地板在收割窗即拒（账本 null 档；boot 合成面同清单另腿拒启）', async () => {
+    // 遗漏大扫 20260904 #3 回归锁：extensions/index.ts 是无 package.json 时的
+    // 第一优先入口候选（候选序先于包根 index.ts——约定主路径非边角），收割腿
+    // 修复前 dirname(entry)=<pkg>/extensions/ 读不到包根清单 → 空门 legacy 放行
+    // → 词名真实收割进账本（收割窗与 boot 装载窗对同一应用 gate 裁决分叉）。
+    // 修复后单层爬找读到包根清单 → min 99.0 在收割装载窗即抛
+    // API_VERSION_MISMATCH → refreshLedger 吞为 null 档（unknown 警示兜底——
+    // 收割面吞账纪律见 #8 注释收窄；最终执法位 = boot 合成面，链未断）。
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-ext-')));
+    const appDir = join(compositionDir, 'ext-plugin');
+    mkdirSync(join(appDir, 'extensions'), { recursive: true });
+    writeFileSync(
+      join(appDir, 'extensions', 'index.ts'),
+      'export const name = "ext-plugin";\nexport const events = [{ name: "ext/evt" }];\nexport default () => {};\n',
+    );
+    // 清单在包根（不在 extensions/ 内——与入口不同层正是缺陷形态）
+    writeFileSync(
+      join(appDir, 'ext-plugin.app.yaml'),
+      ['id: vendor/ext', 'label: 演示', 'components:', '  - builtin:chat', 'api:', '  minApiVersion: "99.0"'].join(
+        '\n',
+      ),
+    );
+    const runtime = await assemble({ compositionDir });
+    await runtime.appsService.install(appDir);
+    // 装机账本 observable：修复前 declaredEvents=['ext/evt']（空门放行真实收割），
+    // 修复后 = null（收割装载窗即拒 → 空中抛被 refreshLedger 收为 null 档）
+    const dataJson = JSON.parse(readFileSync(join(compositionDir, 'apps', 'ext-plugin', 'data.json'), 'utf8')) as {
+      declaredEvents: readonly string[] | null;
+    };
+    expect(dataJson.declaredEvents).toBe(null);
+  });
+
   it('overlay 应用全栈：工具经 ctx.effect 注册 → 装配后可见可执行；paths/apps 服务就位', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     const appDir = writeAppDir(

@@ -1034,3 +1034,60 @@ describe('loadComposition：第三方行 API 声明门（apiGate 随计划行）
     expect(p1['unresolved']).toBeUndefined();
   });
 });
+
+/* ---------------- apiGate 根公式（遗漏大扫 20260904 #2——路径形直指文件） ---------------- */
+
+describe('loadComposition：apiGate 根公式（路径形直指文件 ref）', () => {
+  /**
+   * 路径形直指文件的开发形态（resolveAppEntry 文件/目录两分明确支持——local 源
+   * 迭代用）：入口文件与清单同目录。修复前缺陷（#2）：resolveAppRoot 对文件形
+   * ref 返回文件路径本身，readApiGateAtRoot 拿文件路径当目录 readdir 抛 ENOTDIR
+   * → 被 catch 静默归入「根不可读 = 空门」→ apiGate 恒 undefined（实验键声明
+   * 失效误拒 + min 地板缺席 fail-open）。
+   */
+  function makePathFileApp(manifest?: string): string {
+    const dataDir = makeDataDir();
+    const appDir = join(dataDir, 'path-app');
+    mkdirSync(appDir, { recursive: true });
+    const entry = writeEntryFile(appDir); // <appDir>/entry.ts（清单与入口同目录）
+    if (manifest !== undefined) writeFileSync(join(appDir, 'path-app.app.yaml'), manifest);
+    writeOverlay(dataDir, `  - id: p1\n    pkg: ${entry}\n    apps: [chat]\n`);
+    return dataDir;
+  }
+
+  /** 从计划里按行 id 取行（同前 describe——免疫兄弟在飞的默认层行增删） */
+  function rowById(dataDir: string): Record<string, unknown> {
+    const plan = loadUserComposition(dataDir).plan as Array<Record<string, unknown>>;
+    return plan.find((row) => row['id'] === 'p1')!;
+  }
+
+  it('文件形 ref + 同目录清单：apiGate 照填充（修复前 readdir(文件) ENOTDIR 被吞 → 恒空门）', () => {
+    const dataDir = makePathFileApp(
+      [
+        'id: vendor/demo',
+        'label: 演示',
+        'components:',
+        '  - builtin:chat',
+        'api:',
+        '  minApiVersion: "1.0"',
+        '  experimental:',
+        '    - berryagent/llm',
+      ].join('\n'),
+    );
+    const p1 = rowById(dataDir);
+    expect(p1['entry']).toBeTruthy();
+    expect(p1['apiGate']).toEqual({ appId: 'vendor/demo', experimental: ['berryagent/llm'] });
+  });
+
+  it('文件形 ref + min 99.0：行转 unresolved 拒启（修复前空门放行——min 地板缺席 fail-open）', () => {
+    const dataDir = makePathFileApp(
+      ['id: vendor/demo', 'label: 演示', 'components:', '  - builtin:chat', 'api:', '  minApiVersion: "99.0"'].join(
+        '\n',
+      ),
+    );
+    const p1 = rowById(dataDir);
+    expect(p1['unresolved']).toContain('装载门拒载');
+    expect('entry' in p1).toBe(false);
+    expect('apiGate' in p1).toBe(false);
+  });
+});

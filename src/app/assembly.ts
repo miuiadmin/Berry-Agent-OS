@@ -1368,9 +1368,13 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * install/update/uninstall 运行期被调，彼时装配已完成全部初始化）。
    * - loadEntry：词表账本收割面——与装载管线同一 jiti 工厂同一 import 门禁
    *   （virtualFaces + guardTransform），一次性装载读 name/events 词名；API
-   *   声明门随行（就绪度审计 20260903 P0 送达链——入口目录即构件根的标准
-   *   布局下读清单 api 块；min 地板拒载在收割面即响〔fail-loud〕，嵌套入口
-   *   布局读不到清单 = 空门 fail-closed——首个实验键应用落地时按需收口）；
+   *   声明门随行（就绪度审计 20260903 P0 送达链——从入口目录读清单 api 块，
+   *   单层上爬覆盖 extensions/ 约定布局〔无 package.json 时的第一优先入口
+   *   候选，清单在包根——遗漏大扫 20260904 #3〕，更深层嵌套读不到清单 =
+   *   空门 fail-closed）；min 地板拒载经 loadEntry 抛出后收割消费面吞账
+   *   （refreshLedger 记 null 档 / mount config 校验面记不可得）不阻断装机
+   *   ——即响面 = boot 合成面（unresolved 拒启）与 configure 面（异常上抛
+   *   拒写），最终执法位 = boot（遗漏大扫 20260904 #8 注释如实收窄）；
    * - affectedSessionCounts：受影响会话计数取数面——flush 屏障内嵌（write-behind
    *   尾部对查询不可见）+ Store 全库精确聚合（latestSessionId 同族宿主侧直查）；
    * - emitUninstalled：卸载成功尾双落地——总线广播 + 当前会话流落账
@@ -1389,7 +1393,12 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         createAppJiti(virtualFaces),
         entry,
         (() => {
-          const gate = readApiGateAtRoot(dirname(entry));
+          // 收割腿根公式（遗漏大扫 20260904 #3）：入口目录无清单时单层上爬——
+          // extensions/ 约定布局（无 package.json 时的第一优先入口候选）的清单
+          // 在包根；再深不上爬（真嵌套 = 空门 fail-closed）。两常见布局与 boot
+          // 合成腿（resolveAppRoot 构件根）同值，收割装载窗与 boot 装载窗不再分叉
+          const entryDir = dirname(entry);
+          const gate = readApiGateAtRoot(entryDir) ?? readApiGateAtRoot(dirname(entryDir));
           return gate === undefined ? undefined : { appId: gate.appId, experimental: new Set(gate.experimental) };
         })(),
       ),

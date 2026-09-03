@@ -14,7 +14,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
@@ -726,11 +726,16 @@ export function loadComposition(
     // unresolved 行——与入口解析失败同面拒绝式即响（boot 断言拒启 / dump-config
     // 诊断面行级归因），消息自带升级指引；清单缺席/坏清单 = 空门（fail-closed，
     // 见 readApiGateAtRoot 错误语义两分）。
+    // 根公式文件形归一（遗漏大扫 20260904 #2）：resolveAppRoot 对路径形直指文件
+    // 的 ref 返回文件路径本身（resolveAppEntry 同源两分依赖此形态），直接当目录
+    // readdir 抛 ENOTDIR 会被吞成「空门」——文件形取其目录再读（清单与入口同
+    // 目录的开发形态）；目录形原样。与 resolveAppEntry 的文件/目录两分同律。
     let gateUnresolved: string | undefined;
     let apiGate: { appId: string; experimental: readonly string[] } | undefined;
     if (entry !== undefined) {
       try {
-        apiGate = readApiGateAtRoot(resolveAppRoot(ref, dataDir));
+        const gateRoot = resolveAppRoot(ref, dataDir);
+        apiGate = readApiGateAtRoot(statSync(gateRoot).isFile() ? dirname(gateRoot) : gateRoot);
       } catch (err) {
         gateUnresolved = `应用「${ref}」装载门拒载：${err instanceof Error ? err.message : String(err)}`;
       }
