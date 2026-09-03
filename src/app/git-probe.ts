@@ -44,7 +44,12 @@ export function createGitProbe(): GitProbeFace {
       try {
         const [count, files] = await Promise.all([
           run(cwd, ['rev-list', '--count', `${before}..${after}`]),
-          run(cwd, ['diff', '--name-only', before, after]),
+          // core.quotepath=false（遗漏大扫 20260903 fresh D1-1）：git 缺省 true 把
+          // 非 ASCII 路径输出成八进制转义+字面包引号（"\350\256\276…"）——本仓自身
+          // 设计文档/ CJK 路径即主形态，落账 files 全是带引号转义垃圾，42 批晋升桥
+          // 「产出验证」与 events_query 审计面拿到的都是坏数据。关掉即原生 UTF-8。
+          // （state 的 porcelain 只数行数不消费路径，无此患。）
+          run(cwd, ['-c', 'core.quotepath=false', 'diff', '--name-only', before, after]),
         ]);
         return {
           commits: Number(count.trim()) || 0,

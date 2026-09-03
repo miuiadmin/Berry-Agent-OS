@@ -418,3 +418,31 @@ describe('interrupt 小刀——cancelAsks 退出兜底（包装面直测）', (
     tui.cancelAsks(); // 幂等——无提问在身为 no-op
   });
 });
+
+describe('消息流滚动帽（遗漏大扫 20260903 spec D1-2 修死——批 C 休眠 VStack 清理补刀）', () => {
+  it('超帽丢最旧：maxMessageLines=6 下 10 条消息复起全帧重画只见尾 6 条', async () => {
+    // 修前红位：批 C 换防 383f8b25 停屏期事件仍进组件树（requestRender 短路、
+    // 树照长无帽）——桌面态长跑 + 后台长会话 = 内存无界累积、复起全量重画线性
+    // 涨。观测面：frames 累积全部历史写，presence 断言看不见剪除——改走
+    // stop()+start() 复起路（requestRender(true) 强制全帧重画），末帧即组件
+    // 树真相快照。
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal, maxMessageLines: 6 });
+    tui.start(); // 首起路（screenStarted 置位——复起走强制全帧分支）
+    // 10 条单行消息（message_end 无流式块直落正文，各 1 个 Text 子件）
+    for (let i = 0; i < 10; i += 1) {
+      tui.handle({ type: 'message_end', message: assistantMessage(`消息行${String(i).padStart(2, '0')}`) });
+    }
+    await flush();
+    const frameCountBeforeRestart = terminal.frames.length; // 复起重画面分界
+    tui.stop(); // 停屏（批 C 换防形态）
+    tui.start(); // 复起路：requestRender(true) 全帧重画
+    await flush();
+    // 复起重画可能拆多次 write（光标转义 + 行块）——拼接复起点后全部写为快照
+    const redraw = terminal.frames.slice(frameCountBeforeRestart).join('');
+    expect(redraw).toContain('消息行09'); // 最新恒保留
+    expect(redraw).toContain('消息行04'); // 帽内最旧一条（10-6=4 起）
+    expect(redraw).not.toContain('消息行00'); // 修前红：无帽全量重画含最旧行
+    expect(redraw).not.toContain('消息行03'); // 帽外三条整段剪除
+  });
+});

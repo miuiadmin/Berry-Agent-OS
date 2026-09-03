@@ -3,7 +3,9 @@
 # 仓库四道门禁（typecheck / test / lint:topology / format:check）此前只有
 # 本机手动钩子与发版时点（release 契约 1）执法，外部 PR / 新机器 clone 零
 # 强制——本工作流把四门禁搬上 GitHub Actions：push 与 pull_request 双触发
-# （外部贡献走 PR 面）。Node 22 单线（运行时下限 = 22.19，22.x 最新即满足）。
+# （外部贡献走 PR 面）。Node 24 单线（engines >=24.0 硬闸对齐——66ae8c59 用户
+# 拍板「Node 最低 24」；22 线 npm 安装即拒，CI 跑 22 = 全部门禁运行在支持线
+# 之下且 Node 24 独占行为面永不可见——遗漏大扫 20260903 deps D1-1 收口）。
 #
 # 关键细节：checkout 必须 fetch-depth: 0（全史）——check-tense 规则 1 把公开
 # 文档里的「已落码 <hash>」引用对照 git log 全量 commit 前缀集，浅克隆只见
@@ -36,7 +38,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - name: 安装 bubblewrap 并解除 userns 限制（mcp 件 OS 沙箱层后端——e2e 真子进程测试依赖）
         # 两步缺一不可（刀四 CI 二跑红实证）：
@@ -93,7 +95,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - name: 安装 bubblewrap 并解除 userns 限制（release 契约 1 门禁含全量 test——mcp e2e 同依赖）
         if: runner.os == 'Linux'

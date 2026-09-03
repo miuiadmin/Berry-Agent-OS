@@ -156,6 +156,63 @@ describe('git/range Output 锚（第六十一批）', () => {
     expect((events[0]!.data as { files: string[] }).files).toHaveLength(50);
   });
 
+  it('字节帽 60KiB（遗漏大扫 20260903 fresh D1-2 修死）：条数帽之内超长路径串保头丢尾 + filesTruncated 披露', async () => {
+    // 50 条 × ~1400 字符 ≈ 70KiB > 60KiB 字节预算——条数帽（50）放行、字节帽
+    // 拦腰。修前红位：序列化撞 64KiB 事件护栏 → appendEvent 抛
+    // SESSION_EVENT_TOO_LARGE 有产出零落账（events 空 + 落账 warn）。
+    const fat = Array.from({ length: 50 }, (_, i) => `d/${'x'.repeat(1390)}-${i}.ts`);
+    const { probe } = fakeProbe(
+      [
+        { head: 'aaa111', dirtyCount: 0 },
+        { head: 'bbb222', dirtyCount: 0 },
+      ],
+      { commits: 1, files: fat },
+    );
+    const { tracker, events } = rig(probe);
+    await tracker.onFirstMutation();
+    tracker.onRunSettled('sess-A');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(events).toHaveLength(1); // 修前 0（护栏拒绝）
+    const data = events[0]!.data as { files: string[]; filesTruncated?: number };
+    expect(data.files.length).toBeGreaterThan(0);
+    expect(data.files.length).toBeLessThan(50); // 字节预算在条数帽之内再拦一刀
+    expect(data.filesTruncated).toBe(50 - data.files.length); // 截断面诚实披露
+    expect(data.files[0]).toBe(fat[0]); // 保头（git 清单序前缀保留）
+    // 序列化体积恒在预算内（护栏余量成立）
+    expect(Buffer.byteLength(JSON.stringify(data.files))).toBeLessThanOrEqual(60 * 1024);
+  });
+
+  it('落账腿单独分桶（fresh D1-2 修死）：appendEvent 抛错 warn 归因「落账失败」不误标「结算复探异常」', async () => {
+    // 探测腿全成功、只有落账 appendEvent 抛（护栏 SESSION_EVENT_TOO_LARGE /
+    // 写侧拒绝形态）——修前红位：落进外层 catch 被 warn 成「结算复探异常」，
+    // 归因撒谎误导排障方向。
+    const { probe } = fakeProbe(
+      [
+        { head: 'aaa111', dirtyCount: 0 },
+        { head: 'bbb222', dirtyCount: 0 },
+      ],
+      { commits: 1, files: ['src/a.ts'] },
+    );
+    const warnMsgs: string[] = [];
+    const tracker = createGitAnchorTracker({
+      routedSessionId: () => 'sess-A',
+      appendEvent: () => {
+        throw new Error('SESSION_EVENT_TOO_LARGE: 66560 > 65536');
+      },
+      workspaceRoot: () => '/ws',
+      probe,
+      logger: {
+        debug: () => {},
+        warn: (msg) => warnMsgs.push(msg),
+      },
+    });
+    await tracker.onFirstMutation();
+    tracker.onRunSettled('sess-A');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(warnMsgs.some((m) => m.includes('落账失败'))).toBe(true); // 修前：文案是「结算复探异常」
+    expect(warnMsgs.some((m) => m.includes('结算复探异常'))).toBe(false);
+  });
+
   it('异常锁一：首探测抛异常免锚不阻工具', async () => {
     const boom: GitProbeFace = {
       state: async () => {

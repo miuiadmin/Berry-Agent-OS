@@ -66,9 +66,12 @@ describe('正常执行', () => {
 
 describe('超时自治（execute 内自计时 + 树杀）', () => {
   it('到点抛 TOOL_TIMEOUT，不等满命令时长', async () => {
-    const started = Date.now();
+    // 单调钟 + 相对阈值（遗漏大扫 20260903 test D8-2）：墙钟 Date.now 免疫 NTP
+    // 跳变缺失、绝对阈值不随参数伸缩——统一 performance.now + `timeoutMs*2+1000`
+    //（修前红语义不破：陪跑 30s 远超 1600）
+    const started = performance.now();
     await expectRejectCode(() => runArgv(['bash', '-c', 'sleep 30'], { timeoutMs: 300 }), TOOL_TIMEOUT);
-    expect(Date.now() - started).toBeLessThan(5000); // 没陪跑 30s
+    expect(performance.now() - started).toBeLessThan(300 * 2 + 1000); // 没陪跑 30s
   });
   it('树杀杀整组：孙进程一并终结（killpg 负 pid）', async () => {
     // bash -c 起 sleep 孙进程后主 sleep 挂着；超时树杀后全组死——若只杀直接
@@ -84,9 +87,10 @@ describe('后台孤儿形态执法（运行时探针 20260902 F-2 修死）', ()
     // 主进程已退）→ 孤儿同 pgid 存活持有 stdout 管道 → close 等管道 EOF →
     // 结算被孤儿自然寿命绑架、sleep 泄漏、文案谎称「进程组已树杀」。
     // 修后：无条件 killpg（组空 ESRCH 落 catch 无害）→ 预算点结算。
-    const started = Date.now();
+    const started = performance.now();
     await expectRejectCode(() => runArgv(['bash', '-c', 'sleep 8 & echo launched'], { timeoutMs: 1500 }), TOOL_TIMEOUT);
-    expect(Date.now() - started).toBeLessThan(4000); // 修前 ~8000ms（孤儿 8s 自然退出）
+    // 相对阈值（timeoutMs*2+1000，D8-2）——修前 ~8000ms（孤儿 8s 自然退出）
+    expect(performance.now() - started).toBeLessThan(1500 * 2 + 1000);
   });
 
   it('取消腿：abort 树杀不被孤儿管道绑架结算', { timeout: 12_000 }, async () => {
@@ -94,10 +98,11 @@ describe('后台孤儿形态执法（运行时探针 20260902 F-2 修死）', ()
     // → close 等到孤儿 12s 自然退出。修后：abort 无条件 killpg → 管道随孤儿
     // 死而关 → close 及时到，主进程正常退出码照常结算
     const ac = new AbortController();
-    setTimeout(() => ac.abort(), 300);
-    const started = Date.now();
+    const ABORT_AT_MS = 300; // abort 锚（相对阈值随锚伸缩——D8-2）
+    setTimeout(() => ac.abort(), ABORT_AT_MS);
+    const started = performance.now();
     const run = await runArgv(['bash', '-c', 'sleep 12 & echo go'], { signal: ac.signal });
-    expect(Date.now() - started).toBeLessThan(4000); // 修前 ~12000ms
+    expect(performance.now() - started).toBeLessThan(ABORT_AT_MS * 2 + 1000); // 修前 ~12000ms
     expect(run.exitCode).toBe(0); // 主进程早已正常退出——abort 不是失败二分腿
   });
 
@@ -109,7 +114,7 @@ describe('后台孤儿形态执法（运行时探针 20260902 F-2 修死）', ()
       // 外不追杀）持管道时 close 永等其自然退出。修后：执法已发（组内
       // SIGKILL 不可挡）而 close 宽限内未至 → 按 exit 事件已知信息主动结算，
       // 不被输出流尾巴绑架（探针 F-2 修法②）。
-      const started = Date.now();
+      const started = performance.now();
       await expectRejectCode(
         () =>
           runArgv(
@@ -124,7 +129,8 @@ describe('后台孤儿形态执法（运行时探针 20260902 F-2 修死）', ()
           ),
         TOOL_TIMEOUT,
       );
-      expect(Date.now() - started).toBeLessThan(4000); // 修前 ~12000ms（异组孤儿自然退出）
+      // 相对阈值（timeoutMs*2+1000，D8-2）——修前 ~12000ms（异组孤儿自然退出）
+      expect(performance.now() - started).toBeLessThan(1200 * 2 + 1000);
     },
   );
 });

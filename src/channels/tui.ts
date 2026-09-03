@@ -54,6 +54,14 @@ export interface TuiChannelOptions {
   readonly onRendererError?: (err: unknown, role: string) => void;
   /** 终端注入（缺省 ProcessTerminal；测试/特殊终端用） */
   readonly terminal?: Terminal;
+  /**
+   * 消息流滚动帽（遗漏大扫 20260903 spec D1-2；02-计划 桌面 TUI 批 C 清单
+   * 「休眠 VStack 清理」383f8b25 缺席补刀）：messages 组件树子行上限——桌面
+   * 换防停屏期事件仍进组件树 + 长会话正文，零帽零剪枝 = 内存无界累积 + 复起
+   * 全量重画成本线性涨。超帽丢最旧（终端 scrollback 同款语义）；缺省 2000。
+   * 可注入 = 测试面（生产恒缺省）。
+   */
+  readonly maxMessageLines?: number;
   /** 标题行文案（缺省不渲染标题） */
   readonly title?: string;
   /** 历史投影拉取（S3 按会话键取：undefined = 当前聚焦〔起屏路，壳闭包解析〕；repaint 重画显式带键——通道不持注册表，宿主注入闭包路由） */
@@ -170,6 +178,8 @@ const NOTIFY_PREFIX: Record<NotifyLevel, string> = { info: 'ℹ', success: '✔'
 /** 组装 TUI 通道 */
 export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const terminal = opts.terminal ?? new ProcessTerminal();
+  /** 消息流滚动帽（缺省 2000——超帽丢最旧，见 TuiChannelOptions.maxMessageLines） */
+  const maxMessageLines = opts.maxMessageLines ?? 2000;
   const tui: TUI = new TuiMainScreen(terminal);
   /** 起屏旗标（批 C 桌面换防）：首起拉历史投影，停屏后复起只全量重画不重拉 */
   let screenStarted = false;
@@ -280,9 +290,16 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
 
   /* ---- 展示原语 ---- */
 
-  /** 追加若干展示行（每行一个 Text；请求重绘） */
+  /** 追加若干展示行（每行一个 Text；请求重绘）。超滚动帽丢最旧（休眠期无界堆积收口） */
   const appendLines = (lines: readonly string[]): void => {
     for (const line of lines) messages.addChild(new Text(line, 1));
+    // 滚动帽执法（遗漏大扫 20260903 spec D1-2）：批 C 换防停屏期事件仍进组件
+    // 树（requestRender 短路、树照长）——桌面态持续数小时 + 后台长会话即内存
+    // 无界累积，复起全量重画成本随树线性涨。children 是 Container 公开数组，
+    // 头部整段剪除 = 终端 scrollback 上限同款语义（最新恒保留；流式槽恒在尾
+    // 部不受影响）
+    const overflow = messages.children.length - maxMessageLines;
+    if (overflow > 0) messages.children.splice(0, overflow);
     messages.invalidate();
     tui.requestRender();
   };

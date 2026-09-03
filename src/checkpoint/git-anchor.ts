@@ -52,6 +52,13 @@ type AnchorState = { readonly before: GitProbeState } | { readonly noGit: true }
 
 /** files 清单截帽（64KiB 纪律——与 source_refs 50 帽同族） */
 const FILES_CAP = 50;
+/**
+ * files 序列化字节预算（遗漏大扫 20260903 fresh D1-2）：64KiB 事件护栏留封套
+ * 余量后的 files 专属份额——条数帽挡不住超长路径串（50 条 × 平均 >1.3KiB 即
+ * 撞护栏），撞上即 appendEvent 抛 SESSION_EVENT_TOO_LARGE、有产出却零落账。
+ * 超预算截断保头丢尾并记 filesTruncated 诚实披露，不炸护栏。
+ */
+const FILES_BYTE_BUDGET = 60 * 1024;
 
 /**
  * 构造 git/range 追踪器。生命周期与快照旗同拍：onFirstMutation（首变更工具
@@ -121,14 +128,40 @@ export function createGitAnchorTracker(deps: GitAnchorDeps): {
         if (headMoved) {
           delta = await probe.delta(root, before.head, after.head);
         }
-        deps.appendEvent('git/range', {
-          before: before.head,
-          after: after.head,
-          commits: delta?.commits ?? 0,
-          files: (delta?.files ?? []).slice(0, FILES_CAP),
-          dirtyBefore: before.dirtyCount,
-          dirtyAfter: after.dirtyCount,
-        });
+        // files 两段帽（遗漏大扫 20260903 fresh D1-1/D1-2 同族收口）：条数帽
+        // FILES_CAP + 字节帽 FILES_BYTE_BUDGET——超字节预算保头丢尾记
+        // filesTruncated（截断面诚实披露），保证序列化事件恒在 64KiB 护栏内
+        const capped = (delta?.files ?? []).slice(0, FILES_CAP);
+        let used = 0;
+        let keep = capped.length;
+        for (let i = 0; i < capped.length; i += 1) {
+          // 每条序列化成本 = JSON 引号转义串字节 + 1（逗号/括号分摊）
+          used += Buffer.byteLength(JSON.stringify(capped[i])) + 1;
+          if (used > FILES_BYTE_BUDGET) {
+            keep = i;
+            break;
+          }
+        }
+        const files = capped.slice(0, keep);
+        const filesDropped = capped.length - keep;
+        try {
+          deps.appendEvent('git/range', {
+            before: before.head,
+            after: after.head,
+            commits: delta?.commits ?? 0,
+            files,
+            // 仅截断时在场（既有载荷形状不变——零截断路 data 与修前逐字段相等）
+            ...(filesDropped > 0 ? { filesTruncated: filesDropped } : {}),
+            dirtyBefore: before.dirtyCount,
+            dirtyAfter: after.dirtyCount,
+          });
+        } catch (err) {
+          // 落账腿单独分桶（遗漏大扫 20260903 fresh D1-2）：appendEvent 抛错
+          // （如护栏 SESSION_EVENT_TOO_LARGE / 写侧拒绝）此前落进外层 catch 被
+          // 误标「结算复探异常」——探测腿与落账腿归因各归各，warn 文案不再撒谎
+          deps.logger.warn('git 锚落账失败（护栏或写侧拒绝——事件未落）', { error: String(err) });
+          return;
+        }
         deps.logger.debug('git 锚落账', {
           sessionId,
           before: before.head,
