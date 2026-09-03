@@ -517,17 +517,30 @@ function upgradeSse(res: ServerResponse, opts: WebuiServerOptions): void {
 
 /**
  * 读 POST 请求体（字节帽 256KiB——submit 文本远小于此，超帽 413 由调用方应答）。
+ *
+ * 超帽后必须丢弃式继续消费至流自然 end 再返回（遗漏大扫 20260904-b F-1）：
+ * 早退会让 413 应答早于请求体收尾到达，而真实客户端（node:http 全局池
+ * keep-alive / 浏览器 fetch 同族）对「应答已完而写腿未完」的收场 = 中止写腿
+ * 销毁 socket（RST）——连接池里紧邻的下一请求吃 ECONNRESET 连坐，更糟变体
+ * 连 413 本身都丢（1MB 体五轮三轮实测命中）。丢弃式消费保证**应答永不早于
+ * 体收完**——客户端写腿恒先收场，池连接恒干净；内存仍只累积帽内字节。
+ *
  * @returns undefined = 超帽；字符串 = 全体 UTF-8 文本
  */
 async function readBody(req: IncomingMessage): Promise<string | undefined> {
   const chunks: Buffer[] = [];
   let total = 0;
+  let overLimit = false;
   for await (const chunk of req) {
     total += (chunk as Buffer).byteLength;
-    if (total > WEBUI_BODY_LIMIT_BYTES) return undefined;
-    chunks.push(chunk as Buffer);
+    if (total > WEBUI_BODY_LIMIT_BYTES) {
+      // 超帽：只翻旗不早退——继续消费到自然 end（见函数头注释，早退=连接池连坐病根）
+      overLimit = true;
+    } else {
+      chunks.push(chunk as Buffer);
+    }
   }
-  return Buffer.concat(chunks).toString('utf8');
+  return overLimit ? undefined : Buffer.concat(chunks).toString('utf8');
 }
 
 /** JSON 应答（Content-Type 固定 utf-8；整体单次 stringify 同 SSE 帧纪律） */

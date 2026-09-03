@@ -238,6 +238,13 @@ export function App() {
   const [gate, setGate] = useState<'ok' | 'needed'>('ok');
   /** 引导成功纪元（只增计数——effect 依赖之一，换 key 即整套重建） */
   const [authEpoch, setAuthEpoch] = useState(0);
+  /**
+   * SSE 永久失败重臂纪元（只增——遗漏大扫 20260904-b F-2）：EventSource 吃
+   * HTTP 级拒绝（401 等）一次即 readyState=CLOSED **永不再自动重连**（真
+   * Chrome 实测；瞬断网络错才是 CONNECTING 自动重连腿）。本纪元进 SSE effect
+   * 依赖，退避计时器 +1 即重建连接（详见 effect 内 onerror 注释）。
+   */
+  const [sseEpoch, setSseEpoch] = useState(0);
 
   /** 错误入状态条（ApiError 带状态码；其余按名字）。401 特判 = 翻引导闸 */
   const noteError = useCallback((err: unknown) => {
@@ -306,10 +313,13 @@ export function App() {
       .catch(() => undefined);
   }, [gate, authEpoch, select, noteError]);
 
-  /* SSE 活体流（gate/authEpoch 重键——闸未开不留旧连接，放行后重建即带 cookie；
-   * 信封四族分派，全部判据只对查看中会话起作用） */
+  /* SSE 活体流（gate/authEpoch/sseEpoch 重键——闸未开不留旧连接，放行后重建
+   * 即带 cookie；纪元重臂见 onerror 注释；信封四族分派，全部判据只对查看中
+   * 会话起作用） */
   useEffect(() => {
     if (gate !== 'ok') return;
+    // 永久失败退避重臂计时器（onerror 的 CLOSED 腿排入——effect 收口必摘）
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     const es = new EventSource('/api/events');
     es.onopen = () => {
       setConnected(true);
@@ -331,7 +341,23 @@ export function App() {
         })
         .catch(() => undefined);
     };
-    es.onerror = () => setConnected(false); // 断线——浏览器自动重连，状态条示红
+    es.onerror = () => {
+      setConnected(false); // 状态条示红（两条腿共用的最低信号）
+      // 永久失败腿（F-2，规范 §6.8「SSE 永久失败重臂」条款）：HTTP 级拒绝
+      // （401 等）一次即 readyState=CLOSED 永不再连（真 Chrome 实测；瞬断网
+      // 络错才是 CONNECTING 浏览器自动重连）——闲置窗口只示红会让页面假
+      // 「重连中」卡死（事件零感知，直到任一交互触发 fetch 才自愈）。收口
+      // 两步：①轻量探鉴权（401 → 既有引导闸翻转换 cookie，authEpoch 重键
+      // 即整套重建）；②无论成败退避重臂纪元（非鉴权性 HTTP 级拒绝如连接帽
+      // 503 也能复活；退避 15s 防热转）。
+      if (es.readyState !== EventSource.CLOSED) return;
+      fetchSessions()
+        .catch(noteError)
+        .finally(() => {
+          // 探活翻闸（gate 变化）会触发本 effect 收口清掉本计时器——不重复重建
+          reconnectTimer = setTimeout(() => setSseEpoch((e) => e + 1), 15_000);
+        });
+    };
     es.onmessage = (me: MessageEvent<string>) => {
       let env: SseEnvelope;
       try {
@@ -479,8 +505,12 @@ export function App() {
         else if (typeof status === 'string') setNotice(status);
       }
     };
-    return () => es.close();
-  }, [gate, authEpoch, loadView, refreshSessions]);
+    return () => {
+      // 退避计时器与连接同生命周期（防收口后迟到触发重臂——纪元孤儿）
+      if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
+      es.close();
+    };
+  }, [gate, authEpoch, sseEpoch, loadView, refreshSessions]);
 
   /** 开新会话（POST /api/sessions——一条龙服务端内化，前端只收清单条目） */
   const onOpen = useCallback(async () => {

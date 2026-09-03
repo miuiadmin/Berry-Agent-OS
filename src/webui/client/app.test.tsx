@@ -61,9 +61,13 @@ vi.mock('./api', async (importOriginal) => {
 /** EventSource 桩（jsdom 无 SSE 实现——实例捕获 + 帧驱动 + close 记账） */
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
+  /** DOM EventSource.readyState 常量（组件永久失败腿判定消费——0=CONNECTING/2=CLOSED） */
+  static readonly CLOSED = 2 as const;
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
+  /** 连接态（0=CONNECTING/1=OPEN/2=CLOSED——F-2 永久失败腿的驱动位，测试手拨） */
+  readyState = 0;
   closed = false;
   constructor(public readonly url: string) {
     FakeEventSource.instances.push(this);
@@ -242,6 +246,56 @@ describe('App 引导闸（复盘 #45——daemon 401 → token 屏 → 放行重
     });
     expect(screen.getByText('daemon 访问令牌')).toBeTruthy(); // 闸仍在
     expect(api.fetchSessions).toHaveBeenCalledTimes(1); // 未重建
+  });
+});
+
+describe('App SSE 永久失败重臂（遗漏大扫 20260904-b F-2——EventSource 吃 HTTP 级拒绝即 CLOSED 永不再连）', () => {
+  it('CLOSED 腿探鉴权：401 → 既有引导闸翻转 + 旧连接收口（修前 onerror 只翻红点假「重连中」卡死）', async () => {
+    // daemon 重启换 token 的闲置窗口形态：EventSource 对 401 的 HTTP 级拒绝一次
+    // 即 readyState=CLOSED 永不再连（真 Chrome 实测——浏览器自动重连只覆盖
+    // CONNECTING 瞬断腿）。修前 onerror 只 setConnected(false) 翻红点：闸不
+    // 翻、页面假「重连中」，事件零感知直到任一交互触发 fetch 才自愈。
+    render(<App />);
+    await untilLoaded(); // 先完成 happy 首载（此后才模拟 daemon 换 token）
+    api.fetchSessions.mockRejectedValueOnce(new ApiError(401, 'GET /api/sessions → 401')); // CLOSED 腿探鉴权必吃 401
+    const es = FakeEventSource.instances.at(-1)!;
+    expect(es.closed).toBe(false); // 前置：首载连接活
+    act(() => {
+      es.readyState = FakeEventSource.CLOSED; // 手拨永久失败态（真 401 拒绝的等价驱动）
+      es.onerror?.();
+    });
+    // 探鉴权 401 → noteError → 引导闸翻转（token 屏接管）
+    await waitFor(() => {
+      expect(screen.getByText('daemon 访问令牌')).toBeTruthy();
+    });
+    expect(es.closed).toBe(true); // 旧连接随闸收口（不再假活）
+  });
+
+  it('CLOSED 腿探活成功：退避 15s 重臂纪元——新 EventSource 重建（非鉴权性 HTTP 拒绝如连接帽 503 也能复活）', async () => {
+    // 上一用例的 mockRejectedValueOnce 残队不被 clearAllMocks 清（只清 calls）——
+    // mockReset 清实现与 once 队后重新 prime，保证本用例零污染独立
+    api.fetchSessions.mockReset();
+    primeHappyLoad();
+    render(<App />);
+    await untilLoaded();
+    const es = FakeEventSource.instances.at(-1)!;
+    vi.useFakeTimers(); // 退避计时器归假钟管（RTL+假钟纪律：advanceTimersByTimeAsync 不用 waitFor）
+    try {
+      act(() => {
+        es.readyState = FakeEventSource.CLOSED;
+        es.onerror?.();
+      });
+      // primeHappyLoad 使探活腿成功（非 401）→ 不翻闸，只排队退避重臂
+      expect(screen.queryByText('daemon 访问令牌')).toBeNull();
+      const before = FakeEventSource.instances.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(FakeEventSource.instances.length).toBe(before + 1); // 纪元 +1 → effect 重跑 → 新连接
+      expect(es.closed).toBe(true); // 旧连接被 cleanup 收口
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

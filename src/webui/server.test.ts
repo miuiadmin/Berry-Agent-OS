@@ -9,7 +9,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http';
-import { connect } from 'node:net';
+import { connect, type Socket } from 'node:net';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -89,6 +89,57 @@ function send(
     req.on('error', reject);
     if (opts.body !== undefined) req.write(opts.body);
     req.end();
+  });
+}
+
+/** 裸 socket 应答采集：读到「头 + Content-Length 体」完备即 resolve。
+ *
+ * F-1 红锁专用件——node:http 客户端带幂等重试与连接池剪枝语义（RST 到达即把
+ * 毒 socket 从空闲池剔除，重开新连接假绿），裸 socket 手控帧零客户端语义，
+ * 连接层生死最确定。本服务面 JSON 应答全走 sendJson 定长体，故按
+ * Content-Length 判完备。 */
+function readRawResponse(sock: Socket): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    // 收尾三事件统一摘监听（防止 resolve 后残余事件重复触发）
+    const cleanup = () => {
+      sock.off('data', onData);
+      sock.off('error', onError);
+      sock.off('close', onClose);
+    };
+    const onData = (c: Buffer) => {
+      chunks.push(c);
+      // latin1 逐字节看形状（头区纯 ASCII，体长按字节计不受多字节字符干扰）
+      const text = Buffer.concat(chunks).toString('latin1');
+      const headerEnd = text.indexOf('\r\n\r\n');
+      if (headerEnd === -1) return;
+      const headers = text.slice(0, headerEnd);
+      // 两形判完备：定长体（Content-Length 足量）或 chunked 体（终块 0\r\n\r\n）
+      // ——sendJson 的 writeHead+end 不设定长头时 node 走 chunked 帧（裸探针实证）
+      const cl = /Content-Length: (\d+)/i.exec(headers);
+      if (cl !== null) {
+        if (Buffer.concat(chunks).length >= headerEnd + 4 + Number(cl[1])) {
+          cleanup();
+          resolve(text);
+        }
+        return;
+      }
+      if (/Transfer-Encoding: chunked/i.test(headers) && text.endsWith('0\r\n\r\n')) {
+        cleanup();
+        resolve(text);
+      }
+    };
+    const onError = (err: Error) => {
+      cleanup();
+      reject(err);
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error('连接在对端侧被关闭——未收到完备应答（连接被销毁/RST 形态）'));
+    };
+    sock.on('data', onData);
+    sock.on('error', onError);
+    sock.on('close', onClose);
   });
 }
 
@@ -487,6 +538,49 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
       body: JSON.stringify({ text: 'x'.repeat(256 * 1024) }),
     });
     expect(huge.status).toBe(413);
+  });
+
+  it('超帽 413 连接卫生（F-1 回归锁）：应答不早于请求体收完——同连接紧邻请求必达应答', async () => {
+    // 缺陷形态（探针 p5b：1MB 体 ×5 轮紧邻请求 3 轮 ECONNRESET）：readBody
+    // for-await 早退 → 服务端在请求体未收完时即应答 413。真实客户端（node:http
+    // 全局池 keep-alive / 浏览器 fetch 同族）对「应答已完而写腿未完」的收场 =
+    // 中止写腿销毁 socket（RST）——池里紧邻的下一请求吃 ECONNRESET 连坐，更糟
+    // 变体连 413 本身都丢。注：node v24 服务端对未读完请求有自动排空兜底（裸
+    // socket 纯服务端视角连接可存活——危害腿在客户端收场行为，连接层竞速约
+    // 六成命中不可作确定性红位）。
+    // 红锁改锁合同不变式（修前 413 毫秒级即到 × 500ms 观察窗，两向确定性）：
+    // **请求体未收完，服务端一字节都不应答**——修前 413 读满 256KiB 即时到达
+    // （观察窗内非空即红）；修后服务端必等剩余体（零字节）→ 补发余量 → 413 +
+    // 同连接紧邻请求 202（应答永不早于体收完，客户端写腿恒先收场，池连接恒净）。
+    const sock = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve, reject) => {
+      sock.once('connect', resolve);
+      sock.once('error', reject);
+    });
+    try {
+      const big = JSON.stringify({ text: 'x'.repeat(300 * 1024) });
+      const head = `POST /api/sessions/live/submit HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(big)}\r\n\r\n`;
+      const early: Buffer[] = [];
+      const onEarly = (c: Buffer) => early.push(c);
+      sock.on('data', onEarly);
+      // 先发 280KiB（已超 256KiB 帽；余约 20KiB 故意不发——钉住「体未收完」态）
+      sock.write(head + big.slice(0, 280 * 1024));
+      await new Promise((r) => setTimeout(r, 500)); // 观察窗：修后服务端必仍在等剩余体
+      sock.off('data', onEarly);
+      expect(early.length).toBe(0); // 合同断言：体未收完零应答（修前 413 即时到——红位）
+      sock.write(big.slice(280 * 1024)); // 补发余量（两段合计恰等 Content-Length——体收完）
+      const first = await readRawResponse(sock);
+      expect(first.startsWith('HTTP/1.1 413')).toBe(true);
+      // 同一 TCP 连接紧邻第二请求：修后必达 202——连接回到干净帧边界
+      const small = JSON.stringify({ text: 'again' });
+      sock.write(
+        `POST /api/sessions/live/submit HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(small)}\r\n\r\n${small}`,
+      );
+      const second = await readRawResponse(sock);
+      expect(second.startsWith('HTTP/1.1 202')).toBe(true);
+    } finally {
+      sock.destroy();
+    }
   });
 
   it('/api/events：SSE 升级（头族 + connected 注释行 + hello 帧）', async () => {
