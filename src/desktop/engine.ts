@@ -162,6 +162,12 @@ export class DesktopEngine {
   private readonly events = new Emitter<EngineEventMap>();
   /** kitty 探测落定值（应答到达前缺省 legacy） */
   private protocol: KeyboardProtocol = 'legacy';
+  /**
+   * 硬退复原钩子解除器（TUI-1 同族——批 C 双栈第二栈；null = 未武装）。
+   * 持屏窗内 fatal exit(1)/二次 SIGINT exit(130) 不经 dispose——用户被留在
+   * 死备屏（1049）+ 光标藏 + 粘贴开 + kitty 推栈。
+   */
+  private disarmExitRestore: (() => void) | null = null;
 
   constructor(opts: DesktopEngineOptions = {}) {
     this.io = opts.io ?? new ProcessTerminalIO();
@@ -223,6 +229,7 @@ export class DesktopEngine {
     this.priorRaw = this.io.isRaw();
     this.root = root;
     this.io.write(ENTER_MODES);
+    this.armExitRestore();
     this.io.setRawMode(true);
     this.io.onInput(this.handleInput);
     this.io.onResize(this.handleResize);
@@ -302,6 +309,7 @@ export class DesktopEngine {
     this.io.setRawMode(this.priorRaw);
     this.cancelFrame();
     this.state = 'suspended';
+    this.disarmExitRestore?.(); // 出屏解除硬退复原钩子（持屏窗闭合）
   }
 
   /**
@@ -318,6 +326,7 @@ export class DesktopEngine {
   resume(): void {
     if (this.state !== 'suspended') return;
     this.io.write(ENTER_MODES);
+    this.armExitRestore(); // 复进屏重武装（arm 幂等——先解除旧钩子再挂）
     this.io.setRawMode(true);
     this.io.onInput(this.handleInput);
     this.io.resume();
@@ -377,7 +386,34 @@ export class DesktopEngine {
     this.io.onResize(null);
     this.cancelFrame();
     this.cancelEscapeTimer();
+    this.disarmExitRestore?.(); // 出屏解除硬退复原钩子（持屏窗闭合——挂起态已解除亦幂等）
     this.state = 'disposed';
+  }
+
+  /**
+   * 武装硬退复原钩子（TUI-1 同族，骨架篇 §1.3 终端态复原条款；仅真
+   * ProcessTerminalIO——测试注入 io 零污染）。进屏模式串是写字节开启的设备
+   * 态（备屏/光标/粘贴/kitty 推栈），fatal exit(1)/二次 SIGINT exit(130)
+   * 不经 dispose——钩子在 process 'exit' 兜底写 LEAVE_MODES（与出屏严格
+   * 对称反序——单源常量）+ raw 交还。生命周期 = 持屏窗〔start/resume →
+   * suspend/dispose〕；与 TUI 通道复原钩子换防互斥（对家栈持屏时本栈已解除）。
+   */
+  private armExitRestore(): void {
+    if (!(this.io instanceof ProcessTerminalIO)) return; // 注入 io（测试）零污染
+    this.disarmExitRestore?.();
+    const restore = (): void => {
+      try {
+        this.io.write(LEAVE_MODES); // 出屏对称反序单源（kitty 弹栈→粘贴关→光标显→备屏出）
+        this.io.setRawMode(false); // raw 交还（Node 出场钩亦会做——幂等兜底）
+      } catch {
+        // 复位尽力而为——退出路径不允许二次异常（crash.log 同款纪律）
+      }
+    };
+    process.on('exit', restore);
+    this.disarmExitRestore = () => {
+      process.removeListener('exit', restore);
+      this.disarmExitRestore = null;
+    };
   }
 
   /** 输入处理器（decoder 喂入 + 事件排空上抛 + lone-ESC 判定窗定时器装/卸） */

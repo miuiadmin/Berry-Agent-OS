@@ -175,6 +175,43 @@ const EDITOR_THEME: EditorTheme = {
 /** 级别 → 通知行前缀（success 档 2026-08-27 第三十三批 P2-1 新增） */
 const NOTIFY_PREFIX: Record<NotifyLevel, string> = { info: 'ℹ', success: '✔', warn: '⚠', error: '✖' };
 
+/* ---- 终端态复原（TUI-1，第十轮 TUI 专项扫雷 20260904；骨架篇 §1.3 终端态复原条款） ---- */
+
+/** 已武装复原钩子的解除器（模块级单例——一进程一真终端；重复武装先解除旧的） */
+let disarmTerminalRestore: (() => void) | null = null;
+
+/**
+ * 武装 process exit 终端态复原钩子（仅真 ProcessTerminal 调用——测试注入终端零污染）。
+ *
+ * 硬退路径（fatal exit(1) / 二次 SIGINT exit(130)）不经优雅退出序列，tui.stop()
+ * 的复位写不执行；终端私有模式是写字节开启的设备态，进程退出不自动复原——崩溃
+ * 后宿主 shell 键序错乱（Esc/Alt 组合键乱码、Ctrl+C 失去 SIGINT）。raw mode 由
+ * Node 出场钩（uv_tty_reset_mode）自行复位，私有模式序列无此待遇——本钩子补位。
+ *
+ * 复位写幂等镜像 tui.stop() 的全部设备态写：对未激活模式即终端缺省值复位，恒
+ * 安全（空 kitty 栈弹栈合法）。生命周期 = channel start() 武装 → stop() 解除，
+ * 钩子只活在〔start, stop）崩溃窗内（正常停屏的复位归 tui.stop() 单源）。
+ */
+function armTerminalRestore(): void {
+  disarmTerminalRestore?.();
+  const restore = (): void => {
+    try {
+      process.stdout.write('\x1b]9;4;0\x07'); // OSC 9;4 进度态清零（镜像 stop() 首写）
+      process.stdout.write('\x1b[?2004l'); // 括号粘贴模式关闭
+      process.stdout.write('\x1b[<u'); // kitty 键盘协议弹栈（空栈弹栈合法）
+      process.stdout.write('\x1b[>4;0m'); // modifyOtherKeys 复位缺省
+      process.stdin.setRawMode?.(false); // raw 交还（Node 出场钩亦会做——幂等兜底）
+    } catch {
+      // 复位尽力而为——退出路径不允许二次异常（crash.log 同款纪律）
+    }
+  };
+  process.on('exit', restore);
+  disarmTerminalRestore = () => {
+    process.removeListener('exit', restore);
+    disarmTerminalRestore = null;
+  };
+}
+
 /** 组装 TUI 通道 */
 export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const terminal = opts.terminal ?? new ProcessTerminal();
@@ -555,6 +592,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       return backend;
     },
     start() {
+      // 终端态复原钩子武装（TUI-1）：真终端判据（instanceof）防测试注入终端污染
+      // exit 钩子清单；复起路同样重挂（arm 幂等——先解除旧钩子再挂新的）
+      if (terminal instanceof ProcessTerminal) armTerminalRestore();
       // 复起路（批 C 桌面换防——stop 后再 start）：组件树跨停屏保连续，不重拉
       // 历史（重拉即重复行）；桌面引擎曾在屏上绘过，差分基线（previousLines）
       // 已失真——force 复位渲染状态强制全帧重画
@@ -576,6 +616,8 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     },
     stop(options) {
       tui.stop(options);
+      // 正常停屏解除复原钩子（TUI-1）：tui.stop() 已做全部复位，退出时不再重复写
+      disarmTerminalRestore?.();
     },
     /**
      * 退出兜底（interrupt 小刀：cancelAll 生产调用者从无到有）：收场无 run
