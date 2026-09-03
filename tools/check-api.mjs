@@ -41,10 +41,29 @@ const SNAPSHOT_PATH =
   process.env.CHECK_API_SNAPSHOT !== undefined
     ? resolve(REPO_ROOT, process.env.CHECK_API_SNAPSHOT)
     : join(REPO_ROOT, 'src/contracts/api-surface.json');
+/**
+ * 扫描根（查 2 公开根 / 查 3c 标签树 / 查 4 使用面 / 查 5 文档示例 / 查 6
+ * compat 目录 / 查 7 清单目录与 package.json 的树侧基准）。`CHECK_API_ROOT`
+ * env 缝 = 回归锁专用夹具树位（check-topology 的 CHECK_ROOT 同款纪律——就绪度
+ * 审计 20260903 P1：扫描侧四查 + 查 3c 两方向原本硬锚真树恒绿不可证伪，缝后
+ * 注入夹具树证各查可红；脚本自身依赖〔jiti 载真契约面 / 生成器真值〕恒走真仓
+ * 不随缝移）。缺省 = 真仓根。
+ */
+const SCAN_ROOT = process.env.CHECK_API_ROOT !== undefined ? resolve(process.env.CHECK_API_ROOT) : REPO_ROOT;
+/**
+ * API 面注入位（查 2 tier 三支 / 查 5 实验符号源的输入侧）。`CHECK_API_SURFACE`
+ * env 缝注入 JSON 面清单（extractSurface 产物形）——缺省真抽取。注入时查 1
+ * 整块跳过：drift 面的真值恒走真册（既定纪律——注入面不是 drift 真值，比较
+ * 无意义且恒红干扰探针断言）。
+ */
+const SURFACE_INJECTED =
+  process.env.CHECK_API_SURFACE !== undefined
+    ? JSON.parse(readFileSync(resolve(REPO_ROOT, process.env.CHECK_API_SURFACE), 'utf8'))
+    : undefined;
 /** 公开根（自由符号查 2 的扫描对象） */
-const BARREL_PATH = join(REPO_ROOT, 'src/contracts/index.ts');
+const BARREL_PATH = join(SCAN_ROOT, 'src/contracts/index.ts');
 /** 官方应用清单目录（查 7） */
-const APPS_DIR = join(REPO_ROOT, 'apps');
+const APPS_DIR = join(SCAN_ROOT, 'apps');
 
 const jiti = createJiti(import.meta.url);
 /** 便利导入：仓库内相对路径 → 模块运行时面 */
@@ -57,14 +76,14 @@ const v = (msg) => problems.push(msg);
 /** tier 合法词汇（§6.13.3 三级——internal 结构性不可达不进面清单） */
 const TIERS = new Set(['stable', 'experimental', 'deprecated']);
 
-/** 递归收集目录下指定后缀文件（相对仓库根路径；符号链接不跟随） */
+/** 递归收集目录下指定后缀文件（相对扫描根路径；符号链接不跟随——随 CHECK_API_ROOT 缝移） */
 function walkFiles(dirRel, suffixes, out = []) {
-  const abs = join(REPO_ROOT, dirRel);
+  const abs = join(SCAN_ROOT, dirRel);
   if (!existsSync(abs)) return out;
   for (const name of readdirSync(abs).sort()) {
     if (name === 'node_modules' || name === '.git' || name === 'dist') continue;
     const rel = join(dirRel, name);
-    const full = join(REPO_ROOT, rel);
+    const full = join(SCAN_ROOT, rel);
     if (statSync(full).isDirectory()) walkFiles(rel, suffixes, out);
     else if (suffixes.some((s) => name.endsWith(s))) out.push(rel);
   }
@@ -73,9 +92,9 @@ function walkFiles(dirRel, suffixes, out = []) {
 
 /* ---------------- 查 1：drift（快照 ≠ 抽取真值红） ---------------- */
 
-const surface = await extractSurface();
+const surface = SURFACE_INJECTED ?? (await extractSurface());
 const snapshotText = readFileSync(SNAPSHOT_PATH, 'utf8');
-if (serializeSurface(surface) !== snapshotText) {
+if (SURFACE_INJECTED === undefined && serializeSurface(surface) !== snapshotText) {
   // 结构化 diff 摘要（计数 + 样例——修复指引指回抽取器 CLI）
   const snap = JSON.parse(snapshotText);
   const keyOf = (e) => `${e.module}::${e.symbol}`;
@@ -211,7 +230,7 @@ const DEPRECATIONS =
   const jsdocFiles = walkFiles('src', ['.ts']).filter((f) => !f.endsWith('.test.ts'));
   const taggedIds = new Set();
   for (const file of jsdocFiles) {
-    const text = readFileSync(join(REPO_ROOT, file), 'utf8');
+    const text = readFileSync(join(SCAN_ROOT, file), 'utf8');
     for (const m of text.matchAll(/@deprecated\s+(DEP-\d{3})/g)) taggedIds.add(m[1]);
     if (/@deprecated(?!\s+DEP-\d{3})/.test(text)) {
       v(`[查 3] ${file}：裸 @deprecated 标签未携带 DEP 编号（标签形 = @deprecated DEP-001 说明——§6.13.6 双向断言）`);
@@ -244,7 +263,7 @@ const DEPRECATIONS =
       (f) => !f.endsWith('.test.ts') && !f.endsWith('contracts/deprecations.ts'),
     );
     const exampleFiles = walkFiles('examples', ['.ts']);
-    const texts = new Map([...srcFiles, ...exampleFiles].map((f) => [f, readFileSync(join(REPO_ROOT, f), 'utf8')]));
+    const texts = new Map([...srcFiles, ...exampleFiles].map((f) => [f, readFileSync(join(SCAN_ROOT, f), 'utf8')]));
     for (const target of scanTargets) {
       const name = target.symbol.split('::')[1] ?? target.symbol;
       // 键形符号（含 /）按子串（import 说明符无词边界）；标识符按 \b 词边界
@@ -280,7 +299,7 @@ const DEPRECATIONS =
           ? new RegExp(entry.module.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
           : null;
       for (const file of docFiles) {
-        const text = readFileSync(join(REPO_ROOT, file), 'utf8');
+        const text = readFileSync(join(SCAN_ROOT, file), 'utf8');
         if (re.test(text) || (keyRe !== null && keyRe.test(text))) {
           v(
             `[查 5] 实验面 ${entry.module}::${entry.symbol} 漏进稳定文档/示例 ${file}——实验面不入稳定文档（§6.13.8 查 5）`,
@@ -294,7 +313,7 @@ const DEPRECATIONS =
 /* ---------------- 查 6：compat 件死期（批 4 前结构性拒绝） ---------------- */
 
 {
-  const compatDir = join(REPO_ROOT, 'src/compat');
+  const compatDir = join(SCAN_ROOT, 'src/compat');
   if (existsSync(compatDir)) {
     v(
       `[查 6] src/compat/ 在场而 compat 死期机器未落地（批 4 收剑点火件）——死期未登记的废弃桥结构性拒绝；` +
@@ -308,7 +327,7 @@ const DEPRECATIONS =
 {
   const appMod = await imp('../src/contracts/app.ts');
   const apiMod = await imp('../src/contracts/api.ts');
-  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(join(SCAN_ROOT, 'package.json'), 'utf8'));
   const manifests = readdirSync(APPS_DIR).filter((n) => n.endsWith('.app.yaml'));
   for (const name of manifests) {
     const path = join(APPS_DIR, name);

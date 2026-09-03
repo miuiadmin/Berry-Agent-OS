@@ -14,10 +14,14 @@
  *    查 8（生成物 ≠ 渲染真值）双红——seam 联动证明生成物从提交位快照派生；
  * 5. scanTopLevelExports 单测（手写 token 扫描器——含 tsgo 模板幻影陷阱回归锁）；
  * 6. 生成器纯函数单测：classifyFaceDiff 四类分桶 + judgeBreakages 判级携 DEP
- *    语境（sanctioned/MAJOR 分桶——§6.13.6 冷读 M1 语义锁）。
+ *    语境（sanctioned/MAJOR 分桶——§6.13.6 冷读 M1 语义锁）；
+ * 7. 扫描侧可红探针（就绪度审计 20260903 P1）：CHECK_API_ROOT 夹具树缝 +
+ *    CHECK_API_SURFACE 面注入缝——查 2 tier 三支与自由符号 / 查 3c 两方向 /
+ *    查 5 实验隔离 / 查 6 compat / 查 7 两形态各得负例（原本硬锚真树恒绿
+ *    不可证伪）；夹具基线先证 exit 0（红归因前提——基线不净红即夹具噪音非探针命中）。
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -164,6 +168,186 @@ describe('check-api 查 1/查 8：快照篡改双红探针（生成物从提交�
       expect(r.stderr).toContain('docs/API参考.md 漂移');
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE 双缝——就绪度审计 20260903 P1）', () => {
+  /**
+   * 夹具树基线（CHECK_API_ROOT 的消费前提）：查 2 barrel 读 / 查 7 apps 目录与
+   * package.json 读是无条件面——夹具根缺任一即脚本 crash 先于出口（problems
+   * 永不落 stderr，断言必空）。基线三件全绿形：纯星出 barrel（scanTopLevelExports
+   * 只收直导出——星出走 stars 不进 names）/ 带 api 块合法清单 / apiVersion 1.0。
+   * 每探针在基线上只注入一处违规——红归因唯一（守护炮负例探针纪律）。
+   * 脚本侧真值（jiti 载真契约面 / 生成器真值 / 真注册簿）恒走真仓不随缝移——
+   * 注入侧只动扫描树与面清单（check-api.mjs 顶注缝契约）。
+   */
+  function makeFixtureRoot() {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'berry-check-api-root-')));
+    mkdirSync(join(root, 'src/contracts'), { recursive: true });
+    writeFileSync(join(root, 'src/contracts/index.ts'), "export * from './fixture-face.js';\n");
+    mkdirSync(join(root, 'apps'));
+    writeFileSync(
+      join(root, 'apps/zz-fixture.app.yaml'),
+      'id: vendor/zz\nlabel: 夹具\ncomponents:\n  - builtin:chat\napi:\n  minApiVersion: "1.0"\n',
+    );
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ apiVersion: '1.0' }, null, 2) + '\n');
+    return root;
+  }
+
+  /** spawn 门禁（env 缝注入 + 仓库 cwd——与门禁链同一调用形态） */
+  const runGate = (extraEnv) =>
+    spawnSync(process.execPath, [SCRIPT], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: { ...process.env, ...extraEnv },
+    });
+
+  it('夹具基线净树 exit 0——扫描侧六查在夹具根全绿（后续红 = 探针注入归因唯一）', () => {
+    const root = makeFixtureRoot();
+    try {
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 2 tier 三支可红（面注入缝）：tier 非法 + 缺 since + 缺 formFactors 一次三红，且查 1 注入即跳过', () => {
+    // CHECK_API_SURFACE 注入面清单（extractSurface 产物形）——查 1 drift 面恒走
+    // 真册，注入时整块跳过（stderr 无 [查 1] 是跳过语义的断言面）
+    const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-surface-'));
+    const fake = join(dir, 'fake-surface.json');
+    writeFileSync(
+      fake,
+      JSON.stringify({
+        exports: [{ symbol: 'zzFake', module: 'zz/fixture', tier: 'banana', since: '', formFactors: [] }],
+        capabilities: [],
+      }),
+    );
+    try {
+      const r = runGate({ CHECK_API_SURFACE: fake });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 2]');
+      expect(r.stderr).toContain('tier 非法');
+      expect(r.stderr).toContain('缺 since');
+      expect(r.stderr).toContain('缺 formFactors');
+      expect(r.stderr).not.toContain('[查 1]'); // 注入面不是 drift 真值——查 1 整块跳过
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 2 自由符号半边可红：公开根直导出无 JSDoc 标级 → exit 1 点名符号', () => {
+    const root = makeFixtureRoot();
+    try {
+      // 基线 barrel 追加一条顶层直导出（无 @stable 标签）——自由符号现役为零，
+      // 闸守新增：直导出必带标级载体
+      writeFileSync(
+        join(root, 'src/contracts/index.ts'),
+        "export * from './fixture-face.js';\nexport const zzFree = 1;\n",
+      );
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 2]');
+      expect(r.stderr).toContain('公开根出现直导出');
+      expect(r.stderr).toContain('zzFree');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 5 实验面隔离可红（双缝）：experimental 符号漏进 docs/ → exit 1 点名坐标', () => {
+    // 面注入供实验符号源，夹具树供 docs/ 扫描面——双缝各司一侧
+    const root = makeFixtureRoot();
+    mkdirSync(join(root, 'docs'));
+    writeFileSync(join(root, 'docs/guide.md'), '# 指南\n\n先试用 zzFutureThing。\n');
+    const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-surface-'));
+    const fake = join(dir, 'fake-surface.json');
+    writeFileSync(
+      fake,
+      JSON.stringify({
+        exports: [
+          {
+            symbol: 'zzFutureThing',
+            module: 'berryagent',
+            tier: 'experimental',
+            since: '1.0',
+            formFactors: ['standalone'],
+          },
+        ],
+        capabilities: [],
+      }),
+    );
+    try {
+      const r = runGate({ CHECK_API_ROOT: root, CHECK_API_SURFACE: fake });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 5]');
+      expect(r.stderr).toContain('漏进稳定文档');
+      expect(r.stderr).toContain('zzFutureThing');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 6 compat 死期可红：src/compat/ 在场即结构性拒绝（批 4 点火前 fail-closed）', () => {
+    const root = makeFixtureRoot();
+    try {
+      mkdirSync(join(root, 'src/compat'));
+      writeFileSync(join(root, 'src/compat/legacy-bridge.ts'), 'export const legacyBridge = 1;\n');
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 6]');
+      expect(r.stderr).toContain('src/compat');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 7 可红（legacy 形）：清单缺 api 块 → exit 1（回填 api.minApiVersion 即绿的指引文案）', () => {
+    const root = makeFixtureRoot();
+    try {
+      writeFileSync(
+        join(root, 'apps/zz-fixture.app.yaml'),
+        'id: vendor/zz\nlabel: 夹具\ncomponents:\n  - builtin:chat\n',
+      );
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 7]');
+      expect(r.stderr).toContain('缺 api 块');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 7 可红（空目录形）：apps/ 零 .app.yaml → exit 1（仓库布局异常防退化）', () => {
+    const root = makeFixtureRoot();
+    try {
+      rmSync(join(root, 'apps/zz-fixture.app.yaml'));
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 7]');
+      expect(r.stderr).toContain('零 .app.yaml');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 3c 两方向可红：裸 @deprecated 标签 + 册外 DEP 编号标签 → 双红（真注册簿零在册无噪音）', () => {
+    const root = makeFixtureRoot();
+    try {
+      // a.ts 裸标签（无编号无法对账）；b.ts 带编号但真册零在册——两方向各红
+      writeFileSync(join(root, 'src/a.ts'), '/** @deprecated */\nexport const zzOld = 1;\n');
+      writeFileSync(join(root, 'src/b.ts'), '/** @deprecated DEP-999 登记先行 */\nexport const zzNew = 2;\n');
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 3]');
+      expect(r.stderr).toContain('裸 @deprecated 标签未携带 DEP 编号');
+      expect(r.stderr).toContain('DEP-999 未在 DEP 注册簿登记');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   }, 60_000);
 });
