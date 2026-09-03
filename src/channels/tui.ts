@@ -278,11 +278,18 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
    * 退出」）——通道不知驱动数，文案判据在宿主侧 */
   /** title 段（缺 title = 空串——着色锚点；着色克制律：只着本段，尾段恒素） */
   const footerTitlePart = opts.title ? ` ${opts.title}` : '';
-  /** 尾段（发送/命令/退出提示——恒不着色） */
-  const footerRest = opts.title
-    ? ` — Enter 发送 / / 命令 / ${opts.quitHint ?? 'Ctrl+D·Ctrl+C 退出'}`
-    : ` Enter 发送 / / 命令 / ${opts.quitHint ?? 'Ctrl+D·Ctrl+C 退出'}`;
-  const footerText = new Text(footerTitlePart + footerRest);
+  /**
+   * 尾段现算（发送/命令/退出提示——恒不着色）。TUI-8：「/ 命令」段按注册表
+   * 空否省略——空表形态（attach 纯客户端 v1）无命令面，提示行不虚报能力；
+   * 每次现算而非构造期快照，注册面变动（boot 注册 / /reload 重注册 / 技能
+   * 命令重扫）经 onChange 重算——与下方 installAutocomplete 重装同构。
+   */
+  const footerRestText = (): string => {
+    const commandSeg = opts.commands.list().length > 0 ? ' / / 命令' : '';
+    const quit = opts.quitHint ?? 'Ctrl+D·Ctrl+C 退出';
+    return opts.title ? ` — Enter 发送${commandSeg} / ${quit}` : ` Enter 发送${commandSeg} / ${quit}`;
+  };
+  const footerText = new Text(footerTitlePart + footerRestText());
 
   /* ---- 主题换装（D4 theme 渲染轻件，契约篇 §5.4 theme 条款） ---- */
   /**
@@ -300,12 +307,20 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const applyTheme = (sessionId: string | undefined): void => {
     focusColorize = accentColorizer(opts.themeFor?.(sessionId));
     editor.borderColor = focusColorize;
-    footerText.setText(focusColorize(footerTitlePart) + footerRest);
+    footerText.setText(focusColorize(footerTitlePart) + footerRestText());
     footerText.invalidate();
     // 保底请求重绘：起屏空历史路（renderHistoryInto 零追加行）无其他渲染触发，
     // footer 换装需自带一次 requestRender（幂等调度，repaint 路多一次无害）
     tui.requestRender();
   };
+
+  // 注册面变动重算尾段（TUI-8：与 installAutocomplete 的 onChange 重装同构——
+  // 注册表自持通知，宿主不编排时点；多监听器并列，title 段沿用当前聚焦着色）
+  opts.commands.onChange(() => {
+    footerText.setText(focusColorize(footerTitlePart) + footerRestText());
+    footerText.invalidate();
+    tui.requestRender();
+  });
 
   // 四组件直挂 tui 线性树（TuiMainScreen 主屏逐行写出、原生 scrollback 底部
   // 锚定——TUI-3 收正：原 VStack 布局根 + setLayoutRoot 条件安装是 alt-screen
@@ -394,7 +409,17 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       opts.commands
         .dispatch(trimmed)
         .then((result) => {
-          if (result === 'unknown') appendLines([`✖ 未知命令：${trimmed.split(' ')[0]}（/help 查看清单）`]);
+          if (result === 'unknown') {
+            // 分档文案（TUI-8）：注册表空 = 本形态无命令面（attach 纯客户端
+            // v1——/ 前缀输入按通道统一派发语义本地拦截**不投递**，诚实告知
+            // 而非误导性 /help 指引）；非空表保留 /help 指引
+            const head = trimmed.split(' ')[0];
+            appendLines([
+              opts.commands.list().length === 0
+                ? `✖ 本形态无斜杠命令面：${head} 未投递（发送普通消息请不以 / 开头）`
+                : `✖ 未知命令：${head}（/help 查看清单）`,
+            ]);
+          }
         })
         .catch((err: unknown) => {
           appendLines([`✖ 命令执行失败：${err instanceof Error ? err.message : String(err)}`]);

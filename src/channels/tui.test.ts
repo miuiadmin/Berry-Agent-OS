@@ -52,10 +52,12 @@ function fakeTerminal(): Terminal & { frames: string[] } {
   };
 }
 
-/** 空命令注册表（本文件不派发命令——输入路由不触发） */
+/** 空命令注册表（本文件不派发命令——输入路由不触发；onChange 在场：TUI-8
+ * 页脚尾段经其重算，注册表面是通道构造的必备依赖） */
 const emptyCommands = {
   register: () => () => undefined,
   list: () => [],
+  onChange: () => () => undefined,
 } as unknown as CommandRegistry;
 
 /** 空宿主（submit/requestQuit/interrupt 不应被触达——触达即断言失败） */
@@ -510,13 +512,14 @@ function makeHost() {
 }
 
 /** 记账命令注册表（dispatch 可编排结果：'ok' / 'unknown' / reject——tui.ts
- * onSubmit 命令腿三消费面全可断言） */
-function makeCommands(opts: { result?: 'ok' | 'unknown' | 'reject' } = {}) {
+ * onSubmit 命令腿三消费面全可断言；empty: true = 空注册表〔TUI-8 空表分档
+ * 腿——attach 纯客户端 v1 形态：dispatch 存在但 list 空〕） */
+function makeCommands(opts: { result?: 'ok' | 'unknown' | 'reject'; empty?: boolean } = {}) {
   const log: string[] = [];
   const result = opts.result ?? 'ok';
   const registry = {
     register: () => () => undefined,
-    list: () => [{ name: 'help', description: '帮助', handler: () => {} }],
+    list: () => (opts.empty ? [] : [{ name: 'help', description: '帮助', handler: () => {} }]),
     lookup: (name: string) => ({ name, description: '', handler: () => {} }),
     dispatch: async (text: string): Promise<'ok' | 'unknown'> => {
       log.push(`dispatch:${text}`);
@@ -670,5 +673,43 @@ describe('输入路由回归锁（契约篇 §5.4 命令>提问>消息序 + quit
     expect(await answer).toBe('真答案');
     expect(log).toEqual([]); // 全程零 submit（命令腿与答案腿各归其位）
     tui.stop();
+  });
+});
+
+describe('TUI-8 空表分档（无命令面形态的诚实披露）', () => {
+  it('空注册表 unknown → ✖ 本形态无斜杠命令面（不误导 /help；submit 零触达）', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const cmds = makeCommands({ result: 'unknown', empty: true }); // attach 纯客户端形态：dispatch 在、清单空
+    const tui = createTuiChannel({ host, commands: cmds.registry, terminal });
+    tui.start();
+    await flush();
+    await type(terminal, '/nosuch');
+    terminal.send('\r');
+    await flush(200);
+    expect(cmds.log).toEqual(['dispatch:/nosuch']); // 仍走本地派发（统一语义不按空表分流）
+    expect(log).toEqual([]); // 不投递（「原样投递」头注已勘正——输入被拦截）
+    const all = terminal.frames.join('');
+    expect(all).toContain('✖ 本形态无斜杠命令面：/nosuch 未投递'); // 空表分档文案
+    expect(all).not.toContain('/help 查看清单'); // 空表不给误导性 /help 指引（修前红位：恒拼 /help 段）
+    tui.stop();
+  });
+
+  it('页脚「/ 命令」段按注册表空否省略（非空保留原形）', async () => {
+    // 空表：提示行不虚报命令能力（attach 形态）
+    const emptyTerm = new CaptureTerminal();
+    const emptyTui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal: emptyTerm });
+    emptyTui.start();
+    await flush();
+    expect(emptyTerm.frames.join('')).not.toContain('/ 命令'); // 段省略（修前红位：恒拼段）
+    expect(emptyTerm.frames.join('')).toContain('Enter 发送'); // 发送提示仍在
+    emptyTui.stop();
+    // 非空：原形保留（三段完整）
+    const fullTerm = new CaptureTerminal();
+    const fullTui = createTuiChannel({ host: strictHost, commands: makeCommands().registry, terminal: fullTerm });
+    fullTui.start();
+    await flush();
+    expect(fullTerm.frames.join('')).toContain('Enter 发送 / / 命令'); // 非空表恒拼段
+    fullTui.stop();
   });
 });

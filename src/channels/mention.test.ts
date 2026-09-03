@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { createFileSegmentProvider, createMentionProvider, type FilesFace, type SymbolsFace } from './mention.js';
-import type { AutocompleteProvider } from '@earendil-works/pi-tui/dist/autocomplete.js';
+import type { AutocompleteProvider } from '@earendil-works/pi-tui'; // TUI-10：裸名（公开面再导出，与 mention.ts 同载体）
 
 /** 记录型内层桩：三面调用全记录；返回可脚本化的哨兵结果（区分「真转发了」与「碰巧同值」） */
 function recordingInner(overrides: Partial<AutocompleteProvider> = {}) {

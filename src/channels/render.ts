@@ -15,10 +15,15 @@ import type { RendererDefinition } from './types.js';
 /** 展示行截断上限（单行摘要用；全文渲染不走这里） */
 const BRIEF_MAX = 160;
 
-/** 单行摘要截断（超长加省略号） */
+/**
+ * 单行摘要截断（超长加省略号）。切片按**码点**（`[...text]` 展开）——UTF-16
+ * 原生 slice 会在边界把 4 字节 emoji 切成孤代理项，终端渲染为乱码问号
+ * （TUI-5：⚙ 工具摘要 / ✖ 错误行 / ↳ 结果行三个触发面同走此单点，一处修
+ * 全覆盖）。触发判据仍是 UTF-16 长度（截断门槛不变，只有切法换码点）。
+ */
 export function truncate(text: string, max: number = BRIEF_MAX): string {
   if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
+  return `${[...text].slice(0, max - 1).join('')}…`;
 }
 
 /** 拼接文本/图片内容块的文本部分（图片块以占位符表示） */

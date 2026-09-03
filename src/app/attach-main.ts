@@ -8,7 +8,9 @@
  *   SSE 接线（display 族聚焦渲染/摘要行、session 族审批驱动、notify/status
  *   直落）→ 等退出。
  *
- * v1 边界（规范钉死）：无斜杠命令面（命令注册表空——/输入原样投递）；无会话
+ * v1 边界（规范钉死）：无斜杠命令面（命令注册表空——/ 前缀输入按通道统一
+ * 派发语义本地拦截**不投递**，TUI 空表分档提示「本形态无斜杠命令面」；TUI-8
+ * 同笔裁决：原「/输入原样投递」头注与实态不符，勘正）；无会话
  * 切换 UI（单聚焦）；Ctrl+C = 打断聚焦 run（POST interrupt）、Ctrl+D = 仅退
  * attach（不动 daemon）；cordon 披露 = submit 503 诚实错误行 + health
  * degraded 起屏横幅；审批卡 = confirm 双段式（y/n + 草案在场追问 always），

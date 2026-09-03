@@ -50,6 +50,17 @@ describe('truncate', () => {
     expect(truncate(long)).toHaveLength(160);
     expect(truncate(long).endsWith('…')).toBe(true);
   });
+
+  it('截断按码点切片——跨界 4 字节 emoji 不产孤代理项（TUI-5 回归锁）', () => {
+    // 158 个 a + 两个 😀 = 162 UTF-16 单元 > 160 触发截断；UTF-16 原生 slice
+    // 在第 159 单元处恰好切开首个 emoji 的高代理项（修前红位——输出含孤代理
+    // 项，终端渲染乱码）；码点切片保整字，末位 emoji 完整保留后接省略号
+    const long = 'a'.repeat(158) + '😀'.repeat(2);
+    expect(truncate(long)).toBe('a'.repeat(158) + '😀…');
+    // 自定义 max 边界同形：aa😀x = 5 单元 > 4，UTF-16 切片第 3 单元恰取到
+    // 😀 的高代理项（孤代理）；码点切片保整字 'aa😀' + 省略号
+    expect(truncate('aa' + '😀' + 'x', 4)).toBe('aa😀…');
+  });
 });
 
 describe('joinTextContent', () => {

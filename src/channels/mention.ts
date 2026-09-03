@@ -36,11 +36,9 @@
  *   即中止在飞取数）。
  */
 
-import type {
-  AutocompleteItem,
-  AutocompleteProvider,
-  AutocompleteSuggestions,
-} from '@earendil-works/pi-tui/dist/autocomplete.js';
+// TUI-10：三符号均经包公开面 index 再导出——裸名导入（pi-tui 0.84.4 无
+// exports 字段，裸名/深路径解析同一实体；深路径是载体卫生问题，统一裸名）
+import type { AutocompleteItem, AutocompleteProvider, AutocompleteSuggestions } from '@earendil-works/pi-tui';
 
 /**
  * documentSymbol 查询面（刀三行面晚绑桥第二消费点——lsp 行 apply 挂真身、
