@@ -26,6 +26,14 @@ export function spawnEngineProcess(opts: { command: string; args: readonly strin
     stdio: 'ignore', // 引擎日志不收（CDP 面是诊断真相；管道不持活宿主）
     env: buildChildEnv(process.env), // 白名单透传——凭证族不出宿主
   });
+  // 异步送达的 spawn 失败腿吸收（遗漏大扫 20260904 #1，契约篇 §6.10 ⑧）：
+  // ENOENT/EACCES 类失败（发现序过检后的 TOCTOU 窗内同样可达）Node 在 child
+  // 上**异步**发 'error' 事件（无进程即无 exit 事件）——不挂监听则 unhandled
+  // 'error' = uncaughtException 直接杀宿主（六入口无一幸免）。失败的可观察性
+  // 由返回的 pid === undefined 承担（启动等待超帽走 BROWSER_CONNECT_FAILED
+  // 干净失败路），不靠进程崩溃；空监听即吸收（错误本身不入日志面——pid 缺席
+  // 已是消费面的完整信号）
+  child.on('error', () => {});
   // 引擎进程活探测（killTree 竞态判据——exitCode === null 即活）
   const alive = (): boolean => child.exitCode === null && child.signalCode === null;
   // 子进程引用脱钩（宿主不 wait 引擎退出——收场走树杀，防 zombie 也不归我们）

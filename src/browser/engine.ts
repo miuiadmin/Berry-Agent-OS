@@ -373,24 +373,31 @@ export class BrowserEngine {
     // 启动入口亦 closed，两形一致
     const entryStatus = this.status;
     this.status = { state: 'starting' };
-    const child = this.deps.spawnEngine({ command: discovered.path, args });
-    this.child = child;
-    // pid 缺席形态不入登记簿（全面复盘 20260903 #18，契约篇 §6.10 ⑧）：spawn
-    // 失败腿（child.pid undefined——无进程可杀）入册只会留 children.json 死账，
-    // 且遗留 -1 哨兵条目会被下次启动清扫再触 kill(1) 链——在场才记
-    if (child.pid !== undefined) {
-      this.deps.registry.add({
-        hostPid: process.pid,
-        childPid: child.pid,
-        server: 'browser-engine',
-        command: discovered.path,
-      });
-    }
-    this.deps.logger.info(
-      `browser 引擎 spawn（pid=${child.pid ?? 'n/a（spawn 失败腿——无进程）'}，profile=profile-${bootId.slice(0, 8)}）`,
-    );
-
+    // spawn 调用位并入 try（遗漏大扫 20260904 #1，契约篇 §6.10 ⑧ 同步腿）：
+    // ENOEXEC 形态（文件过发现序 X_OK 但非可执行格式——截断二进制/垃圾内容）
+    // 在本仓目标平台（macOS / Node 24）实测于 spawn 调用位**同步抛**——裸抛在
+    // try 外会直接穿出 bringUp：status 钉死 'starting'（#17 状态不谎报的反面）
+    // + 清算零执行。声明提升到 try 外；同步腿抛出时 child 保持 undefined，
+    // teardownGeneration 各判据守卫双缺席（不树杀不净退），失败原样上抛。
+    let child: EngineChild | undefined;
     try {
+      child = this.deps.spawnEngine({ command: discovered.path, args });
+      this.child = child;
+      // pid 缺席形态不入登记簿（全面复盘 20260903 #18，契约篇 §6.10 ⑧）：spawn
+      // 失败腿（child.pid undefined——无进程可杀）入册只会留 children.json 死账，
+      // 且遗留 -1 哨兵条目会被下次启动清扫再触 kill(1) 链——在场才记
+      if (child.pid !== undefined) {
+        this.deps.registry.add({
+          hostPid: process.pid,
+          childPid: child.pid,
+          server: 'browser-engine',
+          command: discovered.path,
+        });
+      }
+      this.deps.logger.info(
+        `browser 引擎 spawn（pid=${child.pid ?? 'n/a（spawn 失败腿——无进程）'}，profile=profile-${bootId.slice(0, 8)}）`,
+      );
+
       // ---- DevToolsActivePort 轮询（spawn → 可握手之间的就绪信号） ----
       const wsUrl = await this.waitForDevToolsPort(profileDir, child);
       const connection = await CdpConnection.connect(wsUrl, this.deps.newConnection, {

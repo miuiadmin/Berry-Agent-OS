@@ -114,14 +114,13 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
       detectProviders(cfg, ui, ctx);
 
       // 孤儿清扫（先于自家 spawn——上次宿主非正常退出残留的引擎进程树）。
-      // kill 闭包加 pid>0 卫（全面复盘 20260903 #18，契约篇 §6.10 ⑧）：在册
-      // 历史 -1 哨兵死账（修码前的 children.json 遗留）与非法 pid 不触信号——
-      // killTree(-1) 会归一成 process.kill(1) = 杀 init/自身
+      // kill 探针直连 killTree（exec/mcp/lsp 三消费腿同形）：非正 pid 死账在
+      // sweep 单点归类 reaped 不进 kill 面（遗漏大扫 20260904 #16，契约篇
+      // §6.6 死账分类单点）——消费闭包 pid>0 卫（§6.10 ⑧ 原修法）退役：双守
+      // 会掩盖单点执法回归（sweep 侧漏卫时消费卫仍拦 = 红锁测不出单点失守）
       void deps.registry
         .sweep({
-          kill: (pid) => {
-            if (pid > 0) deps.killTree(pid);
-          },
+          kill: deps.killTree,
         })
         .then((report) => {
           if (report.killed.length > 0) {

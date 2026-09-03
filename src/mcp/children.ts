@@ -109,6 +109,19 @@ export class ChildRegistry {
     const reaped: number[] = [];
     let kept = 0;
     for (const entry of this.list()) {
+      if (!(entry.childPid > 0)) {
+        // 死账分类单点（遗漏大扫 20260904 #16，契约篇 §6.6）：childPid 非正
+        // （历史 -1 哨兵遗留/损坏簿）= 无进程可杀的纯簿记——真探针走到底反
+        // 而危险：isPidAlive 的 EPERM=活语义会判 -1 为「活」（非 root 下
+        // process.kill(-1, 0) 恒 EPERM），ps -p -1 必败 → 验证降级照杀分支
+        // → killTree(-1) 归一 process.kill(1)/杀全用户会话进程。归 reaped 类
+        // （只删条目，不进 killed 面不触信号不谎报「已树杀」）——单点执法
+        // 覆盖 exec/mcp/lsp/browser 四消费腿，消费闭包各自为政的 pid>0 卫
+        // 由本单源取代
+        this.remove(entry.childPid);
+        reapedRecordsIn(reaped, entry.childPid);
+        continue;
+      }
       if (isAlive(entry.hostPid)) {
         kept += 1; // 兄弟宿主（允许双开）——不碰
         continue;

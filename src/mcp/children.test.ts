@@ -9,7 +9,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChildRegistry } from './children.js';
 
 /** 本用例临时目录登记（afterEach 提示性清点——tmp 目录随系统清理） */
@@ -157,5 +157,27 @@ describe('ChildRegistry.sweep — 孤儿清扫判定序', () => {
     expect(report.reapedRecords).toEqual([10]);
     expect(report.kept).toBe(1);
     expect(registry.list().map((it) => it.childPid)).toEqual([30]);
+  });
+
+  it('死账分类：childPid 非正（历史 -1 哨兵）= 无进程可杀——不探活不验命令行不 kill，只删条目归 reaped（遗漏大扫 20260904 #16）', async () => {
+    const { registry } = makeRegistry();
+    registry.add(entry({ childPid: -1 })); // 在册历史死账（哨兵代偿时代遗留）
+    const kill = vi.fn();
+    // 假探针忠实真形状（防测试资产共谋——形状取自真探针行为推演，非反向凑绿）：
+    // 真探针 isPidAlive 是 EPERM=活（children.ts 「活但非属主」）——非 root 下
+    // process.kill(-1, 0) 恒 EPERM，-1 必判「活」；ps -p -1 必败 → commandOf
+    // undefined（验证降级照杀分支）。修前这条链直通 kill(-1)：真调用方
+    // killTree(-1) 归一 process.kill(1)/杀全用户会话进程（批 90 哨兵毒化漏网）
+    const report = await registry.sweep({
+      isAlive: (pid) => pid === -1,
+      commandOf: async () => undefined,
+      kill,
+    });
+    // 修前红位：kill 收 -1 + killed 账含 -1（报告谎报「已树杀」）；
+    // 修后：非正 pid 在判定序最前归类 reaped——无进程可杀的纯簿记
+    expect(kill).not.toHaveBeenCalled();
+    expect(report.killed).toEqual([]);
+    expect(report.reapedRecords).toContain(-1);
+    expect(registry.list()).toEqual([]);
   });
 });
