@@ -399,6 +399,9 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
             ...(row === undefined ? {} : { createdAt: row.createdAt }),
             updatedAt: entry.session.events.at(-1)?.time,
             active: !entry.retired,
+            // 运行态可选键（TUI 强化批 2 刀三）：驱动 isRunning 直读（注册表现场
+            // 态零新表零游标）；近史腿不写键〔视同 false〕——本腿恒写键非真即假
+            running: entry.driver.isRunning,
             ...(accent === undefined ? {} : { accent }),
           });
         }

@@ -69,6 +69,10 @@ export interface WebuiSessionSummary {
   readonly updatedAt?: number;
   /** 是否活会话（驱动注册表在场且未退役 = 可 submit；false = 只读〔已闭 store 兜底〕） */
   readonly active: boolean;
+  /** 是否在飞 run（TUI 强化批 2 刀三）：活条目腿 = 驱动 `isRunning` 直读（服务端
+   * 零新表零游标——注册表现场态）；近史 store 行不写键（视同 false）。消费面 =
+   * attach 运行态种子（重连窗漏 start 的结构性盲区补齐）与 SPA 侧栏运行点（可选） */
+  readonly running?: boolean;
   /** 应用强调色（D4 theme 条款 web 兑现——sessionsFor 组装时按条目 appId 取清单 theme.accent；缺席 = 前端缺省色） */
   readonly accent?: string;
 }

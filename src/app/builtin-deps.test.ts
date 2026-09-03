@@ -80,3 +80,36 @@ describe('组合根限流单例（web/browser 两件共享 InflightGates）', ()
     expect(deps.browserDeps.gates).toBe(gates);
   });
 });
+
+/* ---------------- 会话清单运行态可选键（TUI 强化批 2 刀三） ---------------- */
+
+describe('webuiDeps.sessionsFor 运行态可选键（TUI 强化批 2 刀三——活条目腿直读驱动 isRunning）', () => {
+  /** 带注册表活条目的最小宿主：driver.isRunning 可脚本化（双段 cast 过界——
+   * registry.entries 公开面是 ReadonlyMap 视图，测试注入需可写位；sessionsFor
+   * 只消费 entry.session.header.sessionId / appId / retired / driver.isRunning） */
+  function hostWithEntry(isRunning: boolean): BuiltinHostResources {
+    const host = minimalHost(dir);
+    (host.registry as unknown as { entries: Map<string, unknown> }).entries.set('s-run', {
+      session: { header: { sessionId: 's-run' }, events: [{ type: 'turn/start', time: 7 }] },
+      appId: 'chat',
+      retired: false,
+      driver: { isRunning },
+    });
+    return host;
+  }
+
+  it('在飞条目 running: true（驱动直读——修前键缺席即红）；退役语义另测', () => {
+    const deps = assembleBuiltinDeps(hostWithEntry(true));
+    const row = deps.webuiDeps.sessionsFor().find((s) => s.id === 's-run');
+    expect(row).toBeDefined();
+    expect(row?.active).toBe(true);
+    // 修前红位：running 键缺席（undefined ≠ true）
+    expect(row?.running).toBe(true);
+  });
+
+  it('空闲条目 running: false（键在场——活条目腿恒写键，非真即假不缺省）', () => {
+    const deps = assembleBuiltinDeps(hostWithEntry(false));
+    const row = deps.webuiDeps.sessionsFor().find((s) => s.id === 's-run');
+    expect(row?.running).toBe(false);
+  });
+});

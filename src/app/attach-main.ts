@@ -221,6 +221,20 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
   let historyCache: readonly AgentMessage[] = [];
   /** 条目运行态（display agent_start/end 驱动——状态行/占位槽判据） */
   const runningBySession = new Map<string, boolean>();
+  /** 清单 running 种子写回（TUI 强化批 2 刀三——重连窗漏 start 的结构性盲区
+   * 补齐：SSE 单源下重连窗内错过的 agent_start 永不重放，聚焦会话在飞 run 被
+   * entryStatus 误报 idle；清单 running 键〔驱动 isRunning 真相〕在握手与
+   * repull 两时点批量补种）。时序纪律：种子写回以事件为先——该会话已有 SSE
+   * 增量态〔agent_start/end 先到〕则跳过，防 repull 旧快照覆盖新事件态且无
+   * 后续事件自愈；未列条目不动〔清单只含活会话与近史，未知会话键保留增量态〕 */
+  const seedRunning = (sessions: readonly WebuiSessionSummary[]): void => {
+    for (const session of sessions) {
+      if (runningBySession.has(session.id)) continue;
+      runningBySession.set(session.id, session.running === true);
+    }
+  };
+  // 真握手时点补种（SSE 未开、登记簿空——全量直种；后续增量由 SSE 维持）
+  seedRunning(handshake.sessions);
   /** 会话 accent 表（清单拉取刷新——themeFor 数据源） */
   const accentBySession = new Map<string, string | undefined>();
   /** 退出旗（收尾期静音断线/迟到通知） */
@@ -325,6 +339,8 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
     }
     if (sessionsRes !== undefined && sessionsRes.status === 200 && sessionsRes.sessions !== undefined) {
       for (const session of sessionsRes.sessions) accentBySession.set(session.id, session.accent);
+      // 重连 repull 时点补种（刀三运行态种子——与真握手两时点齐；事件为先纪律见 seedRunning 头注）
+      seedRunning(sessionsRes.sessions);
     }
     if (approvalsRes !== undefined && approvalsRes.status === 200 && approvalsRes.approvals !== undefined) {
       syncApprovals(approvalsRes.approvals);

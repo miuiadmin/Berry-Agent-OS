@@ -149,11 +149,16 @@ interface FakeDaemonScript {
   /** SSE 升级行为：'503' = 恒拒（帽满形）/ 'drop-once' = 首连 200 供帧后
    * 200ms 毁 socket、此后长连（repull 代际形）/ 'drop-then-401' = 首连 200
    * 供帧后 600ms 毁 socket、此后一切升级 401（会话中 token 轮换形——起屏后
-   * 重连撞 401，真世界形状） */
-  sse: '503' | 'drop-once' | 'drop-then-401';
+   * 重连撞 401，真世界形状）/ 'steady' = 首连即长连保活（运行态种子形——
+   * SSE 零 display 事件，清单 running 键是运行态唯一真相源） */
+  sse: '503' | 'drop-once' | 'drop-then-401' | 'steady';
   /** 投影分档：'delayed-old' = 首请求挂 1200ms 后答旧投影、后续即答新投影
    * （repull 代际腿——旧代迟到）；缺省恒答新投影 */
   messages?: 'delayed-old';
+  /** 清单条目运行态（TUI 强化批 2 刀三）：true = sessions 行带 running: true
+   * ——驱动在飞而 SSE 不发 agent_start（重连错过形），attach 状态行只可能经
+   * 清单种子显示「工作中」（修前红位 = 状态行恒空） */
+  running?: boolean;
 }
 
 /** 落一份形状完整的 daemon.json + token（前置闸只读形状——同 attach-main.test 夹具） */
@@ -190,10 +195,18 @@ async function startFakeDaemon(script: FakeDaemonScript): Promise<number> {
   const server = createServer((req, res) => {
     const url = req.url ?? '';
     if (url === '/api/sessions') {
-      // 握手 + 清单：单活会话（cwd 匹配 = 任意——cwd 匹配池回退最新 active 同形）
-      res
-        .writeHead(200, { 'content-type': 'application/json' })
-        .end(JSON.stringify([{ id: 'sess-pty', appId: 'chat', active: true, cwd: '/w', createdAt: 1, updatedAt: 2 }]));
+      // 握手 + 清单：单活会话（cwd 匹配 = 任意——cwd 匹配池回退最新 active 同形）；
+      // running 可选键（刀三运行态种子形）：驱动在飞真相走清单不走 SSE
+      const row: Record<string, unknown> = {
+        id: 'sess-pty',
+        appId: 'chat',
+        active: true,
+        cwd: '/w',
+        createdAt: 1,
+        updatedAt: 2,
+      };
+      if (script.running === true) row.running = true;
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify([row]));
       return;
     }
     if (url === '/api/health') {
@@ -225,7 +238,8 @@ async function startFakeDaemon(script: FakeDaemonScript): Promise<number> {
       }
       // drop-once：首连供心跳后 200ms 毁 socket（逼重连），此后长连保活；
       // drop-then-401：首连供心跳后 600ms 毁 socket（起屏后的真断线），此后
-      // 一切升级尝试 401（会话中 token 轮换——重连即撞拒）
+      // 一切升级尝试 401（会话中 token 轮换——重连即撞拒）；steady：首连即
+      // 长连保活零 display 事件（运行态种子形——状态行真相只走清单键）
       sseConnections += 1;
       if (script.sse === 'drop-then-401' && sseConnections > 1) {
         res.writeHead(401, { 'content-type': 'application/json' }).end('{}');
@@ -233,7 +247,7 @@ async function startFakeDaemon(script: FakeDaemonScript): Promise<number> {
       }
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.write(': ping\n\n');
-      if (sseConnections === 1) {
+      if (sseConnections === 1 && script.sse !== 'steady') {
         setTimeout(() => res.socket?.destroy(), script.sse === 'drop-then-401' ? 600 : 200);
         return;
       }
@@ -327,6 +341,19 @@ describe('attach 连接面真 pty 锁（首连静默 / 401 退出码 / repull �
       const out = lock.output();
       // 判序：新代必须是最后一次投影绘制——修前红位 = REPL_OLD 后绘（lastIndexOf 反超）
       expect(out.lastIndexOf('REPL_NEW 答复正文')).toBeGreaterThan(out.lastIndexOf('REPL_OLD 答复正文'));
+    },
+    180_000,
+  );
+
+  it.skipIf(!hasPtyRelay())(
+    '刀三运行态种子修前红：清单 running:true + SSE 零 display 事件 → 状态行「工作中」（修前恒空——entryStatus 误报 idle）',
+    async () => {
+      // 重连错过形的纯化形态：驱动在飞（清单 running 键 = 唯一真相源）、SSE 长连
+      // 但不发任何 agent_start——修前 runningBySession 登记簿空，repaint 时
+      // entryStatus 返回 idle、状态行不显示「工作中」（waitFor 超时即红）
+      const lock = await spawnAttach({ sse: 'steady', running: true });
+      await lock.done; // 横幅已出 + 首连 repull 已触发（repaint 消费种子）
+      await waitFor('状态行 工作中', 30_000, () => lock.output().includes(' 工作中'), lock.output);
     },
     180_000,
   );
