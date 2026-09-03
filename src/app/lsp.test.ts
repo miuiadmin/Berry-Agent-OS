@@ -548,6 +548,66 @@ describe('lsp 件 — write/edit 后诊断注入', () => {
     // 已回流路径照实报 0 条——但全清宣称必须带超钟限定
     expect(text).toContain('0 条');
   });
+
+  // 组间并发回归锁（B6——第十一轮遗漏大扫 20260904-b）：post 注入按服务器分组，
+  // 组间不得串行排队——两组各吃 cap（≤3.5s）累计 7s 击穿 post 段 5s 竞速钟，
+  // 成功 write/edit 误报 TOOL_TIMEOUT。修前形态：组间 for-await 串行，第二组的
+  // didChange 要等第一组超钟 cap 耗尽才发出。
+  it('组间并发：双服务器一次 edit——第二组 didChange 不等第一组超钟（修复前必红）', async () => {
+    const env = makeEnv();
+    // gate-a.ts 永不回流（ts 组吃满 cap）；其余路径即时空集
+    const harness = makeHarness({
+      diagnosticsFor: (uri) => (uri.endsWith('gate-a.ts') ? undefined : []),
+    });
+    await applyLsp(env, harness, {
+      servers: {
+        ts: { command: '/fake/bin/ts', args: ['--stdio'], languages: ['.ts'], diagnostics_timeout_ms: 1500 },
+        py: { command: '/fake/bin/py', args: ['--stdio'], languages: ['.py'] },
+      },
+    });
+    registerFakeWrite(env, harness.workspace);
+    // 双服务器预热到活（首触各 spawn 一台：servers[0]=ts / servers[1]=py）
+    await runTool(env, 'write', { path: 'gate-a.ts' });
+    await runTool(env, 'write', { path: 'gate-b.py' });
+    await vi.waitFor(() => {
+      expect(harness.registry.adds).toHaveLength(2);
+    });
+    // 假 edit 双写路径（一次 post 注入同时盖 ts + py 两服务器组）
+    env.tools.register({
+      name: 'edit',
+      description: '假 edit（双写双服务器——组间并发测试）',
+      parameters: Type.Object({ path: Type.String() }),
+      effect: 'write',
+      execute: async (_args: Record<string, unknown>) => {
+        const a = resolve(harness.workspace, 'gate-a.ts');
+        const b = resolve(harness.workspace, 'gate-b.py');
+        return {
+          content: [{ type: 'text', text: '已改' }],
+          details: {
+            operations: [
+              { op: 'edit', path: a },
+              { op: 'edit', path: b },
+            ],
+          },
+        };
+      },
+    });
+    const pending = runTool(env, 'edit', { path: 'x' });
+    // 探针窗 300ms（远小于 ts 组 1500ms cap）：串行形态下 py 组文档同步
+    // 必缺席（ts 组还在等诊断）；并发形态下即刻到达。探针盯文档同步面
+    // didOpen|didChange——预热 write 走 preheat 快径不同步文档，edit 是
+    // py 文档首触，发的必是 didOpen（client.ts syncDocument 首触开档）
+    await new Promise((r) => setTimeout(r, 300));
+    const pyDocSync = harness.servers[1]!.frames.some(
+      (f) => f['method'] === 'textDocument/didOpen' || f['method'] === 'textDocument/didChange',
+    );
+    expect(pyDocSync).toBe(true); // 修复前必红：串行——py 文档同步迟到 1500ms
+    const result = await pending;
+    expect(result.isError).toBeFalsy();
+    expect(textOf(result)).toContain('已改'); // 原结果保留
+    expect(textOf(result)).toContain('未及回流（ts'); // ts 组超钟降级段照常
+    expect(textOf(result)).toContain('0 条（py'); // py 组空集段照常（段序按分组序）
+  });
 });
 
 /* ---------------- 熔断与回卷 ---------------- */

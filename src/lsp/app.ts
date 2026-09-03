@@ -720,6 +720,9 @@ interface InjectDeps {
  * 只消费已活实例；未活触发 fire-and-forget 预热 + 首触一次性注记后跳过；
  * 已活则并发同步全部写路径 + 各路径等待（cap = min(配值, 3.5s) 硬帽），
  * 超钟诚实降级注记；诊断段追加进 result.content（50 条 + 4KiB 帽）。
+ * 多服务器分组间也并发（B6——第十一轮遗漏大扫 20260904-b：组间串行两组
+ * 各吃 cap 即累计 7s，击穿 post 段 5s 竞速钟把成功写误报 TOOL_TIMEOUT）；
+ * 段序按分组序拼接，确定性渲染不随完成序漂移。
  * delete 路径发 didClose 告别（读盘必 ENOENT——已 open 的 URI 才有告别面）。
  */
 async function injectDiagnostics(input: PostInput, deps: InjectDeps): Promise<void> {
@@ -765,18 +768,19 @@ async function injectDiagnostics(input: PostInput, deps: InjectDeps): Promise<vo
     byServer.set(route.name, group);
   }
 
-  /** 组级处理：未活 → 预热 + 首触注记；已活 → 并发同步 + 组内等待（cap 硬帽） */
-  const sections: string[] = [];
-  for (const [name, group] of byServer) {
+  /** 单组处理 → 该组诊断段文本（'' = 无段）。未活 → 预热 + 首触注记；已活 → 并发同步 + 组内等待（cap 硬帽） */
+  const handleGroup = async (name: string, group: { config: LspServerConfig; paths: string[] }): Promise<string> => {
     const live = deps.liveOf(name);
     if (live === undefined) {
       // 快径第一律：拉起绝不占 post 段预算——后台预热 + 首触一次性注记后跳过
+      // （首触两动作同笔：注记 + 预热——只注记不预热会把 spawn 推迟到二次写，
+      // 「等活后二次写附诊断」的活体来源就断了）
+      deps.preheat(name);
       if (!deps.preheatNoted.has(name)) {
         deps.preheatNoted.add(name);
-        sections.push(`LSP 服务器「${name}」预热中，本次未附诊断（下次写入生效）`);
+        return `LSP 服务器「${name}」预热中，本次未附诊断（下次写入生效）`;
       }
-      deps.preheat(name);
-      continue;
+      return '';
     }
     // 并发同步全部路径 + 等各自诊断（cap = min(配值, 3.5s) 硬帽——post 段预算内）
     const cap = Math.min(diagnosticsTimeoutOf(group.config), POST_WAIT_CAP_MS);
@@ -807,17 +811,25 @@ async function injectDiagnostics(input: PostInput, deps: InjectDeps): Promise<vo
     const pendingNote =
       pendingPaths.length > 0 ? `；另 ${pendingPaths.length} 个路径未及回流：${pendingPaths.join(', ')}` : '';
     if (!gotAny) {
-      sections.push(`LSP 诊断未及回流（${name}，等待 ${cap}ms）——服务器索引中`);
-    } else if (lines.length === 0) {
-      sections.push(`LSP 诊断：0 条（${name}，已检路径无问题${pendingNote}）`);
-    } else {
-      let text = `LSP 诊断（${name}，${lines.length} 条${truncated ? `，截断至 ${MAX_DIAG_ENTRIES}` : ''}${pendingNote}）：\n${lines.join('\n')}`;
-      if (Buffer.byteLength(text, 'utf8') > MAX_DIAG_SECTION_BYTES) {
-        text = `${text.slice(0, MAX_DIAG_SECTION_BYTES)}\n…（4KiB 截断）`;
-      }
-      sections.push(text);
+      return `LSP 诊断未及回流（${name}，等待 ${cap}ms）——服务器索引中`;
     }
-  }
+    if (lines.length === 0) {
+      return `LSP 诊断：0 条（${name}，已检路径无问题${pendingNote}）`;
+    }
+    let text = `LSP 诊断（${name}，${lines.length} 条${truncated ? `，截断至 ${MAX_DIAG_ENTRIES}` : ''}${pendingNote}）：\n${lines.join('\n')}`;
+    if (Buffer.byteLength(text, 'utf8') > MAX_DIAG_SECTION_BYTES) {
+      text = `${text.slice(0, MAX_DIAG_SECTION_BYTES)}\n…（4KiB 截断）`;
+    }
+    return text;
+  };
+
+  // 组间并发（B6——第十一轮遗漏大扫 20260904-b）：修前组间 for-await 串行——
+  // 两组各吃 cap（≤3.5s）即累计 7s 击穿 post 段 5s 竞速钟（成功 write/edit 被
+  // 误报 TOOL_TIMEOUT）。并发后最坏等待 = 最慢单组 cap + 格式化余量，回到
+  // post 段预算内；段序仍按分组序（byServer 插入序）拼接——确定性渲染不随
+  // 完成序漂移
+  const groupTexts = await Promise.all([...byServer].map(([name, group]) => handleGroup(name, group)));
+  const sections = groupTexts.filter((text) => text !== '');
   if (skipped.length > 0) sections.push(`（${skipped.length} 个路径在 LSP 工作区根外，未诊断）`);
   if (sections.length === 0) return;
 
