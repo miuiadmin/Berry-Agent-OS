@@ -4,3 +4,9 @@ dist
 *.min.css
 pnpm-lock.yaml
 package-lock.json
+
+# 生成物（查 8 以生成器真值逐字节执法——第二形态权威只会逼生成器仿真 prettier
+# 的表格列宽算法，补丁式反律）：COMPATIBILITY.md 表格形态生成即定格。
+# docs/API参考.md 不在此列——其生成器本就输出 prettier 稳定形态（标题+列表，
+# 见 generate-api-reference.mjs 形态纪律注），两态并行零冲突。
+COMPATIBILITY.md

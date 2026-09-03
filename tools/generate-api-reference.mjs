@@ -3,9 +3,11 @@
  * API 参考生成器（契约篇 §6.13.9「API 参考自动生成」——2026-09-03 第九十一批
  * 窗口内机器建设）。
  *
- * surface.json → docs/API参考.md：符号面全部生成（签名/层级/since/deprecated
- * 全从面清单派生——手写文档只留概念叙述，文档漂移类缺陷结构性消失）。守护 =
- * check-api 查 8 生成物 drift；`npm run build` 尾挂再生。
+ * surface.json → docs/API参考.md：符号面全部生成（符号名/层级/since/deprecated
+ * 全从面清单派生——面清单无签名数据，.d.ts 模板面才是签名位；手写文档只留
+ * 概念叙述，文档漂移类缺陷结构性消失——全面复盘 20260903-91 刀六勘正：原稿
+ * 「签名……派生」宣称失实）。守护 = check-api 查 8 生成物 drift；
+ * `npm run build` 尾挂再生。
  *
  * 形态纪律（prettier 稳定）：docs/ 在 format:check 射面内，本文件输出用
  * 标题 + 列表（proseWrap preserve 下 prettier 零动作的形态）——表格列宽对齐
