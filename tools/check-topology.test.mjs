@@ -196,4 +196,32 @@ describe('check-topology 机器闸（复盘 20260901 T-3）', () => {
       rmSync(root3, { recursive: true, force: true });
     }
   });
+
+  it('#22 非白名单 .mjs/.tsx 即红：rogue.mjs 被点名、白名单内同后缀放行（全面复盘 20260903）', () => {
+    const root4 = mkdtempSync(join(tmpdir(), 'berry-check-topo-f22-'));
+    try {
+      for (const mod of SEATS) {
+        const dir = join(root4, 'src', mod);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'index.ts'), '');
+      }
+      writeFileSync(join(root4, 'src', 'app', 'assembly.ts'), '');
+      // 白名单内刻意排除形态（bridge 两件）——合法不点名（反向锁：白名单整块
+      // 删除恒红时，白名单文件被误点名本断言先红）
+      writeFileSync(join(root4, 'src', 'bridge', 'carrier-launch.mjs'), '');
+      // 白名单外 .mjs 含裸 import react——修前 collect() 只收 .ts，DAG/裸导入/
+      // 深挖面三道执法整棵静默（探针实证 exit 0）；白名单断言后此处必点名
+      writeFileSync(join(root4, 'src', 'tools', 'rogue.mjs'), "import React from 'react';\n");
+      const run = spawnSync(process.execPath, [SCRIPT], {
+        cwd: ROOT,
+        env: { ...process.env, CHECK_ROOT: root4 },
+        encoding: 'utf8',
+      });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('tools/rogue.mjs：src 内 .mjs/.tsx 不在白名单');
+      expect(run.stderr).not.toContain('carrier-launch.mjs：');
+    } finally {
+      rmSync(root4, { recursive: true, force: true });
+    }
+  });
 });

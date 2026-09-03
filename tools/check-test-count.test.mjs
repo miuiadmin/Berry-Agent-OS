@@ -6,7 +6,7 @@
  * 同款先例）。
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
@@ -110,5 +110,31 @@ describe('check-test-count 机器闸（全面复盘 20260902 G-3④）', () => {
     const r = run(root, log);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('零「Tests  N passed」汇总行');
+  });
+
+  it('绿路（收集完备性）：client 内 .test.tsx 与 src 内 .test.ts 皆双轨覆盖形态不红（全面复盘 20260903 #23）', () => {
+    const { root, log } = fixture();
+    // 两轨合法形态各一件：node 轨 src/**/*.test.ts（client 外）+ client 轨
+    // src/webui/client/**/*.test.{ts,tsx}——完备性断言不得误伤合法命名
+    mkdirSync(join(root, 'src', 'session'), { recursive: true });
+    writeFileSync(join(root, 'src', 'session', 'a.test.ts'), '');
+    mkdirSync(join(root, 'src', 'webui', 'client'), { recursive: true });
+    writeFileSync(join(root, 'src', 'webui', 'client', 'd.test.tsx'), '');
+    const r = run(root, log);
+    expect(r.status).toBe(0);
+  });
+
+  it('红路⑤收集盲区：双轨外测试形态（client 外 .test.tsx / .test.mjs）→ exit 1 逐一点名（#23 回归锁）', () => {
+    const { root, log } = fixture();
+    // 修前 vitest 双轨 include 对此双形零收集零执行零报错（探针 vitest list
+    // 实证）——CI 绿、README 计数照过，静默盲区；完备性断言后差集非空即红
+    mkdirSync(join(root, 'src', 'desktop'), { recursive: true });
+    writeFileSync(join(root, 'src', 'desktop', 'b.test.tsx'), '');
+    mkdirSync(join(root, 'src', 'exec'), { recursive: true });
+    writeFileSync(join(root, 'src', 'exec', 'c.test.mjs'), '');
+    const r = run(root, log);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/desktop/b.test.tsx');
+    expect(r.stderr).toContain('src/exec/c.test.mjs');
   });
 });

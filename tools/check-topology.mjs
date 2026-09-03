@@ -191,8 +191,10 @@ const BARE_IMPORTS = {
 const TEST_BARE_IMPORTS = {
   // 狗粮件 fixture（dogfood.test.ts）与自建回环（self-build-loop.test.ts）真引用虚拟面键
   typebox: ['app'],
-  // loader.test fixture 源码引用虚拟模块名（装载面设计而非漂移）
-  berryagent: ['context'],
+  // loader.test fixture 源码引用虚拟模块名（装载面设计而非漂移）；worker.test
+  // fixture 同律（就绪度审计 20260903 P0——worker 域 svc.load 载荷过桥测试的
+  // 夹具入口内嵌同一虚拟键 import 文本）
+  berryagent: ['context', 'bridge'],
   // @xterm/headless = oracle 测试第二真相源（技术栈篇 §4.5 十一律第 10 条——
   // oracle.test.ts 终端仿真器对照；仅测试引用，产码零依赖）
   '@xterm/headless': ['desktop'],
@@ -266,6 +268,21 @@ function collect(dir) {
       if (full === join(srcRoot, 'webui', 'client')) continue;
       out.push(...collect(full));
     } else if (full.endsWith('.ts')) out.push(full);
+  }
+  return out;
+}
+
+/** 递归收集 src 下 .mjs 全部与 .tsx（client 子树除外——与 collect() 同排除）。
+ *  用途：collect() 只收 .ts，.mjs/.tsx 不进本器三道执法（DAG/裸导入/深挖面）——
+ *  本清单供下方白名单断言点名（全面复盘 20260903 #22 修死）。 */
+function collectNonTs(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      if (full === join(srcRoot, 'webui', 'client')) continue;
+      out.push(...collectNonTs(full));
+    } else if (full.endsWith('.mjs') || full.endsWith('.tsx')) out.push(full);
   }
   return out;
 }
@@ -471,6 +488,26 @@ function relative(file) {
   for (const face of LEGACY_DEEP_FACES) {
     if (!usedDeep.has(face)) {
       violations.push(`深挖面册死项：${face} 产码跨模块零引用——已收敛或已内聚，删册行（契约篇 §6.3#2 公开面收敛棘轮）`);
+    }
+  }
+}
+
+/* ---------------- src 内 .mjs/.tsx 白名单执法（全面复盘 20260903 #22 修死） ----------------
+ * collect() 只收 .ts——src 内 .mjs/.tsx 整棵不进 DAG/裸导入/深挖面三道执法（探针
+ * 实证：src/agent/rogue.mjs 裸 import react 三门禁全绿静默逃逸）。静默逃逸变
+ * fail-loud 登记：src 下 .mjs 与 client 外 .tsx 必须落在显式白名单，白名单外
+ * 新文件即红——想新增先入册并注释形态（把例外从习惯变契约）。client 子树 .tsx
+ * 是 vite 打包域合法产物（与 collect() 同排除，不在此扫描面）。 */
+{
+  /** 显式白名单（相对 srcRoot）：今日恰 = bridge 两件刻意排除形态（tsc 不编 .mjs，
+   *  carrier 启动器独立进程形态） */
+  const NON_TS_WHITELIST = new Set(['bridge/carrier-launch.mjs', 'bridge/carrier-resolve.mjs']);
+  for (const file of collectNonTs(srcRoot)) {
+    const rel = file.slice(srcRoot.length + 1);
+    if (!NON_TS_WHITELIST.has(rel)) {
+      violations.push(
+        `${rel}：src 内 .mjs/.tsx 不在白名单——collect() 只收 .ts，此文件整棵逃逸 DAG/裸导入/深挖面三道执法（新增先入册并注释形态，或改 .ts——全面复盘 20260903 #22）`,
+      );
     }
   }
 }

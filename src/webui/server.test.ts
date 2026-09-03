@@ -984,4 +984,36 @@ describe('端点计数锚（全面复盘 20260902 G-3③——公开面「微路
       expect(text, doc).toContain(`微路由${cn}端点`);
     }
   });
+
+  it("路由形状闭集执法：全部 '/api/' 字面量出现处必落两形或登记豁免（第三形即红——计数锚 fail-open 收口，全面复盘 20260903 #24）", () => {
+    // 计数锚只数两形（字面量/正则 exec）——新端点若写成第三形（如判法换序
+    // req.method === 'GET' && pathname === …、或新增 startsWith 前缀路由），
+    // 两形计数零变化、锚静默绿——公开文档「微路由 N 端点」宣称失真无人点名
+    //（探针实证：server.ts 注入换序形后计数锚照绿）。本形状断言扫全部单引号
+    // '/api/…' 字符串出现处逐处核形状：任何落不进已知形/豁免的出现即红。
+    const src = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+    const hits = [...src.matchAll(/'(\/api\/[^']*)'/g)];
+    expect(hits.length).toBeGreaterThan(0); // 扫描面退化（零命中）先红
+    /** startsWith 豁免计数（今日恰 2：auth gate 前缀检查 + 404 fallback——皆非端点路由） */
+    let startsWithCount = 0;
+    for (const hit of hits) {
+      const before = src.slice(Math.max(0, hit.index - 32), hit.index);
+      const after = src.slice(hit.index + hit[0].length, hit.index + hit[0].length + 48);
+      if (/pathname\s*!==\s*$/.test(before)) continue; // auth gate 比较豁免（health/auth 两处）
+      if (/pathname\s*\.\s*startsWith\s*\(\s*$/.test(before)) {
+        startsWithCount += 1; // 前缀形非端点——计数上限断言兜住（新增前缀路由即超限红）
+        continue;
+      }
+      // 形一（字面量端点）：pathname === '/api/x' 紧随 && req.method === 'M'——
+      // 换序/断行/裸比较皆不匹配即红（正则 exec 形的 /api/ 在正则字面量内非字符串，不进本扫描）
+      const ok = /pathname\s*===\s*$/.test(before) && /^\s*&&\s*req\.method\s*===\s*'[A-Z]+'/.test(after);
+      expect(
+        ok,
+        `第三形路由或写法漂移：${hit[0]}（前后文 …${before.slice(-24)}|${after.slice(0, 24)}…）——须落字面量端点形（pathname === '/api/x' && req.method === 'M'）或登记豁免`,
+      ).toBe(true);
+    }
+    // startsWith 豁免面上限：auth gate + 404 fallback 恰 2——第三处 startsWith
+    // 即未登记前缀路由（计数锚对其失明）
+    expect(startsWithCount).toBe(2);
+  });
 });

@@ -13,7 +13,7 @@
  * 剥分隔符取整数；根 = CHECK_ROOT（测试夹具注入）缺省仓库根；日志路径 =
  * argv[2]，缺席读 stdin。
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
@@ -33,6 +33,47 @@ const parseFloor = (raw) => {
   const n = Number(digits);
   return Number.isSafeInteger(n) && n > 0 ? n : undefined;
 };
+
+/* ---------- 收集完备性断言（全面复盘 20260903 #23 修死） ----------
+ * vitest 双轨 include 是窄面：node 轨 src 全域 .test.ts（client 子树 exclude）+
+ * client 轨 src/webui/client 子树全域 .test.{ts,tsx}。src 内其他测试命名形态
+ * （client 外 .test.tsx / .test.mjs / .test.js / .test.cjs / .spec.*）双轨皆
+ * 不收——vitest 指定 include 即替换缺省，不收集即不执行不报错（探针 vitest
+ * list 实证零收集；CI 绿、README 计数照过，静默盲区）。本断言把「测试文件零
+ * 收集」变 fail-loud：src 下任何测试命名形态文件必须被至少一轨覆盖，否则红
+ * 并点名差集。规则源 = vitest.config.ts 两轨 include（改轨同笔改此处规则）。 */
+{
+  const srcDir = join(ROOT, 'src');
+  if (existsSync(srcDir)) {
+    /** 测试命名形态判定（.test./.spec. × ts/tsx/mjs/js/cjs） */
+    const isTestShape = (name) => /\.(test|spec)\.(ts|tsx|mjs|js|cjs)$/.test(name);
+    /** 递归收 src 下测试命名形态文件（相对 src 路径） */
+    const walk = (dir) => {
+      const out = [];
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) out.push(...walk(full));
+        else if (isTestShape(entry)) out.push(full.slice(srcDir.length + 1));
+      }
+      return out;
+    };
+    const uncovered = [];
+    for (const rel of walk(srcDir)) {
+      const inClient = rel.startsWith('webui/client/');
+      // node 轨覆盖面：client 外 .test.ts（exclude client 子树）
+      const nodeTrack = rel.endsWith('.test.ts') && !inClient;
+      // client 轨覆盖面：client 子树内 .test.{ts,tsx}（不含 .spec.*——include 未收）
+      const clientTrack = inClient && /\.(test)\.(ts|tsx)$/.test(rel);
+      if (!nodeTrack && !clientTrack) uncovered.push(rel);
+    }
+    if (uncovered.length > 0) {
+      console.error(
+        `check-test-count ✖ src 内测试文件双轨零收集（vitest include 不覆盖即不执行——静默盲区）：\n${uncovered.map((rel) => `  - src/${rel}`).join('\n')}\n（改命名入轨，或同笔滚 vitest.config.ts include 与本断言规则——全面复盘 20260903 #23）`,
+      );
+      process.exit(1);
+    }
+  }
+}
 
 /* ---------- 主流程：读日志 → 提实测 → 读四语 → 三面红对照 ---------- */
 
