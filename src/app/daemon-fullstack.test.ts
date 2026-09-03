@@ -852,6 +852,88 @@ describe('daemon 前台环与 cordon 装配线（复盘 #30/#32/#35）', () => {
     await waitFor(() => !existsSync(daemonStatePath(dataRoot)), 5_000, 'release 清账');
   }, 60_000);
 
+  it('daemonForegroundMain SIGHUP 实弹：优雅退 129 + release 清账（TUI 第十一轮盲区 4——此前仅静态判读）', async () => {
+    // SIGHUP 接线面零实弹：signals.test.ts 单元锁（fake surface）捕不到
+    // daemon.ts 接线回归（如漏挂 SIGHUP 监听则前台 daemon 收 HUP 直接默认死
+    // ——释放编舞全跳）。真跑生产前台主循环实弹核：记账码 129 + 清账。
+    const workspace = makeWorkspace();
+    const port = await grabPort();
+    const dir = mkdtempSync(join(realpathSync(tmpdir()), 'daemon-fg-hup-'));
+    const scriptPath = join(dir, 'fg-hup.mts');
+    writeFileSync(scriptPath, FOREGROUND_CHILD_SCRIPT);
+    const exitFile = join(dir, 'exit');
+    const child = spawn(
+      process.execPath,
+      [
+        fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url)),
+        scriptPath,
+        JSON.stringify({
+          port,
+          dataRoot,
+          exitFile,
+          daemonPath: fileURLToPath(new URL('./daemon.ts', import.meta.url)),
+        }),
+      ],
+      { env: { ...process.env, APP_LOG_LEVEL: 'warn' }, stdio: ['ignore', 'pipe', 'pipe'], cwd: workspace },
+    );
+    children.push(child);
+    const out: string[] = [];
+    child.stdout.setEncoding('utf-8');
+    child.stdout.on('data', (chunk: string) => out.push(chunk));
+    const errOut: string[] = [];
+    child.stderr.setEncoding('utf-8');
+    child.stderr.on('data', (chunk: string) => errOut.push(chunk));
+    const exited = new Promise<number | null>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) resolve(child.exitCode);
+      else child.once('exit', (code) => resolve(code));
+    });
+    const output = () => out.join('') + errOut.join('');
+
+    // ① boot 落账就绪：acquire 落 daemon.json + health 200（后者才是「运行时 +
+    // 信号接线齐」的门——acquire 与 installExitSignals 之间有装配窗，窗内
+    // SIGHUP 走默认死并残留 daemon.json，由下次 start 的 sweep 判死清扫自愈）
+    await raceChildExit(
+      waitFor(() => existsSync(daemonStatePath(dataRoot)), 20_000, '前台 boot 落账'),
+      exited,
+      output,
+    );
+    await raceChildExit(
+      waitFor(
+        async () => {
+          try {
+            return (await fetch(`http://127.0.0.1:${port}/api/health`)).ok;
+          } catch {
+            return false; // 未监听即 ECONNREFUSED——轮询继续（不炸等待底座）
+          }
+        },
+        10_000,
+        'health 就绪',
+      ),
+      exited,
+      output,
+    );
+    // ② SIGHUP 实弹：优雅退 129（terminate 记账）+ release 清账（与 SIGTERM 同编舞）。
+    // 杀目标 = daemon.json 自报 pid（监听面所在进程）——不能杀 spawn 句柄：tsx 是
+    // 两层进程（wrapper + worker），wrapper 无 SIGHUP 监听也不转发（探针实证：
+    // 杀 wrapper 即默认死 + worker 孤儿化 + daemon.json 残留；SIGTERM 腿靠 tsx
+    // 转发碰巧可达）。生产 `berry daemon start` 走 dist 单进程无此层——测试面
+    // 按真 pid 直杀才锁得住信号编舞本体
+    const daemonPid = (JSON.parse(readFileSync(daemonStatePath(dataRoot), 'utf8')) as { pid: number }).pid;
+    try {
+      process.kill(daemonPid, 'SIGHUP');
+      expect(await exited).toBe(129);
+      await waitFor(() => !existsSync(daemonStatePath(dataRoot)), 5_000, 'release 清账');
+    } finally {
+      // 失败路径兜杀真 pid（杀 wrapper 不达 worker——孤儿 daemon 持共享 dataRoot
+      // 会毒化后续测试的 acquire：DAEMON_ALREADY_RUNNING）
+      try {
+        process.kill(daemonPid, 'SIGKILL');
+      } catch {
+        // 已退（期望路径）——无孤儿可杀
+      }
+    }
+  }, 60_000);
+
   it('cordon 装配线（D6 端到端）：write-behind 批落撞锁失败 → cordoned 闩 → health degraded + submit 503', async () => {
     const dbPath = join(dbDir, 'cordon.db');
     const port = await grabPort();
