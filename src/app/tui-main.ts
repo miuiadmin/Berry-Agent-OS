@@ -131,6 +131,14 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
       const entry = id === undefined ? undefined : runtime.drivers.entries.get(id);
       return entry === undefined ? undefined : runtime.apps.get(entry.appId)?.theme?.accent;
     },
+    // todo 折叠查询面（TUI 彻底完善批增强 4，技术栈篇 §4.1）：与 webui SPA 呈现
+    // 同源——builtin-deps todoFor 同款两腿（活条目内存真相 ∪ 已闭 store 兜底 +
+    // goal 段锚活取）；结构类型注入（TodoItem ⊇ TodoItemFace 呈现子集），通道不
+    // import chat 模块。goal 段锚在闭包内每次查询时点重查（激活/停掉即时切段）
+    todoFor: (sessionId) => {
+      const id = sessionId ?? front.focus.sessionId;
+      return id === undefined ? undefined : runtime.todoFor(id);
+    },
   });
   runtime.ui.attach(tui.ui());
   // boot 降级横幅补发（基建大扫 #45）：boot 序内的 ui.notify 广播发生在 backend

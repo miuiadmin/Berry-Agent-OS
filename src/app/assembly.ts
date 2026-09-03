@@ -129,7 +129,8 @@ import {
 import type { EventQueryCursor, EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import type { PreStepDecision } from '../agent/index.js';
 import type { AgentServiceFace, DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
-import { createChatApp, DEFAULT_APPROVAL_TIMEOUT_MS } from '../chat/index.js';
+import { createChatApp, DEFAULT_APPROVAL_TIMEOUT_MS, foldCurrentTodo } from '../chat/index.js';
+import type { TodoItem } from '../chat/index.js';
 import { GoalChannel } from '../goal/index.js';
 import {
   createPathsService,
@@ -557,6 +558,13 @@ export interface AppRuntime {
       }
     | undefined
   >;
+  /**
+   * todo 折叠查询面（TUI 彻底完善批增强 4，技术栈篇 §4.1）：两腿同 webui deps
+   * 同名面（活条目内存真相 ∪ 已闭 store 兜底 + goal 段锚活取——SPA 呈现与 TUI
+   * 面板同一计划态）。结构类型（TodoItem ⊇ TodoItemFace 呈现子集）——tui-main
+   * 消费，通道不 import chat 模块。
+   */
+  todoFor(sessionId: string): readonly TodoItem[] | null | undefined;
   /**
    * 一次性鉴权面活取值（复盘 S-1「监听 ⇒ 鉴权」）：非 daemon 一切监听形态
    *（`--port` 旗标 / overlay `enabled: true`）webui 件 apply 期自足生成进程内
@@ -3076,6 +3084,15 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 刀 B：documentSymbol 面活取值（读 holder——与 webui deps symbolsFor 同源
     // 第二消费点；lsp 行缺席 = undefined，TUI 补全退化委托腿）
     symbolsFor: (path: string) => symbolsFace?.(path) ?? Promise.resolve(undefined),
+    // TUI 完善批增强 4：todo 折叠查询面（两腿同 webui deps 同名面——goal 段锚
+    // 每次查询时点活取，激活/停掉即时切段；TodoItem 结构类型经通道呈现子集消费）
+    todoFor: (sessionId: string): readonly TodoItem[] | null | undefined => {
+      const boundary = goalChannel.goalScopeFor(sessionId)?.activatedSeq;
+      const entry = registry.entries.get(sessionId);
+      if (entry !== undefined) return foldCurrentTodo(entry.session.events, boundary);
+      const loaded = persistence ? persistence.loadSession(sessionId) : undefined;
+      return loaded === undefined ? undefined : foldCurrentTodo(loaded.events, boundary);
+    },
     // 复盘 S-1：一次性鉴权面活取值（读 holder——daemon/零监听形态恒 undefined；
     // 入口披露与测试断言的消费点）
     webuiEphemeralAuth: () => ephemeralAuthFace,
