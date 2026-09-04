@@ -154,11 +154,17 @@ export function classifyFaceDiff(prev, curr) {
     }
     const old = prevMap.get(key);
     // 剥 tier + deprecated 两键再比——DEP 登记日（tier 变 + 载荷挂上）与撤销日
-    // （载荷消失）都只剩 tier 差异 → re-tiered 桶；载荷-only 桶差为零 → 无面变
-    const { tier: oldTier, deprecated: _oldDep, ...oldRest } = old;
-    const { tier, deprecated: _dep, ...rest } = entry;
+    // （载荷消失）都只剩 tier 差异 → re-tiered 桶；载荷-only 桶差为零 → 无面变。
+    // sig 也剥出 rest 比（§6.13.4 刀 C 判据迁移律：**双侧在场才判差**——单向补挂
+    // = 元数据迁移非签名变更；点火前归档快照无 sig 字段，逐符号重算哈希位宽或
+    // 算法变不误报 changed，迁移窗随点火自然闭合）
+    const { tier: oldTier, deprecated: _oldDep, sig: _oldSig, ...oldRest } = old;
+    const { tier, deprecated: _dep, sig: _sig, ...rest } = entry;
     if (JSON.stringify(oldRest) !== JSON.stringify(rest)) changed.push(key);
     else if (oldTier !== tier) reTiered.push({ key, from: oldTier, to: tier });
+    // 签名指纹判差（双侧在场）：rest 全等而 sig 变 = 同名改形——changed 桶的
+    // 签名级判据（词表域无 sig 天然不进此判）
+    else if (_oldSig !== undefined && _sig !== undefined && _oldSig !== _sig) changed.push(key);
   }
   for (const key of prevMap.keys()) if (!currMap.has(key)) removed.push(key);
   const capChanged = JSON.stringify(prev.capabilities) !== JSON.stringify(curr.capabilities);

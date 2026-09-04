@@ -1272,3 +1272,126 @@ export interface Plain { ok: true; }
     }
   });
 });
+
+describe('签名指纹（刀 C——sig 稳定哈希 + classifyFaceDiff 双侧在场判差，§6.13.4）', () => {
+  it('collectTopLevelDeclarations：顶层声明形态全景（体块/签名/重载拼接/再导出豁免）', async () => {
+    const { collectTopLevelDeclarations } = await import('./extract-api-surface.mjs');
+    // 覆盖 tsc 发射产物实测面：import 穿行 / 体块（interface/enum/namespace）闭
+    // `}` 归零收 / 签名（type/const/function）深度 0 `;` 收 / 重载同名拼接 /
+    // 再导出三形（export {…} from / export * from / export type {…} from——
+    // index.d.ts barrel 恒含末形）无本文件声明块不收 / abstract 前导词忽略
+    const dts = [
+      "import { X } from './x.js';",
+      'export interface Face { a : string ; }',
+      'export declare type Alias = Face | null;',
+      'export declare const obj : { readonly k : number };',
+      'export declare function f ( a : string ) : void;',
+      'export declare function f ( a : number ) : void;',
+      'export declare enum En { A , B }',
+      'export declare abstract class Cl { abstract m ( ) : void ; }',
+      'export declare namespace Ns { export interface Hidden { } }',
+      "export type { Face } from './y.js';",
+      "export * from './z.js';",
+      "export { X } from './x.js';",
+    ].join('\n');
+    const decls = collectTopLevelDeclarations(dts);
+    // 再导出形不产声明；Hidden 是 namespace 体内嵌套声明非顶层（深度 ≥1 不收）
+    expect([...decls.keys()]).toEqual(['Face', 'Alias', 'obj', 'f', 'En', 'Cl', 'Ns']);
+    // 体块声明：闭 `}` 入规范文本（声明形状一半）；体内 `;` 在深度 1 不终结
+    expect(decls.get('Face')).toBe('Face { a : string ; }');
+    expect(decls.get('En')).toBe('En { A , B }');
+    expect(decls.get('Ns')).toBe('Ns { export interface Hidden { } }');
+    expect(decls.get('Cl')).toBe('Cl { abstract m ( ) : void ; }');
+    // 签名声明：终结 `;` 不入规范文本；对象字面量型的闭 `}` 入（深度归零非终结位）
+    expect(decls.get('Alias')).toBe('Alias = Face | null');
+    expect(decls.get('obj')).toBe('obj : { readonly k : number }');
+    // 重载同名：多块单空格拼接（任一签名变即指纹变）
+    expect(decls.get('f')).toBe('f ( a : string ) : void f ( a : number ) : void');
+  });
+
+  it('collectTopLevelDeclarations：export default / export = 即红（命名导出纪律）', async () => {
+    const { collectTopLevelDeclarations } = await import('./extract-api-surface.mjs');
+    expect(() => collectTopLevelDeclarations('export default function f(): void;')).toThrow('export default');
+    expect(() => collectTopLevelDeclarations('export = X;')).toThrow('export =');
+  });
+
+  it('sliceInterfaceMembers：规范文本形态（readonly 入指纹 / 重载拼接 / 终结符不入）', async () => {
+    const { sliceInterfaceMembers } = await import('./extract-api-surface.mjs');
+    const members = sliceInterfaceMembers(`
+  send ( msg : string ) : Promise < void > ;
+  readonly policyMode : string;
+  uninstall ( mode : 'inspect' ) : Promise < number > ;
+  uninstall ( mode : 'execute' ) : void;
+  [ key : string ] : unknown;
+  readonly [ index : number ] : string;
+`);
+    expect([...members.keys()]).toEqual(['send', 'policyMode', 'uninstall']);
+    // 名 token 起至深度 0 终结符止（`;` 不入）；readonly 修饰符入（只读性是面承诺）
+    expect(members.get('send')).toBe('send ( msg : string ) : Promise < void >');
+    expect(members.get('policyMode')).toBe('readonly policyMode : string');
+    // 重载同名录收 + 规范文本单空格拼接；字符串字面量 token 文本原样（引号保留）
+    expect(members.get('uninstall')).toBe(
+      "uninstall ( mode : 'inspect' ) : Promise < number > uninstall ( mode : 'execute' ) : void",
+    );
+    // 索引签名（含 readonly 前导形）无名不计——幻影防线
+  });
+
+  it('extractSurface sig 覆盖锁：五模块族形态 + 词表域缺席 + llm 互异 + 确定性', async () => {
+    const mod = await import('./extract-api-surface.mjs');
+    const { serializeSurface } = mod;
+    const surface = await mod.extractSurface();
+    /** 模块 → 该模块全条目（快照序） */
+    const byMod = new Map();
+    for (const e of surface.exports) {
+      const list = byMod.get(e.module) ?? [];
+      list.push(e);
+      byMod.set(e.module, list);
+    }
+    const HEX16 = /^[0-9a-f]{16}$/;
+    // 五模块族挂 sig：berryagent（转发形恒 'forwarded'、声明形 16hex）/ typebox
+    // 三键恒 'forwarded'（上游承诺面）/ llm·sqlite（成员切片 16hex）/ services
+    for (const e of byMod.get('berryagent')) {
+      expect(e.sig, `berryagent ${e.symbol} sig`).toMatch(e.forwarded ? /^forwarded$/ : HEX16);
+    }
+    for (const key of ['typebox', 'typebox/value', 'typebox/compile']) {
+      for (const e of byMod.get(key)) expect(e.sig, `${key} ${e.symbol}`).toBe('forwarded');
+    }
+    // 第五键四枚 sig 两两互异（同值 = 切片机把四键切重了）
+    const llmSigs = byMod.get('berryagent/llm').map((e) => e.sig);
+    expect(llmSigs.length).toBe(4);
+    expect(new Set(llmSigs).size).toBe(llmSigs.length);
+    for (const e of [...byMod.get('berryagent/llm'), ...byMod.get('berryagent/sqlite')]) {
+      expect(e.sig, `${e.module} ${e.symbol}`).toMatch(HEX16);
+    }
+    // services 全挂（服务名 + 方法符号）；词表四域缺席（闭集词表无签名维度）
+    for (const e of byMod.get('services')) expect(e.sig, `services ${e.symbol}`).toMatch(HEX16);
+    for (const key of ['data-keys', 'live-events', 'manifest', 'session-events']) {
+      for (const e of byMod.get(key)) expect('sig' in e, `${key} ${e.symbol} 不挂 sig`).toBe(false);
+    }
+    // 确定性：同进程二次抽取逐字节恒等（sig 哈希无时序/随机源）
+    expect(serializeSurface(await mod.extractSurface())).toBe(serializeSurface(surface));
+  });
+
+  it('classifyFaceDiff：sig 双侧在场才判差（单向补挂 = 元数据迁移非签名变更）', async () => {
+    const { classifyFaceDiff } = await import('./generate-compatibility.mjs');
+    /** 迷你面条目（sig 语义测试面） */
+    const e = (sig) => ({
+      symbol: 'fork',
+      module: 'services',
+      tier: 'stable',
+      since: '1.0',
+      formFactors: ['standalone'],
+      ...(sig === undefined ? {} : { sig }),
+    });
+    const face = (exports) => ({ exports, capabilities: [] });
+    // 单侧补挂（旧快照无 sig / 新快照有）——不判差：迁移窗容忍（§6.13.4 判据迁移律）
+    expect(classifyFaceDiff(face([e(undefined)]), face([e('aaaa1111aaaa1111')])).changed).toEqual([]);
+    expect(classifyFaceDiff(face([e('aaaa1111aaaa1111')]), face([e(undefined)])).changed).toEqual([]);
+    // 双侧在场且互异——changed 桶（签名级判据：同名改形）
+    expect(classifyFaceDiff(face([e('aaaa1111aaaa1111')]), face([e('bbbb2222bbbb2222')])).changed).toEqual([
+      'services::fork',
+    ]);
+    // 双侧同值——无差
+    expect(classifyFaceDiff(face([e('aaaa1111aaaa1111')]), face([e('aaaa1111aaaa1111')])).changed).toEqual([]);
+  });
+});

@@ -11,7 +11,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9ef4e93985439769"
     },
     {
       "symbol": "AGENT_CONTINUE_INVALID",
@@ -22,7 +23,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "15bb55bd1be66a91"
     },
     {
       "symbol": "AGENT_DELIVER_AS_UNSUPPORTED",
@@ -33,7 +35,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a755eb2895482022"
     },
     {
       "symbol": "AGENT_ROLE_EXISTS",
@@ -44,7 +47,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "55d0cac675c81690"
     },
     {
       "symbol": "AGENT_ROLE_INVALID",
@@ -55,7 +59,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "acfd75031dd93d6f"
     },
     {
       "symbol": "AGENT_SESSION_INACTIVE",
@@ -66,7 +71,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fa4d73b6bcabb8c2"
     },
     {
       "symbol": "AGENT_SESSION_KEY_REQUIRED",
@@ -77,7 +83,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f0127657bd493fff"
     },
     {
       "symbol": "API_CAPABILITY_MISSING",
@@ -88,7 +95,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "714b9baf8b98eb81"
     },
     {
       "symbol": "API_EXPERIMENTAL_UNDECLARED",
@@ -99,7 +107,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "42768823e62921e7"
     },
     {
       "symbol": "API_VERSION_MALFORMED",
@@ -110,7 +119,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e13de70c6c6371c2"
     },
     {
       "symbol": "API_VERSION_MISMATCH",
@@ -121,7 +131,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "bc2da409a32f78f3"
     },
     {
       "symbol": "APP_APPLY_FAILED",
@@ -132,7 +143,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "6cf6e9bbb8f314b7"
     },
     {
       "symbol": "APP_APPLY_TIMEOUT",
@@ -143,7 +155,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "06d60850947dba4a"
     },
     {
       "symbol": "APP_CONFIG_INVALID",
@@ -154,7 +167,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1db731528d55bcf7"
     },
     {
       "symbol": "APP_DUPLICATE",
@@ -165,7 +179,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0004ba058fd37c6c"
     },
     {
       "symbol": "APP_ENTRY_UNRESOLVED",
@@ -176,7 +191,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "8cdd8a73bf335ab3"
     },
     {
       "symbol": "APP_EVENT_RATE",
@@ -187,7 +203,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "94fa39f6e630254f"
     },
     {
       "symbol": "APP_IMPORT_FORBIDDEN",
@@ -198,7 +215,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c4080329e386f8f1"
     },
     {
       "symbol": "APP_INJECT_UNRESOLVED",
@@ -209,7 +227,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "cc86c49fd121162e"
     },
     {
       "symbol": "APP_INSTALL_FAILED",
@@ -220,7 +239,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ab88930df1eb8da5"
     },
     {
       "symbol": "APP_INVALID",
@@ -231,7 +251,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "280b81652f48dca1"
     },
     {
       "symbol": "APP_LOAD_FAILED",
@@ -242,7 +263,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b42a7cd80334848a"
     },
     {
       "symbol": "APP_MAIN_DB_FORBIDDEN",
@@ -253,7 +275,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "897914892e5f5ee3"
     },
     {
       "symbol": "APP_NOT_FOUND",
@@ -264,7 +287,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "15cea1d27902a9fb"
     },
     {
       "symbol": "APP_SHAPE_INVALID",
@@ -275,7 +299,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "71296bf085a6869d"
     },
     {
       "symbol": "APP_SHUTDOWN_QUIESCE_VIOLATED",
@@ -286,7 +311,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "7cb723c34ce621cc"
     },
     {
       "symbol": "AgentMessage",
@@ -297,7 +323,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0b3b57587ae5c3a0"
     },
     {
       "symbol": "AgentTool",
@@ -308,7 +335,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1f75868e2e96f1fc"
     },
     {
       "symbol": "AgentToolResult",
@@ -319,7 +347,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3eced520a01fe147"
     },
     {
       "symbol": "ApiBlock",
@@ -330,7 +359,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9908c12f10a2b293"
     },
     {
       "symbol": "ApiGateResult",
@@ -341,7 +371,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c8d7dba24d0cfa14"
     },
     {
       "symbol": "ApiTier",
@@ -352,7 +383,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "eae60cd3d5ce7dce"
     },
     {
       "symbol": "AppActivatedPayload",
@@ -363,7 +395,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "acbeac5fd3f5a699"
     },
     {
       "symbol": "AppApply",
@@ -374,7 +407,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "178cd5f715095123"
     },
     {
       "symbol": "AppContext",
@@ -385,7 +419,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3f980520937ea1cf"
     },
     {
       "symbol": "AppError",
@@ -396,7 +431,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "677b7e21dbfa8587"
     },
     {
       "symbol": "AppEventHandler",
@@ -407,7 +443,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "4443cd9731fe7259"
     },
     {
       "symbol": "AppFailedPayload",
@@ -418,7 +455,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9fbfe0f2ee7f40ed"
     },
     {
       "symbol": "AppIdPattern",
@@ -429,7 +467,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1d0bb9f06e65098d"
     },
     {
       "symbol": "AppLoadResult",
@@ -440,7 +479,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "6ccd0df7aea05fdd"
     },
     {
       "symbol": "AppLogger",
@@ -451,7 +491,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "7b223b9efaace6c2"
     },
     {
       "symbol": "AppManifest",
@@ -462,7 +503,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e516bf01437e3c63"
     },
     {
       "symbol": "AppManifestSchema",
@@ -473,7 +515,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "4fe17612dda37955"
     },
     {
       "symbol": "AppModule",
@@ -484,7 +527,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ec54e3e5f8cf3738"
     },
     {
       "symbol": "AppPlanRow",
@@ -495,7 +539,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "19532d7f9e06111b"
     },
     {
       "symbol": "AppSkipReason",
@@ -506,7 +551,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "23d42a133da5c57e"
     },
     {
       "symbol": "AppSkippedPayload",
@@ -517,7 +563,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d73c944935708522"
     },
     {
       "symbol": "AssistantMessage",
@@ -528,7 +575,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d13b04c0d40f7c7b"
     },
     {
       "symbol": "AssistantStream",
@@ -539,7 +587,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "df158ffbf377e6e6"
     },
     {
       "symbol": "AssistantStreamEvent",
@@ -550,7 +599,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d236bd27ebab6657"
     },
     {
       "symbol": "BRIDGE_CALL_TIMEOUT",
@@ -561,7 +611,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b1ff9b4c931f27db"
     },
     {
       "symbol": "BRIDGE_CANCELLED",
@@ -572,7 +623,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3d41231f9f3fb585"
     },
     {
       "symbol": "BRIDGE_ENCODE_FAILED",
@@ -583,7 +635,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d68613fd2822d509"
     },
     {
       "symbol": "BRIDGE_HANDLER_FAILED",
@@ -594,7 +647,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "6bede7ffcfb158ce"
     },
     {
       "symbol": "BRIDGE_METHOD_NOT_FOUND",
@@ -605,7 +659,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "6ad0a262acde7cc3"
     },
     {
       "symbol": "BRIDGE_SURFACE_NARROWED",
@@ -616,7 +671,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "476ad7699de65140"
     },
     {
       "symbol": "BRIDGE_WORKER_EXITED",
@@ -627,7 +683,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0d68ef85d40d410c"
     },
     {
       "symbol": "BROWSER_CONFIG_CONFLICT",
@@ -638,7 +695,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "86a31a30ce9f63e9"
     },
     {
       "symbol": "BROWSER_CONNECT_FAILED",
@@ -649,7 +707,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1c6f2b9f1b3abaee"
     },
     {
       "symbol": "BROWSER_ENGINE_NOT_FOUND",
@@ -660,7 +719,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a019139cba57a02e"
     },
     {
       "symbol": "BROWSER_INSTALL_FAILED",
@@ -671,7 +731,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "16ebb1aa485c114d"
     },
     {
       "symbol": "BROWSER_NODE_UNSUPPORTED",
@@ -682,7 +743,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "223a94b5e7b1cce8"
     },
     {
       "symbol": "BuiltinAppModule",
@@ -693,7 +755,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9af81ac561238242"
     },
     {
       "symbol": "CAPABILITIES",
@@ -704,7 +767,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5528013b708f73d6"
     },
     {
       "symbol": "CHECKPOINT_BLOB_CORRUPT",
@@ -715,7 +779,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "59c5bdbb7d06ff1f"
     },
     {
       "symbol": "COMPOSITION_ROW_INVALID",
@@ -726,7 +791,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e4f9c0ae7083883a"
     },
     {
       "symbol": "CONTEXT_DISPOSED",
@@ -737,7 +803,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d0d475e6451bb907"
     },
     {
       "symbol": "CONTEXT_EFFECT_INVALID",
@@ -748,7 +815,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c5828e1ab4ed40c4"
     },
     {
       "symbol": "CONTEXT_EFFECT_LIMIT",
@@ -759,7 +827,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "da72e0b61a4526dc"
     },
     {
       "symbol": "CONTEXT_FORK_LIMIT",
@@ -770,7 +839,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ff27e447b6cdacb0"
     },
     {
       "symbol": "CONTEXT_SERVICE_EXISTS",
@@ -781,7 +851,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "84bef8b7bd8c93ac"
     },
     {
       "symbol": "CONTEXT_SERVICE_NAME_INVALID",
@@ -792,7 +863,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d51ac0defeb9cf69"
     },
     {
       "symbol": "CONTEXT_SERVICE_NOT_FOUND",
@@ -803,7 +875,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b33a591c7c4ca19e"
     },
     {
       "symbol": "CONTRACT_BAD_ERROR_CODE",
@@ -814,7 +887,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1fe67a2081c34cdf"
     },
     {
       "symbol": "CONTRACT_DUPLICATE_ERROR_CODE",
@@ -825,7 +899,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "01e34aaacccf63ce"
     },
     {
       "symbol": "CORE_EVENT_TYPES",
@@ -836,7 +911,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3abcb82298391e82"
     },
     {
       "symbol": "CapabilityEntry",
@@ -847,7 +923,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "59896f9dacce25cc"
     },
     {
       "symbol": "CommandCompletionItem",
@@ -858,7 +935,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "cdb50f6d10aa6c75"
     },
     {
       "symbol": "CommandDefinition",
@@ -869,7 +947,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b36af05a8c344a7e"
     },
     {
       "symbol": "CompositionReloadedPayload",
@@ -880,7 +959,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "eeb4f54fdf922f38"
     },
     {
       "symbol": "CompositionRow",
@@ -891,7 +971,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "7804bed5f41f11eb"
     },
     {
       "symbol": "CustomMessage",
@@ -902,7 +983,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "06dea5b0a8b35e29"
     },
     {
       "symbol": "DAEMON_ALREADY_RUNNING",
@@ -913,7 +995,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "eba052581cdb7105"
     },
     {
       "symbol": "DAEMON_START_TIMEOUT",
@@ -924,7 +1007,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e6ec10977013e975"
     },
     {
       "symbol": "DAEMON_STOP_TIMEOUT",
@@ -935,7 +1019,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3e56318b5619356d"
     },
     {
       "symbol": "DATA_DESCRIPTOR_API_KEYS",
@@ -946,7 +1031,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "263e95ae504e943a"
     },
     {
       "symbol": "DeliverChannel",
@@ -957,7 +1043,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "7c3e59e7b20a120a"
     },
     {
       "symbol": "DescriptorKeyEntry",
@@ -968,7 +1055,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "82cc281338b41c64"
     },
     {
       "symbol": "EVENT_DUPLICATE",
@@ -979,7 +1067,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "44a22ebcf60b58f4"
     },
     {
       "symbol": "EVENT_HANDLER_TIMEOUT",
@@ -990,7 +1079,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "08374634faf6b36a"
     },
     {
       "symbol": "EVENT_HOST_RESERVED",
@@ -1001,7 +1091,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0362fc424b61cd5e"
     },
     {
       "symbol": "EVENT_MODE_MISMATCH",
@@ -1012,7 +1103,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "46c2edea84b2fd03"
     },
     {
       "symbol": "EVENT_UNKNOWN",
@@ -1023,7 +1115,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "6a6ec5b9cd5e820b"
     },
     {
       "symbol": "EXEC_ENV_FORBIDDEN",
@@ -1034,7 +1127,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "73612192ed4078d2"
     },
     {
       "symbol": "EXEC_SPAWN_FAILED",
@@ -1045,7 +1139,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "36764fc1103417ff"
     },
     {
       "symbol": "EventName",
@@ -1056,7 +1151,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "8a06b3237d381949"
     },
     {
       "symbol": "EventQueryCursor",
@@ -1067,7 +1163,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "babfdb9bcf6ee265"
     },
     {
       "symbol": "EventQueryOptions",
@@ -1078,7 +1175,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "71d425276ab710a6"
     },
     {
       "symbol": "EventQueryResult",
@@ -1089,7 +1187,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0c22065a64e3df03"
     },
     {
       "symbol": "EventQueryRow",
@@ -1100,7 +1199,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "74a08577dbed6cd8"
     },
     {
       "symbol": "ExecEnvTable",
@@ -1111,7 +1211,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "07276dda5915149d"
     },
     {
       "symbol": "ExecOptions",
@@ -1122,7 +1223,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e51c6bc0c90c0bd5"
     },
     {
       "symbol": "ExecResult",
@@ -1133,7 +1235,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d6323334bbd8fff0"
     },
     {
       "symbol": "ExecService",
@@ -1144,7 +1247,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ca3c4cbf1b41894e"
     },
     {
       "symbol": "ExecuteInput",
@@ -1155,7 +1259,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "dfee77f1562d1259"
     },
     {
       "symbol": "FS_DECODE_NON_UTF8",
@@ -1166,7 +1271,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e1501421a367d3c2"
     },
     {
       "symbol": "FS_DECODE_UNDECIDABLE",
@@ -1177,7 +1283,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "915da817a7643da0"
     },
     {
       "symbol": "FS_NOT_FOUND",
@@ -1188,7 +1295,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d79881ec83cb17f5"
     },
     {
       "symbol": "FS_NOT_OBSERVED",
@@ -1199,7 +1307,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fa04d560f4cec7aa"
     },
     {
       "symbol": "FS_OUTSIDE_WRITABLE_ROOTS",
@@ -1210,7 +1319,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5ba5756c3723906b"
     },
     {
       "symbol": "FS_PATCH_FAILED",
@@ -1221,7 +1331,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "8eb880c80798a504"
     },
     {
       "symbol": "FS_VERSION_CONFLICT",
@@ -1232,7 +1343,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e3cf426d74efcf9f"
     },
     {
       "symbol": "FS_WRITE_TARGET_DRIFTED",
@@ -1243,7 +1355,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "73a99e5a6642ab50"
     },
     {
       "symbol": "FormFactor",
@@ -1254,7 +1367,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c8aa6efa8504c55c"
     },
     {
       "symbol": "GOAL_ACTIVE_EXISTS",
@@ -1265,7 +1379,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "978c3d513d75fe95"
     },
     {
       "symbol": "GOAL_GATE_FAILED",
@@ -1276,7 +1391,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "da686af49972d9b2"
     },
     {
       "symbol": "GOAL_NOT_FOUND",
@@ -1287,7 +1403,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "4e3e385d4344e1f0"
     },
     {
       "symbol": "GOAL_TODO_SCOPE",
@@ -1298,7 +1415,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b2ddeb21ae85de0f"
     },
     {
       "symbol": "GOAL_TRANSITION_INVALID",
@@ -1309,7 +1427,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d2aa97d140b8ba16"
     },
     {
       "symbol": "GateAction",
@@ -1320,7 +1439,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b82a9f5ffe126bde"
     },
     {
       "symbol": "GateDecisionPayload",
@@ -1331,7 +1451,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f64d89f60045615c"
     },
     {
       "symbol": "GateDecisionSink",
@@ -1342,7 +1463,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e2f5d7207bc5e8d0"
     },
     {
       "symbol": "GateInput",
@@ -1353,7 +1475,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "999133c34a10997d"
     },
     {
       "symbol": "HostFace",
@@ -1364,7 +1487,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "87884d4ed835498d"
     },
     {
       "symbol": "HostFaceData",
@@ -1375,7 +1499,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b676c34d113aa796"
     },
     {
       "symbol": "ImageContent",
@@ -1386,7 +1511,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "7a11d114bfc3b8bd"
     },
     {
       "symbol": "JOB_CONCURRENCY_LIMIT",
@@ -1397,7 +1523,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ba3f829b49f6e019"
     },
     {
       "symbol": "JOB_KIND_DUPLICATE",
@@ -1408,7 +1535,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "caa2409e669134d3"
     },
     {
       "symbol": "JOB_KIND_UNKNOWN",
@@ -1419,7 +1547,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "13d91efedf9722f2"
     },
     {
       "symbol": "JOB_NOT_FOUND",
@@ -1430,7 +1559,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2384ee1da1a497b3"
     },
     {
       "symbol": "JOB_OWNER_MISMATCH",
@@ -1441,7 +1571,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d313395e17e1d015"
     },
     {
       "symbol": "JobController",
@@ -1452,7 +1583,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d9451a4aad9f973c"
     },
     {
       "symbol": "JobCreateOptions",
@@ -1463,7 +1595,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "886a2c0eaae4109c"
     },
     {
       "symbol": "JobHandle",
@@ -1474,7 +1607,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "32f8d0773a993ef7"
     },
     {
       "symbol": "JobSettleDetail",
@@ -1485,7 +1619,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3db910c779999135"
     },
     {
       "symbol": "JobStatus",
@@ -1496,7 +1631,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "28718e69a97c1580"
     },
     {
       "symbol": "JobTerminal",
@@ -1507,7 +1643,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d1df56012b72b30c"
     },
     {
       "symbol": "JobView",
@@ -1518,7 +1655,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fbe9a6f9734ffde5"
     },
     {
       "symbol": "JobsServiceFace",
@@ -1529,7 +1667,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "08ecf216e7c2ade3"
     },
     {
       "symbol": "LIVE_EVENT_CATALOG",
@@ -1540,7 +1679,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "993f175f6adeab27"
     },
     {
       "symbol": "LLM_BUDGET_EXCEEDED",
@@ -1551,7 +1691,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a1de020e0f4bc3b1"
     },
     {
       "symbol": "LLM_COMPLETE_API_KEY_FORBIDDEN",
@@ -1562,7 +1703,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b84cb8ed1058764e"
     },
     {
       "symbol": "LLM_COMPLETE_FAILED",
@@ -1573,7 +1715,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e685b4ebd18618be"
     },
     {
       "symbol": "LLM_COMPLETE_SCHEMA_UNSUPPORTED",
@@ -1584,7 +1727,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f9e50578a23ba1e7"
     },
     {
       "symbol": "LLM_INFLIGHT_LIMIT",
@@ -1595,7 +1739,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5db747c306686fb1"
     },
     {
       "symbol": "LLM_MODEL_NOT_FOUND",
@@ -1606,7 +1751,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d0a7ba909aa76525"
     },
     {
       "symbol": "LLM_MODEL_SPEC_INVALID",
@@ -1617,7 +1763,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e15eef782d2670d2"
     },
     {
       "symbol": "LSP_CONNECT_FAILED",
@@ -1628,7 +1775,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "07af27426b9b3da3"
     },
     {
       "symbol": "LiveEventDefinition",
@@ -1639,7 +1787,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "8d72eaebba6179ae"
     },
     {
       "symbol": "LlmContext",
@@ -1650,7 +1799,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ee023bbf51ec4750"
     },
     {
       "symbol": "LlmTool",
@@ -1661,7 +1811,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c26c21fc2c90ac69"
     },
     {
       "symbol": "MANIFEST_API_KEYS",
@@ -1672,7 +1823,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3540fe65e65ac0c0"
     },
     {
       "symbol": "MCP_CONNECT_FAILED",
@@ -1683,7 +1835,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "da76e69cd34bcd72"
     },
     {
       "symbol": "Message",
@@ -1694,7 +1847,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b8b13927589a2c17"
     },
     {
       "symbol": "MessageRoleDefinition",
@@ -1705,7 +1859,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "95176acc0b70b042"
     },
     {
       "symbol": "MessageSource",
@@ -1716,7 +1871,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "edae08bede63e991"
     },
     {
       "symbol": "ModelInfo",
@@ -1727,7 +1883,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e1f6c5401361d632"
     },
     {
       "symbol": "PERSIST_BATCH_WRITE_FAILED",
@@ -1738,7 +1895,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d476d5169ff8fbca"
     },
     {
       "symbol": "PROMPT_SECTION_DUPLICATE",
@@ -1749,7 +1907,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "08a561be64beee6e"
     },
     {
       "symbol": "PROMPT_SECTION_INVALID",
@@ -1760,7 +1919,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e5f50464a0febe4b"
     },
     {
       "symbol": "PostInput",
@@ -1771,7 +1931,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fc624bffa942b3ab"
     },
     {
       "symbol": "PromptSection",
@@ -1782,7 +1943,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "7b5415cf239f8da9"
     },
     {
       "symbol": "PromptsService",
@@ -1793,7 +1955,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1f53d6f2b2e05c1c"
     },
     {
       "symbol": "RowAppProbe",
@@ -1804,7 +1967,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f5808c96962ff1cb"
     },
     {
       "symbol": "RowSandbox",
@@ -1815,7 +1979,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a8ac3d298339a497"
     },
     {
       "symbol": "SANDBOX_ESCALATION_INVALID",
@@ -1826,7 +1991,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ac2c254a2c4eacc6"
     },
     {
       "symbol": "SANDBOX_MODE_INVALID",
@@ -1837,7 +2003,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "de739887e8a76123"
     },
     {
       "symbol": "SANDBOX_UNAVAILABLE",
@@ -1848,7 +2015,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2cd092a4a6cd6a22"
     },
     {
       "symbol": "SESSION_CORE_TYPE_FORBIDDEN",
@@ -1859,7 +2027,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "753e94cd0eaf976e"
     },
     {
       "symbol": "SESSION_EVENT_DATA_INVALID",
@@ -1870,7 +2039,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d90d2411d59b0e8a"
     },
     {
       "symbol": "SESSION_EVENT_TOO_LARGE",
@@ -1881,7 +2051,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "dd78db446af9947a"
     },
     {
       "symbol": "SESSION_FORK_BOUNDARY_INVALID",
@@ -1892,7 +2063,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2b4b4d008cf1746a"
     },
     {
       "symbol": "SESSION_FORMAT_UNSUPPORTED",
@@ -1903,7 +2075,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fe510c6c60cbc628"
     },
     {
       "symbol": "SESSION_SURFACE_OP_INVALID",
@@ -1914,7 +2087,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0c95e7f08a59b190"
     },
     {
       "symbol": "SESSION_WRITE_CONFLICT",
@@ -1925,7 +2099,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "903260e8ad1e7e03"
     },
     {
       "symbol": "SKILLS_PROVIDER_INVALID",
@@ -1936,7 +2111,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9c0c925a8c3de3c6"
     },
     {
       "symbol": "SUBAGENT_CAPABILITY_UNSUPPORTED",
@@ -1947,7 +2123,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "00c6ebb7d65f918e"
     },
     {
       "symbol": "SUBAGENT_DEPTH_EXCEEDED",
@@ -1958,7 +2135,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f9dce5444416f127"
     },
     {
       "symbol": "SUBAGENT_PROVIDER_DUPLICATE",
@@ -1969,7 +2147,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ac1876e202067c39"
     },
     {
       "symbol": "SUBAGENT_PROVIDER_NOT_FOUND",
@@ -1980,7 +2159,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ac2b3d8508963874"
     },
     {
       "symbol": "SandboxMeta",
@@ -1991,7 +2171,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "29306f99e1cb32b2"
     },
     {
       "symbol": "ServiceCatalogEntry",
@@ -2002,7 +2183,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a41282cd2f8ad2c1"
     },
     {
       "symbol": "SessionEvent",
@@ -2013,7 +2195,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0d6a64f9168f71e1"
     },
     {
       "symbol": "SessionEventCategory",
@@ -2024,7 +2207,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "63ec6f6977e064e1"
     },
     {
       "symbol": "SessionEventTypeDefinition",
@@ -2035,7 +2219,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ccbafbcd5293a841"
     },
     {
       "symbol": "Skill",
@@ -2046,7 +2231,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ea998c1f21879477"
     },
     {
       "symbol": "SkillDiagnostic",
@@ -2057,7 +2243,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "59e19897cac182cb"
     },
     {
       "symbol": "SkillDiagnosticCode",
@@ -2068,7 +2255,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "8913fe0944991665"
     },
     {
       "symbol": "SkillProvenance",
@@ -2079,7 +2267,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "72b44eae50754270"
     },
     {
       "symbol": "SkillSourceLevel",
@@ -2090,7 +2279,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a9db9df19ae1d52d"
     },
     {
       "symbol": "SkillsProvider",
@@ -2101,7 +2291,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1c4cdef44ffc9e5b"
     },
     {
       "symbol": "Static",
@@ -2113,7 +2304,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     },
     {
       "symbol": "StopReason",
@@ -2124,7 +2316,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e198e323e6a12900"
     },
     {
       "symbol": "StreamFn",
@@ -2135,7 +2328,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9324dbd30ac1667d"
     },
     {
       "symbol": "StreamFnOptions",
@@ -2146,7 +2340,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1a4290af791ae0d7"
     },
     {
       "symbol": "SubagentCapabilities",
@@ -2157,7 +2352,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e13a8478f77b5212"
     },
     {
       "symbol": "SubagentExecution",
@@ -2168,7 +2364,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d02fb67b614594f0"
     },
     {
       "symbol": "SubagentProvider",
@@ -2179,7 +2376,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d04efcd3fb8d2086"
     },
     {
       "symbol": "SubagentProviderInfo",
@@ -2190,7 +2388,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "181793a26d53670d"
     },
     {
       "symbol": "SubagentRequest",
@@ -2201,7 +2400,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9229ba0fbb2a1c8f"
     },
     {
       "symbol": "SubagentResult",
@@ -2212,7 +2412,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "697c569c80d49c40"
     },
     {
       "symbol": "SubagentRun",
@@ -2223,7 +2424,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9be7650fa596fd5f"
     },
     {
       "symbol": "SubagentSettlement",
@@ -2234,7 +2436,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "30e349e089e41ddb"
     },
     {
       "symbol": "SubagentStart",
@@ -2245,7 +2448,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c18c4cfd753b0cb0"
     },
     {
       "symbol": "SubagentStopReason",
@@ -2256,7 +2460,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "85b717f545645234"
     },
     {
       "symbol": "SubagentsServiceFace",
@@ -2267,7 +2472,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "94c2ff786648c530"
     },
     {
       "symbol": "SurfaceOp",
@@ -2278,7 +2484,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fc681ead08fc910d"
     },
     {
       "symbol": "TODO_WRITE_TOO_LARGE",
@@ -2289,7 +2496,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "556c2a1194afea85"
     },
     {
       "symbol": "TOOLS_CHANGE_EVENT",
@@ -2300,7 +2508,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "02c841113fa48cc5"
     },
     {
       "symbol": "TOOL_ARGUMENTS_INVALID",
@@ -2311,7 +2520,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3609cac5a8fff79f"
     },
     {
       "symbol": "TOOL_BLOCKED",
@@ -2322,7 +2532,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "81e32775ed390dc1"
     },
     {
       "symbol": "TOOL_DESCRIPTION_REJECTED",
@@ -2333,7 +2544,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "dad0040e0af9a486"
     },
     {
       "symbol": "TOOL_DUPLICATE",
@@ -2344,7 +2556,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2ac2a1306ee49e40"
     },
     {
       "symbol": "TOOL_EXECUTE_EVENT",
@@ -2355,7 +2568,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "34a35c3a08e3d246"
     },
     {
       "symbol": "TOOL_GATE_FAILED",
@@ -2366,7 +2580,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3a8e3a45949da08f"
     },
     {
       "symbol": "TOOL_NOT_STARTED",
@@ -2377,7 +2592,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "eea8920d1668ccea"
     },
     {
       "symbol": "TOOL_OUTCOME_UNKNOWN",
@@ -2388,7 +2604,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2ab133840d871f44"
     },
     {
       "symbol": "TOOL_POST_EXECUTE_EVENT",
@@ -2399,7 +2616,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ab9a73ce37834fa5"
     },
     {
       "symbol": "TOOL_PRE_EXECUTE_EVENT",
@@ -2410,7 +2628,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "10a7f9d4dba3297e"
     },
     {
       "symbol": "TOOL_REGISTRY_LIMIT",
@@ -2421,7 +2640,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "824b8ebdd2d82dee"
     },
     {
       "symbol": "TOOL_REGISTRY_RATE",
@@ -2432,7 +2652,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "eb72beebd3e386e0"
     },
     {
       "symbol": "TOOL_SCHEMA_INVALID",
@@ -2443,7 +2664,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1621c6cb652f8d33"
     },
     {
       "symbol": "TOOL_TIMEOUT",
@@ -2454,7 +2676,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f9c78094f96c325d"
     },
     {
       "symbol": "TOOL_TIMEOUT_FLOOR_MS",
@@ -2465,7 +2688,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5929c050b925c27f"
     },
     {
       "symbol": "TOOL_TIMEOUT_INVALID",
@@ -2476,7 +2700,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "edaef2125d12de22"
     },
     {
       "symbol": "TSchema",
@@ -2488,7 +2713,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     },
     {
       "symbol": "TextContent",
@@ -2499,7 +2725,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "dbf3e677b4573564"
     },
     {
       "symbol": "ThinkingContent",
@@ -2510,7 +2737,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0f2ec9a6666cc2cf"
     },
     {
       "symbol": "ThinkingLevel",
@@ -2521,7 +2749,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f38b086347a97505"
     },
     {
       "symbol": "ToolCallBlock",
@@ -2532,7 +2761,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1889ece095f0a5cf"
     },
     {
       "symbol": "ToolCallOrigin",
@@ -2543,7 +2773,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "17c978fe53e933cb"
     },
     {
       "symbol": "ToolCtx",
@@ -2554,7 +2785,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "28ec02a9afeaab8c"
     },
     {
       "symbol": "ToolDefinition",
@@ -2565,7 +2797,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "8794f4055ae58111"
     },
     {
       "symbol": "ToolExecutionMode",
@@ -2576,7 +2809,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2dc54d34fc1407a8"
     },
     {
       "symbol": "ToolPipelineExecutor",
@@ -2587,7 +2821,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "52ccac7e1df2d77d"
     },
     {
       "symbol": "ToolResultMessage",
@@ -2598,7 +2833,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3b2525c357f955e9"
     },
     {
       "symbol": "ToolUpdateCallback",
@@ -2609,7 +2845,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1e8a2d2f9135b955"
     },
     {
       "symbol": "ToolsService",
@@ -2620,7 +2857,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "afcecd1916c12ae4"
     },
     {
       "symbol": "Type",
@@ -2632,7 +2870,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     },
     {
       "symbol": "Usage",
@@ -2643,7 +2882,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "67231de2db7ee993"
     },
     {
       "symbol": "UserMessage",
@@ -2654,7 +2894,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e5e55c758975b862"
     },
     {
       "symbol": "Value",
@@ -2666,7 +2907,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     },
     {
       "symbol": "VirtualApiKeyEntry",
@@ -2677,7 +2919,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2ee7929bd85bb95a"
     },
     {
       "symbol": "WEBUI_BIND_FORBIDDEN",
@@ -2688,7 +2931,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ae32bb77afab28f2"
     },
     {
       "symbol": "WEBUI_PORT_IN_USE",
@@ -2699,7 +2943,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "6534d9b5dccb8129"
     },
     {
       "symbol": "WEB_DOWNLOAD_FAILED",
@@ -2710,7 +2955,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "be300f04397f51bb"
     },
     {
       "symbol": "WEB_FETCH_FAILED",
@@ -2721,7 +2967,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9fec84a3ff4d38fe"
     },
     {
       "symbol": "WEB_PRIVATE_TARGET",
@@ -2732,7 +2979,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "dafd3956d5b9f6ae"
     },
     {
       "symbol": "WEB_REDIRECT_LIMIT",
@@ -2743,7 +2991,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1d507e6f487d50e9"
     },
     {
       "symbol": "WEB_URL_INVALID",
@@ -2754,7 +3003,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "979822fbe566427d"
     },
     {
       "symbol": "compareApiVersions",
@@ -2765,7 +3015,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "57a9ec6695ced147"
     },
     {
       "symbol": "describeError",
@@ -2776,7 +3027,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3a04c7ee9efea6aa"
     },
     {
       "symbol": "exclusiveAppOf",
@@ -2787,7 +3039,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "eeb8cae7d83fc10d"
     },
     {
       "symbol": "findLiveEvent",
@@ -2798,7 +3051,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fe210be40d9b34a1"
     },
     {
       "symbol": "getMessageRoleDefinition",
@@ -2809,7 +3063,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "016de867db6ec22d"
     },
     {
       "symbol": "getSessionEventType",
@@ -2820,7 +3075,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "26b0cae5cd5e8ff1"
     },
     {
       "symbol": "isCoreSessionEventType",
@@ -2831,7 +3087,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "549fb61abfb4a3c3"
     },
     {
       "symbol": "isStandardMessage",
@@ -2842,7 +3099,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "cd998bd878463796"
     },
     {
       "symbol": "isStandardRole",
@@ -2853,7 +3111,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b29493464c96cdd8"
     },
     {
       "symbol": "isValidApiVersion",
@@ -2864,7 +3123,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1e5d019d447f8711"
     },
     {
       "symbol": "listErrorCodes",
@@ -2875,7 +3135,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "29ee7b3bb6d7a5a4"
     },
     {
       "symbol": "listMessageRoles",
@@ -2886,7 +3147,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "77fd57ee709ba2d6"
     },
     {
       "symbol": "listSessionEventTypes",
@@ -2897,7 +3159,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "68f6a4a9d530e2c5"
     },
     {
       "symbol": "registerAppMessageRole",
@@ -2908,7 +3171,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "56f800e7de72c069"
     },
     {
       "symbol": "registerAppSessionEventType",
@@ -2919,7 +3183,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0458ed34025bbf39"
     },
     {
       "symbol": "registerErrorCode",
@@ -2930,7 +3195,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "eb969843afbcbdaa"
     },
     {
       "symbol": "registerHostMessageRole",
@@ -2941,7 +3207,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "01ad9f83e7324859"
     },
     {
       "symbol": "registerSessionEventType",
@@ -2952,7 +3219,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "77c0a61b551f4b33"
     },
     {
       "symbol": "resolveRowCarrier",
@@ -2963,7 +3231,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "77f37fa82d11f363"
     },
     {
       "symbol": "validateAppManifest",
@@ -2974,7 +3243,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "06dbdf6ef57208b5"
     },
     {
       "symbol": "anthropicMessagesApi",
@@ -2985,7 +3255,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "60b7613c7ea6b9f5"
     },
     {
       "symbol": "createProvider",
@@ -2996,7 +3267,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5cadc02791ab4d6c"
     },
     {
       "symbol": "hasApi",
@@ -3007,7 +3279,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "8e121625fd0160ed"
     },
     {
       "symbol": "lazyApi",
@@ -3018,7 +3291,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9d3b33568822fbc4"
     },
     {
       "symbol": "openDatabase",
@@ -3029,7 +3303,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "af7d219491f6d854"
     },
     {
       "symbol": "app",
@@ -3491,7 +3766,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1ce59afe301346ac"
     },
     {
       "symbol": "agent.onRunSettled",
@@ -3502,7 +3778,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "920f52be8a713bbe"
     },
     {
       "symbol": "agent.reseedTimeline",
@@ -3513,7 +3790,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "292d1f6af9f5a713"
     },
     {
       "symbol": "agent.sendUserMessage",
@@ -3524,7 +3802,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "8f17fbd23cc8e796"
     },
     {
       "symbol": "approval",
@@ -3535,7 +3814,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f141b2fe87d05b51"
     },
     {
       "symbol": "approval.ask",
@@ -3546,7 +3826,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "90ecc69308853052"
     },
     {
       "symbol": "approval.policyMode",
@@ -3557,7 +3838,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "6cc35a324c03d1eb"
     },
     {
       "symbol": "apps",
@@ -3568,7 +3850,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ee59068f5ef51708"
     },
     {
       "symbol": "apps.applyLoad",
@@ -3579,7 +3862,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "47c852295697df83"
     },
     {
       "symbol": "apps.configure",
@@ -3590,7 +3874,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "740d389c196bef5f"
     },
     {
       "symbol": "apps.install",
@@ -3601,7 +3886,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0a032f389a2e24b2"
     },
     {
       "symbol": "apps.list",
@@ -3612,7 +3898,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1ffdae35c3c734aa"
     },
     {
       "symbol": "apps.markFailed",
@@ -3623,7 +3910,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fd01d91863ecba2d"
     },
     {
       "symbol": "apps.mount",
@@ -3634,7 +3922,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "60b5bf58e8281cdd"
     },
     {
       "symbol": "apps.requestReload",
@@ -3645,7 +3934,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f01090a5c6844f42"
     },
     {
       "symbol": "apps.toggle",
@@ -3656,7 +3946,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b2b1c55f4c4bef0f"
     },
     {
       "symbol": "apps.uninstall",
@@ -3667,7 +3958,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1f9deceb3421d415"
     },
     {
       "symbol": "apps.unmount",
@@ -3678,7 +3970,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c96815e5cbb9ebde"
     },
     {
       "symbol": "apps.update",
@@ -3689,7 +3982,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "3365ff570e53c1bb"
     },
     {
       "symbol": "browser",
@@ -3700,7 +3994,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1848a06cf546a3b2"
     },
     {
       "symbol": "browser.acquireContext",
@@ -3711,7 +4006,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9a3281ca6526b21b"
     },
     {
       "symbol": "browser.dispose",
@@ -3722,7 +4018,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a7208073adde5de4"
     },
     {
       "symbol": "browser.status",
@@ -3733,7 +4030,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c39ef78f7142cd06"
     },
     {
       "symbol": "channels",
@@ -3744,7 +4042,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9573726d829d5a94"
     },
     {
       "symbol": "channels.listCommands",
@@ -3755,7 +4054,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5c823aa844627c2c"
     },
     {
       "symbol": "channels.registerCommand",
@@ -3766,7 +4066,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "7d7f429549a0e971"
     },
     {
       "symbol": "channels.registerRenderer",
@@ -3777,7 +4078,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d9c20324b7db20bb"
     },
     {
       "symbol": "channels.rendererFor",
@@ -3788,7 +4090,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c4a8072f9a38411f"
     },
     {
       "symbol": "compaction",
@@ -3799,7 +4102,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0f55d1abcec2d335"
     },
     {
       "symbol": "compaction.compactForOverflow",
@@ -3810,7 +4114,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "eac919b757721352"
     },
     {
       "symbol": "compaction.drain",
@@ -3821,7 +4126,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "15810adabed4f4e9"
     },
     {
       "symbol": "exec",
@@ -3832,7 +4138,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5907664fdeafb1ef"
     },
     {
       "symbol": "exec.exec",
@@ -3843,7 +4150,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "88dafc7546d449ff"
     },
     {
       "symbol": "fetch",
@@ -3854,7 +4162,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c704b9905ce798ac"
     },
     {
       "symbol": "fetch.downloadToFile",
@@ -3865,7 +4174,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "33a6ff6eef550182"
     },
     {
       "symbol": "fetch.fetch",
@@ -3876,7 +4186,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b9a9699c663533fc"
     },
     {
       "symbol": "jobs",
@@ -3887,7 +4198,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a8c79af9ddc89a4e"
     },
     {
       "symbol": "jobs.cancel",
@@ -3898,7 +4210,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a103889bd6ee5d26"
     },
     {
       "symbol": "jobs.create",
@@ -3909,7 +4222,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "354a8d4d6701e830"
     },
     {
       "symbol": "jobs.drain",
@@ -3920,7 +4234,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2fac72a49346eee3"
     },
     {
       "symbol": "jobs.get",
@@ -3931,7 +4246,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0c77ccbaa6dacb37"
     },
     {
       "symbol": "jobs.list",
@@ -3942,7 +4258,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "78496bc79efe89c2"
     },
     {
       "symbol": "jobs.registerKind",
@@ -3953,7 +4270,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "44f8797105c3609c"
     },
     {
       "symbol": "jobs.run",
@@ -3964,7 +4282,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ad8547d49b38e960"
     },
     {
       "symbol": "llm",
@@ -3975,7 +4294,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c36b7bd05b0911d4"
     },
     {
       "symbol": "llm.canAfford",
@@ -3986,7 +4306,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "f81a83dd7aa08887"
     },
     {
       "symbol": "llm.classifyError",
@@ -3997,7 +4318,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0ed8de56d7d795b0"
     },
     {
       "symbol": "llm.complete",
@@ -4008,7 +4330,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "253a71774a55695d"
     },
     {
       "symbol": "llm.getModel",
@@ -4019,7 +4342,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "cc42bff7ddfe7f93"
     },
     {
       "symbol": "llm.isContextOverflowFor",
@@ -4030,7 +4354,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e91c79b53e95cad7"
     },
     {
       "symbol": "llm.listModels",
@@ -4041,7 +4366,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "62d682c02cb3a3d8"
     },
     {
       "symbol": "llm.registerProvider",
@@ -4052,7 +4378,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "9ed4814cecaacab7"
     },
     {
       "symbol": "llm.unregisterProvider",
@@ -4063,7 +4390,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c4ffc271403a327e"
     },
     {
       "symbol": "paths",
@@ -4074,7 +4402,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "932fe5f259699bf0"
     },
     {
       "symbol": "paths.appDataDir",
@@ -4085,7 +4414,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "ec8189007a8dd95d"
     },
     {
       "symbol": "paths.dataDir",
@@ -4096,7 +4426,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "32edf5a79a31690c"
     },
     {
       "symbol": "paths.workspaceRoot",
@@ -4107,7 +4438,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b13209f89c4204bf"
     },
     {
       "symbol": "prompts",
@@ -4118,7 +4450,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d2fffe45fcb9d5d2"
     },
     {
       "symbol": "prompts.listSections",
@@ -4129,7 +4462,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c645cc6c1cab8797"
     },
     {
       "symbol": "prompts.materialize",
@@ -4140,7 +4474,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b3e95a9f56e2bc4f"
     },
     {
       "symbol": "prompts.registerSection",
@@ -4151,7 +4486,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "edfad0c727bfab3b"
     },
     {
       "symbol": "sandbox",
@@ -4162,7 +4498,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "def4a5a10b4dd8ea"
     },
     {
       "symbol": "sandbox.confine",
@@ -4173,7 +4510,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "afee3f31d5f8bf18"
     },
     {
       "symbol": "sandbox.listBackends",
@@ -4184,7 +4522,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fd661859a4a8ed57"
     },
     {
       "symbol": "sandbox.registerBackend",
@@ -4195,7 +4534,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5b28fe11db2546fc"
     },
     {
       "symbol": "sessions",
@@ -4206,7 +4546,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "65dbae08933fe7aa"
     },
     {
       "symbol": "sessions.adopt",
@@ -4217,7 +4558,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "30f432171284cb6b"
     },
     {
       "symbol": "sessions.appendEvent",
@@ -4228,7 +4570,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "49b564421014bfa5"
     },
     {
       "symbol": "sessions.appendWithSurfaceOp",
@@ -4239,7 +4582,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "4a86c03fa09830c0"
     },
     {
       "symbol": "sessions.createSession",
@@ -4250,7 +4594,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "eba4e04c217f5d71"
     },
     {
       "symbol": "sessions.currentSessionId",
@@ -4261,7 +4606,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e302ede99a21537a"
     },
     {
       "symbol": "sessions.deriveMessages",
@@ -4272,7 +4618,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "7b4120c9d7ddd459"
     },
     {
       "symbol": "sessions.eventsOfType",
@@ -4283,7 +4630,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2b41abcb61cb53c4"
     },
     {
       "symbol": "sessions.fork",
@@ -4294,7 +4642,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "be9775388f2eb0fb"
     },
     {
       "symbol": "sessions.isBusy",
@@ -4305,7 +4654,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "a6ab9edb302c67ab"
     },
     {
       "symbol": "sessions.lastClosedBoundary",
@@ -4316,7 +4666,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1872d872cead36d5"
     },
     {
       "symbol": "sessions.logLength",
@@ -4327,7 +4678,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d11a640596747aaa"
     },
     {
       "symbol": "sessions.projectedJsonChars",
@@ -4338,7 +4690,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0af46511b4bf9d66"
     },
     {
       "symbol": "sessions.queryEvents",
@@ -4349,7 +4702,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "189ef747ebd618ab"
     },
     {
       "symbol": "skills",
@@ -4360,7 +4714,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "1a2ea942bddc23e5"
     },
     {
       "symbol": "skills.diagnostics",
@@ -4371,7 +4726,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d045329331e58477"
     },
     {
       "symbol": "skills.get",
@@ -4382,7 +4738,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "30440e8b7430022b"
     },
     {
       "symbol": "skills.list",
@@ -4393,7 +4750,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "378b9373760c2f18"
     },
     {
       "symbol": "skills.refresh",
@@ -4404,7 +4762,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "43b6e2a844cdeb62"
     },
     {
       "symbol": "skills.registerProvider",
@@ -4415,7 +4774,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e74cdc63a337a9b9"
     },
     {
       "symbol": "skills.renderAvailableSkills",
@@ -4426,7 +4786,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "269c594f03b82fbd"
     },
     {
       "symbol": "subagents",
@@ -4437,7 +4798,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "109b37d524dff64b"
     },
     {
       "symbol": "subagents.list",
@@ -4448,7 +4810,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "06466ddb34ba4c8e"
     },
     {
       "symbol": "subagents.register",
@@ -4459,7 +4822,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "080060d331c234de"
     },
     {
       "symbol": "subagents.start",
@@ -4470,7 +4834,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "32e242d31b949c89"
     },
     {
       "symbol": "tools",
@@ -4481,7 +4846,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "825860d4219d5e01"
     },
     {
       "symbol": "tools.compositionFor",
@@ -4492,7 +4858,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0067e387faa01613"
     },
     {
       "symbol": "tools.executor",
@@ -4503,7 +4870,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "200b612d1517b772"
     },
     {
       "symbol": "tools.get",
@@ -4514,7 +4882,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "e9e57474d0305d57"
     },
     {
       "symbol": "tools.list",
@@ -4525,7 +4894,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "8811e94e1d2e3ad2"
     },
     {
       "symbol": "tools.listFor",
@@ -4536,7 +4906,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "0b4da8257bb2bc10"
     },
     {
       "symbol": "tools.register",
@@ -4547,7 +4918,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "d0b5d958bd512d39"
     },
     {
       "symbol": "tools.stats",
@@ -4558,7 +4930,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "80cc0951da2d6f90"
     },
     {
       "symbol": "tools.toAgentTool",
@@ -4569,7 +4942,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5a75f8a3722e14ff"
     },
     {
       "symbol": "ui",
@@ -4580,7 +4954,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "956e3a2a27046409"
     },
     {
       "symbol": "ui.attach",
@@ -4591,7 +4966,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "991a603a69f18735"
     },
     {
       "symbol": "ui.confirm",
@@ -4602,7 +4978,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "c5d7768e3da950ac"
     },
     {
       "symbol": "ui.hasAudience",
@@ -4613,7 +4990,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "7f85b49c5f025f58"
     },
     {
       "symbol": "ui.input",
@@ -4624,7 +5002,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "b4a4fdb03afebf07"
     },
     {
       "symbol": "ui.notify",
@@ -4635,7 +5014,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "5068ee8e470f5e25"
     },
     {
       "symbol": "ui.select",
@@ -4646,7 +5026,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "fca6b8718e21e64b"
     },
     {
       "symbol": "ui.setStatus",
@@ -4657,7 +5038,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "2a6e375486636244"
     },
     {
       "symbol": "ui.setWidget",
@@ -4668,7 +5050,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "sig": "00fc50cf52b4ee4f"
     },
     {
       "symbol": "app/uninstalled",
@@ -4988,7 +5371,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     },
     {
       "symbol": "TSchema",
@@ -5000,7 +5384,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     },
     {
       "symbol": "Type",
@@ -5012,7 +5397,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     },
     {
       "symbol": "Code",
@@ -5024,7 +5410,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     },
     {
       "symbol": "Compile",
@@ -5036,7 +5423,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     },
     {
       "symbol": "Value",
@@ -5048,7 +5436,8 @@
         "server",
         "standalone"
       ],
-      "forwarded": true
+      "forwarded": true,
+      "sig": "forwarded"
     }
   ],
   "capabilities": [
