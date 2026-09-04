@@ -75,7 +75,7 @@ import {
   hostInjectRecord,
   type CommandProcessLog,
 } from '../exec/index.js';
-import { createBridgeFleet, type BridgeFleet } from './bridge-fleet.js';
+import { createBridgeFleet, type BridgeFleet, type FleetStats } from './bridge-fleet.js';
 import {
   createLocalSkillsProvider,
   createPackageSkillsProvider,
@@ -167,6 +167,7 @@ import { createSubagentChildFactory } from './subagent-factory.js';
 import { emitSessionShutdownBounded } from './subagent-child.js';
 import { createTickRunner } from './scheduler-runner.js';
 import { createTickOsRegistrar } from './tick-register.js';
+import type { SchedulerViewFace } from '../scheduler/index.js';
 import {
   createJobsService,
   createSubagentsService,
@@ -577,6 +578,19 @@ export interface AppRuntime {
    * undefined。入口披露（TUI notify / run stderr）与测试断言两消费面。
    */
   webuiEphemeralAuth(): { readonly token: string; readonly port: number; readonly host: string } | undefined;
+  /**
+   * 双舰队观测计数活取值（OS 三大管理面研究刀四——[运行时骨架]篇 §1.2 统一
+   * 管理器 proc 页签）：ring1（默认层行舰队）+ apps（第三方行舰队）各六计数
+   * （spawned/live/crashed/ooms/heartbeatFreezes/terminated）。建树活取零订阅
+   *（冷读裁决 C3 一期零事件订阅——计数来源 = BridgeFleet.stats() 调用点即取）
+   */
+  fleetStats(): { readonly ring1: FleetStats; readonly apps: FleetStats };
+  /**
+   * scheduler-view 面活取值（刀四 jobs 页签供面）：scheduler 件 apply 期挂
+   * 真身、行回卷摘除；缺席（persist:false 降级 / /reload 重装窗）= undefined
+   * ——桌面侧诚实示「scheduler-view 未装载」。symbolsFor 活取形态同构。
+   */
+  schedulerView(): SchedulerViewFace | undefined;
   /**
    * boot 期第三方行隔离降级投影（基建大扫 #45）：id/code/message 三元组——
    * boot 序内的 ui.notify 广播达 daemon 形态 webui 腿；TUI 形态 backend 在
@@ -1610,6 +1624,11 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * 与入口披露（tui-main notify / run-main stderr）两消费点读它；daemon 形态
    * 注入 daemonAuth 故本 holder 恒 undefined（不自足不双披） */
   let ephemeralAuthFace: WebuiEphemeralAuthFace | undefined;
+  /** scheduler-view 面持有器（OS 三大管理面研究刀四——[运行时骨架]篇 §1.2
+   * 统一管理器 jobs 页签）：scheduler 件 apply 期构造、经 mountSchedulerView
+   * 挂入、行回卷摘除；AppRuntime.schedulerView() 活读（/reload 重装窗 =
+   * undefined，桌面侧诚实示「scheduler-view 未装载」——symbolsFace 同款形态） */
+  let schedulerViewFace: SchedulerViewFace | undefined;
   /** ApprovalRequest → claim 载荷适配（enriched 三字段词面拷贝——chat/根 answerer 共用；signal = 撤销面透传（#2 修死），abort 时登记簿以 'cancel' 结算 web 腿） */
   const webClaimOf = (
     req: ApprovalRequest,
@@ -1825,6 +1844,15 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         ephemeralAuthFace = face;
         return () => {
           if (ephemeralAuthFace === face) ephemeralAuthFace = undefined;
+        };
+      },
+      // scheduler-view 面 holder setter（刀四 jobs 页签供面）：mountSymbols
+      // 同款「挂入/身份核对摘除」形——scheduler 行回卷调摘除器，holder 归
+      // undefined（persist:false 降级空转件永不挂面）
+      mountSchedulerView: (face) => {
+        schedulerViewFace = face;
+        return () => {
+          if (schedulerViewFace === face) schedulerViewFace = undefined;
         };
       },
       symbolsFor: (path) => symbolsFace?.(path) ?? Promise.resolve(undefined),
@@ -3125,6 +3153,12 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 复盘 S-1：一次性鉴权面活取值（读 holder——daemon/零监听形态恒 undefined；
     // 入口披露与测试断言的消费点）
     webuiEphemeralAuth: () => ephemeralAuthFace,
+    // 刀四 proc 页签：双舰队观测计数活取（建树活取零订阅——舰队对象是
+    // createRuntime 局部，唯一出路面即此返回值扩面；冷读裁决 C3/C4）
+    fleetStats: () => ({ ring1: ring1Fleet.stats(), apps: appFleet.stats() }),
+    // 刀四 jobs 页签：scheduler-view 面活取（读 holder——件缺席/重装窗
+    // undefined，桌面侧诚实示缺席）
+    schedulerView: () => schedulerViewFace,
     // #45：boot 降级投影（TUI 入口 attach 后补发横幅的数据源——见接口注释）
     bootDegraded: degraded.map((row) => ({ id: row.id, code: row.code, message: row.message })),
     reload,

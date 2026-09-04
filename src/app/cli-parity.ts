@@ -68,6 +68,11 @@ export const CLI_PARITY_RULES: readonly CliParityRule[] = [
     cli: ['sessions', 'list'],
     note: '切换器五件面的可 headless 化半边对等：list 清单 + search 检索（续接/开新/关闭是进程内交互形态动词——live registry 才有五件面，存档进程外无此语义）',
   },
+  {
+    desktop: '/monitor',
+    cli: [],
+    note: '管理器三页签动词面分账（骨架篇 §1.2）：tick 族（e/d/n）对等 = 会话内 /tick 命令面（berry run 单发同参可执行）；Job cancel/全量 reload = 进程内交互态动词显式豁免（live 进程视角 headless 无语义）；memory 族 CLI 对等挂账二期 berry memory 命令族',
+  },
 ];
 
 /**

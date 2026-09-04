@@ -122,3 +122,153 @@ describe('GoalJobsFace：重挂行史语义（once 清零 / every 保留——�
     expect(row.lastRunAt).toBe(firedAt);
   });
 });
+
+/* ---- SchedulerViewFace：桌面管理面（OS 三大管理面研究刀四——清单投影 + ----
+ * 动词守卫单源 + 捕获 ui 相位法） */
+
+describe('SchedulerViewFace：list 清单投影（nextRun 人读词五态 + OS 注册态三值）', () => {
+  /** 局部装配（describe 级自持——不与文件级 beforeEach 的 goal 面共用捕获位） */
+  const assemble = async (extra?: Partial<import('./app.js').SchedulerAppDeps>) => {
+    const s = openStore({ path: ':memory:', migrations });
+    const j = new JobsStore(s.connection);
+    let view: import('./app.js').SchedulerViewFace | undefined;
+    const realUi: string[] = [];
+    const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
+    ctx.provide('ui', { notify: (text: string) => realUi.push(text) } as never);
+    ctx.provide('channels', { registerCommand: () => () => undefined } as never);
+    const plugin = createSchedulerApp({
+      connection: s.connection,
+      turnDepth: () => 0,
+      lastUserMessageAt: () => null,
+      backgroundAffordable: () => true,
+      // mountSchedulerView 捕获（组合根 holder 同款回填观测）
+      mountSchedulerView: (f) => {
+        view = f;
+        return () => {};
+      },
+      ...extra,
+    });
+    await plugin.apply(ctx as never, ctx.config);
+    if (view === undefined) throw new Error('mountSchedulerView 未回填——装配面断链');
+    return { s, j, view, realUi };
+  };
+
+  it('nextRun 五态人读词：仅手动 / ISO / once 已跑 / once 过窗 / 已到点待触发', async () => {
+    const t0 = 1_700_000_000_000;
+    const { j, view } = await assemble({ now: () => t0 });
+    j.add('manual-job', '手动提示', t0, null); // schedule null → 仅手动
+    j.add('every-job', '每时跑', t0, 'every@1h'); // wait → ISO（锚 = createdAt）
+    // once 已跑：抢占推进 last_run_at → evaluateDue 无条件 done 短路
+    j.add('once-ran', '一次', t0, `once@${new Date(t0 + 3_600_000).toISOString()}`);
+    expect(j.reserveRun('once-ran', t0 + 3_600_000, 'scheduled')).toBe('reserved');
+    // once 过窗：at 在 1h 前从未跑（超 10min 容忍窗）→ missed
+    j.add('once-missed', '迟到', t0 - 7_200_000, `once@${new Date(t0 - 3_600_000).toISOString()}`);
+    // once 窗内迟到：at 在 1min 前（10min 容忍窗内）→ fire
+    j.add('once-due', '到点', t0 - 120_000, `once@${new Date(t0 - 60_000).toISOString()}`);
+    const rows = await view.list();
+    const byName = new Map(rows.map((row) => [row.name, row]));
+    expect(byName.get('manual-job')?.nextRun).toBe('仅手动');
+    expect(byName.get('every-job')?.nextRun).toBe(new Date(t0 + 3_600_000).toISOString());
+    expect(byName.get('once-ran')?.nextRun).toBe('once 已跑');
+    expect(byName.get('once-missed')?.nextRun).toBe('once 过窗');
+    expect(byName.get('once-due')?.nextRun).toBe('已到点待触发');
+    // 注册器缺席 → 全行 absent（诊断态非错误）
+    expect([...byName.values()].every((row) => row.osState === 'absent')).toBe(true);
+  });
+
+  it('注册器在场 → registered/unregistered 逐行探测', async () => {
+    const { j, view } = await assemble({
+      osRegistrar: {
+        register: async () => ({ ok: true, message: '' }),
+        unregister: async () => ({ ok: true, message: '' }),
+        isRegistered: async (name) => name === 'reg-job',
+      },
+    });
+    j.add('reg-job', '在册', 0, null);
+    j.add('unreg-job', '未册', 0, null);
+    const byName = new Map((await view.list()).map((row) => [row.name, row]));
+    expect(byName.get('reg-job')?.osState).toBe('registered');
+    expect(byName.get('unreg-job')?.osState).toBe('unregistered');
+  });
+
+  it('库外手编坏串行 → 坏声明串（清单不炸——诊断呈现）', async () => {
+    const { s, view } = await assemble();
+    // add 面词法过闸存不进坏串——坏行只能来自库外手编，直插模拟
+    s.connection
+      .prepare(
+        `INSERT INTO jobs (name, prompt, cwd, schedule, last_run_at, created_at, updated_at,
+                           last_run_reason, session_id, last_session_id, owner, owner_key, enabled)
+         VALUES ('bad-row', 'p', NULL, 'garbage@x', NULL, 0, 0, NULL, NULL, NULL, NULL, NULL, 1)`,
+      )
+      .run();
+    const rows = await view.list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.nextRun).toBe('坏声明串');
+  });
+});
+
+describe('SchedulerViewFace：dispatch 动词面（守卫单源 + 相位法）', () => {
+  /** 局部装配（同上 describe 形态——dispatch 测试自持真库真面） */
+  const assemble = async (extra?: Partial<import('./app.js').SchedulerAppDeps>) => {
+    const s = openStore({ path: ':memory:', migrations });
+    const j = new JobsStore(s.connection);
+    let view: import('./app.js').SchedulerViewFace | undefined;
+    const realUi: string[] = [];
+    const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
+    ctx.provide('ui', { notify: (text: string) => realUi.push(text) } as never);
+    ctx.provide('channels', { registerCommand: () => () => undefined } as never);
+    const plugin = createSchedulerApp({
+      connection: s.connection,
+      turnDepth: () => 0,
+      lastUserMessageAt: () => null,
+      backgroundAffordable: () => true,
+      mountSchedulerView: (f) => {
+        view = f;
+        return () => {};
+      },
+      ...extra,
+    });
+    await plugin.apply(ctx as never, ctx.config);
+    if (view === undefined) throw new Error('mountSchedulerView 未回填——装配面断链');
+    return { s, j, view, realUi };
+  };
+
+  it('守卫单源：goal 挂钟行经桌面腿 rm 同拒（与 /tick rm 同 handler by construction）', async () => {
+    const { j, view } = await assemble();
+    j.putOwned({
+      name: goalJobName('g1'),
+      prompt: '目标',
+      schedule: 'every@1h',
+      sessionId: 's1',
+      owner: GOAL_JOB_OWNER,
+      ownerKey: 'g1',
+      now: 0,
+    });
+    const receipt = await view.dispatch(`rm ${goalJobName('g1')}`);
+    expect(receipt).toContain('系统行');
+    expect(j.get(goalJobName('g1'))).toBeDefined(); // 行未删
+  });
+
+  it('守卫单源：enable 在注册器缺席下回执不可用（诊断态如实示）', async () => {
+    const { j, view } = await assemble();
+    j.add('t1', '跑我', 0, null);
+    const receipt = await view.dispatch('enable t1');
+    expect(receipt).toContain('不可用');
+  });
+
+  it('相位法：dispatch 期同步回执收集返桌面，返回后迟到回执转发真 ui 通道', async () => {
+    // runner 门闩：挂起 promise 手动放行——完成回执必然迟到于 dispatch 返回
+    let release!: (value: import('./types.js').TickRunResult) => void;
+    const gate = new Promise<import('./types.js').TickRunResult>((resolve) => {
+      release = resolve;
+    });
+    const { j, view, realUi } = await assemble({ runJob: () => gate });
+    j.add('t1', '跑我', 0, null);
+    const receipt = await view.dispatch('run t1');
+    expect(receipt).toContain('触发'); // 同步回执（gate 四判据过 + 抢占成功）
+    expect(realUi).toHaveLength(0); // 迟到回执尚未发生——不混进桌面回执
+    release({ exitCode: 0, stdout: 'done', stderr: '', durationMs: 5 });
+    await new Promise((resolve) => setTimeout(resolve, 0)); // 微任务 flush
+    expect(realUi.join('\n')).toContain('t1'); // 完成回执进真 ui 通道（不蒸发）
+  });
+});

@@ -43,6 +43,14 @@ import {
 import type { DesktopAppEntry, DesktopFace, DesktopService, DesktopStatusService } from './desktop-service.js';
 import type { AssistantService } from './assistant-app.js';
 import type { StoreService } from './store-app.js';
+import {
+  parseMonitorTabArg,
+  type DesktopMonitorFace,
+  type MonitorItem,
+  type MonitorPanel,
+  type MonitorResult,
+  type MonitorTab,
+} from './desktop-monitor.js';
 import { POWER_KILL_FAMILY_TEXT, type PowerAction, type PowerResult } from './host-power.js';
 
 /** 桌面命令面全集（对等门禁的桌面侧真相源——cli-parity 交叉核对消费） */
@@ -54,6 +62,7 @@ export const DESKTOP_COMMANDS: readonly string[] = [
   '/desktop',
   '/store',
   '/sessions',
+  '/monitor',
 ];
 
 /** 时序三件注入面（缺省 Date.now/setTimeout/clearTimeout——测试假钟缝合位；与引擎注入面同构） */
@@ -145,6 +154,12 @@ export interface DesktopShellDeps {
    * 五件面：列表/预览/搜索/关闭/开新+续接）。缺席 = /sessions 诚实拒。
    */
   readonly sessions?: DesktopSessionsFace;
+  /**
+   * 统一管理器面（宿主 desktop-main 闭包构造——OS 三大管理面研究刀四，
+   * 骨架篇 §1.2 三页签：proc 进程 / jobs 任务 / mem 内存）。缺席 =
+   * /monitor 诚实拒（非桌面形态/宿主未接线）。
+   */
+  readonly monitor?: DesktopMonitorFace;
 }
 
 /**
@@ -279,8 +294,9 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
   });
 
   /* ---------------- 视图状态（单根渲染树整树换装，状态全在壳） ---------------- */
-  /** 当前视图（desktop 主面 / menu 应用菜单 / detail 应用详情 / confirm 确认与回执 / guide 引导 / prompt 补参输入 / answer 助手应答卡 / store 应用商店 / sessions 会话切换器） */
-  let view: 'desktop' | 'menu' | 'detail' | 'confirm' | 'guide' | 'prompt' | 'answer' | 'store' | 'sessions' =
+  /** 当前视图（desktop 主面 / menu 应用菜单 / detail 应用详情 / confirm 确认与回执 / guide 引导 / prompt 补参输入 / answer 助手应答卡 / store 应用商店 / sessions 会话切换器 / monitor 统一管理器） */
+  let view:
+    'desktop' | 'menu' | 'detail' | 'confirm' | 'guide' | 'prompt' | 'answer' | 'store' | 'sessions' | 'monitor' =
     'desktop';
   /** 分组过滤（desktop 视图） */
   let groupFilter: GroupFilter = 'all';
@@ -298,6 +314,14 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
   let sessionsQuery: string | undefined;
   /** 切换器光标（sessions 视图——当前清单〔搜索过滤后〕下标） */
   let sessionsCursor = 0;
+  /** 管理器当前页签（monitor 视图——spec §1.2 三页签） */
+  let monitorTab: MonitorTab = 'proc';
+  /** 管理器光标（monitor 视图——items 下标：光标只寻址动作行，仪表行不占位） */
+  let monitorCursor = 0;
+  /** 管理器面板缓存（monitor 视图——异步活取的最近一帧；undefined = 首帧未达） */
+  let monitorPanel: MonitorPanel | undefined;
+  /** 管理器取数令牌（递增序——迟到的旧面板不覆盖新页签的取数，answerToken 同律） */
+  let monitorToken = 0;
   /** 确认/回执视图载荷（/shutdown 恒杀全家二次确认 + 管理面回执/两段式第二段共用原语） */
   let confirmPane:
     | {
@@ -306,6 +330,12 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
         /** 确认动作标签（在场 = Enter 执行 run；缺席 = 只读回执——任意键返回） */
         readonly confirmLabel?: string;
         readonly run?: () => void | Promise<void>;
+        /**
+         * 回视槽（OS 三大管理面研究刀四——冷读裁决 C2）：confirm 链退出的目标
+         * 视图；缺省 = 'desktop'（既有消费面零改动）。monitor 发起的回执链回
+         * monitor 视图（管理动作看结果后继续管理，不弹回桌面重走 /monitor）。
+         */
+        readonly backTo?: 'desktop' | 'monitor';
       }
     | undefined;
   /** 引导视图载荷（首启凭证引导——批 E 起助手在场走助手指路面，真文案与应答同源） */
@@ -628,6 +658,37 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     });
   }
 
+  /** monitor 视图主体（三页签 + 面板行——数据组装全在 desktop-monitor 服务面，壳只呈现与选行） */
+  function buildMonitorTree(): Renderable {
+    const rows: Renderable[] = [];
+    if (deps.monitor === undefined) {
+      rows.push(new Text({ content: ' 管理器面未接线（宿主未注入 monitor 面）', style: { dim: true } }));
+    } else if (monitorPanel === undefined) {
+      rows.push(new Text({ content: ' 取数中…', style: { dim: true } }));
+    } else {
+      const current = currentMonitorItem();
+      rows.push(
+        ...monitorPanel.rows.map((row) =>
+          current !== undefined &&
+          row.item !== undefined &&
+          row.item.key === current.key &&
+          row.item.kind === current.kind
+            ? new Text({ content: `▸ ${row.text}`, style: { reverse: true } })
+            : new Text({ content: `  ${row.text}` }),
+        ),
+      );
+    }
+    return new Column({
+      children: [
+        new Text({ content: monitorPanel?.title ?? 'Berry 桌面 — 管理器', style: { bold: true } }),
+        new Text({ content: monitorTabLine() }),
+        new Flex({ child: new Column({ children: rows }) }),
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
+        new Text({ content: monitorHintLine(), style: { dim: true } }),
+      ],
+    });
+  }
+
   /** 按当前视图建树并请求重绘（挂起态 requestRender 静默短路——回桌面后 resume 补帧） */
   function rerender(): void {
     const tree =
@@ -647,7 +708,9 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
                     ? buildStoreTree()
                     : view === 'sessions'
                       ? buildSessionsTree()
-                      : buildDesktopTree();
+                      : view === 'monitor'
+                        ? buildMonitorTree()
+                        : buildDesktopTree();
     engine.setRoot(tree);
   }
 
@@ -1019,6 +1082,148 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     view = 'prompt';
   }
 
+  /* ---------------- 统一管理器动作（刀四三页签的交互半边——面缺席诚实拒） ---------------- */
+  /** 页签序与标签（呈现定序——spec §1.2 proc|jobs|mem） */
+  const MONITOR_TABS: readonly MonitorTab[] = ['proc', 'jobs', 'mem'];
+  const MONITOR_TAB_LABELS: Readonly<Record<MonitorTab, string>> = { proc: '进程', jobs: '任务', mem: '内存' };
+
+  /** 页签行（active 方括号标记——store/sessions 分组页签同形） */
+  function monitorTabLine(): string {
+    return (
+      ' ' +
+      MONITOR_TABS.map((tab) => (tab === monitorTab ? `[${MONITOR_TAB_LABELS[tab]}]` : MONITOR_TAB_LABELS[tab])).join(
+        ' / ',
+      ) +
+      '（←→ 切换）'
+    );
+  }
+
+  /** 键位提示行（页签各有各的动词面——Job 取消只住 proc，tick 动词只住 jobs，记忆动词只住 mem） */
+  function monitorHintLine(): string {
+    if (monitorTab === 'proc') return ' ↑↓ 选择 · k 取消 Job · r 全量 reload · Esc 返回';
+    if (monitorTab === 'jobs') return ' ↑↓ 选择 · e OS 注册 · d 注销 · n 立即运行 · Esc 返回';
+    return ' ↑↓ 选择 · f 冻结/解冻 · x 忘掉 · v 恢复 · e 导出 · Esc 返回';
+  }
+
+  /** 面板动作行集（item 行——光标只寻址动作行，仪表行不占位） */
+  function monitorItemsOf(panel: MonitorPanel): readonly MonitorItem[] {
+    return panel.rows.flatMap((row) => (row.item === undefined ? [] : [row.item]));
+  }
+
+  /** 光标动作行（空面板/无动作行 undefined；越界钳制后取） */
+  function currentMonitorItem(): MonitorItem | undefined {
+    if (monitorPanel === undefined) return undefined;
+    const items = monitorItemsOf(monitorPanel);
+    if (items.length === 0) return undefined;
+    monitorCursor = Math.min(monitorCursor, items.length - 1);
+    return items[monitorCursor];
+  }
+
+  /** 移动管理器光标（空面板无操作；越界循环） */
+  function moveMonitorCursor(step: -1 | 1): void {
+    if (monitorPanel === undefined) return;
+    const items = monitorItemsOf(monitorPanel);
+    if (items.length === 0) return;
+    monitorCursor = (monitorCursor + step + items.length) % items.length;
+  }
+
+  /** 循环切页签（光标归零 + 重取数——分组切换同律） */
+  function cycleMonitorTab(step: -1 | 1): void {
+    const index = MONITOR_TABS.indexOf(monitorTab);
+    monitorTab = MONITOR_TABS[(index + step + MONITOR_TABS.length) % MONITOR_TABS.length]!;
+    monitorCursor = 0;
+    refreshMonitor();
+  }
+
+  /** 开管理器视图（/monitor 命令入口；直达参数已解析成 tab） */
+  function openMonitor(tab: MonitorTab = 'proc'): void {
+    if (deps.monitor === undefined) {
+      setNotice('管理器面未接线（宿主未注入 monitor 面）');
+      return;
+    }
+    monitorTab = tab;
+    monitorCursor = 0;
+    view = 'monitor';
+    refreshMonitor();
+  }
+
+  /** 重取面板（建树活取零订阅——spec 冷读裁决 C3；令牌拦迟到旧帧防串页签） */
+  function refreshMonitor(): void {
+    const face = deps.monitor;
+    if (face === undefined) return;
+    const token = ++monitorToken;
+    monitorPanel = undefined; // 取数中占位（换页签/动作后旧帧不留屏）
+    rerender();
+    void face
+      .panel(monitorTab)
+      .then((panel) => {
+        if (token !== monitorToken) return; // 迟到旧帧丢弃（页签已切/动作已重取）
+        monitorPanel = panel;
+        rerender();
+      })
+      .catch((err: unknown) => {
+        if (token !== monitorToken) return;
+        monitorPanel = {
+          title: 'Berry 桌面 — 管理器',
+          rows: [{ text: ` 取数失败：${err instanceof Error ? err.message : String(err)}` }],
+        };
+        rerender();
+      });
+  }
+
+  /** 管理器结果落视图（string 单行 = notice 回 monitor；多行/receipt = confirm 只读回执链回 monitor——C2 回视槽） */
+  function applyMonitorResult(result: MonitorResult): void {
+    if (typeof result === 'string') {
+      if (result.includes('\n')) {
+        confirmPane = { title: '管理动作回执', lines: result.split('\n'), backTo: 'monitor' };
+        view = 'confirm';
+      } else {
+        view = 'monitor';
+        setNotice(result);
+      }
+    } else {
+      confirmPane = { title: result.title, lines: result.lines, backTo: 'monitor' };
+      view = 'confirm';
+    }
+    refreshMonitor(); // 动作后重取面板（计数/清单即时反映新态）
+  }
+
+  /** 执行管理器异步动词（busy 占位防双发；回执链 applyMonitorResult——失败回 monitor 转述） */
+  function runMonitorAction(call: () => Promise<MonitorResult>): void {
+    confirmPane = { title: '管理动作执行中…', lines: ['执行中…'], backTo: 'monitor' };
+    view = 'confirm';
+    void call()
+      .then((result) => applyMonitorResult(result))
+      .catch((err: unknown) => {
+        view = 'monitor';
+        setNotice(`管理动作失败：${err instanceof Error ? err.message : String(err)}`);
+        rerender();
+      });
+  }
+
+  /** 忘掉记忆（x——唯一过 confirm 的管理动词：软删可逆但需显式确认；run 自管回执链） */
+  function forgetMemory(item: MonitorItem): void {
+    const face = deps.monitor;
+    if (face === undefined) return;
+    confirmPane = {
+      title: `忘掉记忆 ${item.label}？`,
+      lines: [`  ${item.label}（${item.key.slice(0, 8)}）`, '', '忘掉 = 软删（v 可恢复）；版本链与访问流水留档。'],
+      confirmLabel: '确认忘掉',
+      backTo: 'monitor',
+      run: () => {
+        void face
+          .memoryForget(item.key)
+          .then((result) => applyMonitorResult(result))
+          .catch((err: unknown) => {
+            view = 'monitor';
+            setNotice(`忘掉失败：${err instanceof Error ? err.message : String(err)}`);
+            rerender();
+          });
+      },
+    };
+    view = 'confirm';
+  }
+
   /** 提交命令输入（/ 前缀命令面；空提交忽略） */
   function submitInput(): void {
     const text = input.text.trim();
@@ -1090,6 +1295,17 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
         // 会话切换器入口（批 F 桌面级五件面——应用内 chat 的 /sessions 既有面不动）
         openSessions();
         return;
+      case '/monitor': {
+        // 统一管理器入口（刀四三页签）：直达参数 /monitor proc|jobs|mem——非法值诚实拒
+        const arg = text.slice(head.length).trim();
+        if (arg === '') openMonitor();
+        else {
+          const tab = parseMonitorTabArg(arg);
+          if (tab === undefined) setNotice(`未知页签：${arg}（认 proc / jobs / mem）`);
+          else openMonitor(tab);
+        }
+        return;
+      }
       default:
         setNotice(`未知命令：${head}（认 ${DESKTOP_COMMANDS.join(' ')}）`);
     }
@@ -1352,15 +1568,17 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     }
     if (view === 'confirm') {
       const pane = confirmPane;
+      // 回视槽（刀四冷读裁决 C2）：monitor 发起的链退出回 monitor，缺省回 desktop
+      const back = pane?.backTo ?? 'desktop';
       if (key === 'escape') {
         // 取消：不执行（两段式第二段不触达——Esc 是唯一取消面）
         confirmPane = undefined;
-        view = 'desktop';
+        view = back;
         return;
       }
       if (key === 'enter') {
         confirmPane = undefined;
-        view = 'desktop';
+        view = back;
         // 确认执行（run 自管后续视图转换——回执链/失败转述都在其内）
         if (pane?.run !== undefined) {
           void Promise.resolve(pane.run()).catch((err: unknown) => {
@@ -1373,7 +1591,7 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       if (pane?.run === undefined && pane?.confirmLabel === undefined) {
         // 只读回执：任意键返回
         confirmPane = undefined;
-        view = 'desktop';
+        view = back;
       }
       return; // 有确认动作时非 Enter/Esc 键静默（防误触）
     }
@@ -1450,6 +1668,45 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       else if (key === 's' && !mods.ctrl && !mods.alt && !mods.meta) searchSessions();
       return; // 切换器期其余键不达输入框
     }
+    if (view === 'monitor') {
+      // 管理器键位面（刀四三页签）：←→/Tab 切页签（重取数）· ↑↓ 光标（items）·
+      // 页签动词各住各页签（Job 取消只住 proc——宾语唯一，冷读裁决 B5；tick
+      // 动词只住 jobs；记忆动词只住 mem）· Esc 回桌面。视图无输入框——
+      // 全键拦截不落 desktop 命令框
+      const plain = !mods.ctrl && !mods.alt && !mods.meta;
+      if (key === 'escape') view = 'desktop';
+      else if (key === 'left' || key === 'tab') cycleMonitorTab(-1);
+      else if (key === 'right') cycleMonitorTab(1);
+      else if (key === 'up') moveMonitorCursor(-1);
+      else if (key === 'down') moveMonitorCursor(1);
+      else if (key === 'r' && plain && monitorTab === 'proc') {
+        if (deps.monitor !== undefined) runMonitorAction(() => deps.monitor!.reloadAll());
+      } else if (key === 'k' && plain && monitorTab === 'proc') {
+        const item = currentMonitorItem();
+        if (item !== undefined && deps.monitor !== undefined) runMonitorAction(() => deps.monitor!.cancelJob(item.key));
+      } else if (monitorTab === 'jobs') {
+        const item = currentMonitorItem();
+        if (item !== undefined && deps.monitor !== undefined) {
+          if (key === 'e' && plain) runMonitorAction(() => deps.monitor!.tick('enable', item.key));
+          else if (key === 'd' && plain) runMonitorAction(() => deps.monitor!.tick('disable', item.key));
+          else if (key === 'n' && plain) runMonitorAction(() => deps.monitor!.tick('run', item.key));
+        }
+      } else if (monitorTab === 'mem') {
+        const face = deps.monitor;
+        if (face !== undefined) {
+          if (key === 'e' && plain) runMonitorAction(() => face.memoryExport());
+          else {
+            const item = currentMonitorItem();
+            if (item !== undefined) {
+              if (key === 'f' && plain) runMonitorAction(() => face.memoryToggleFrozen(item.key));
+              else if (key === 'v' && plain) runMonitorAction(() => face.memoryRestore(item.key));
+              else if (key === 'x' && plain) forgetMemory(item);
+            }
+          }
+        }
+      }
+      return; // 管理器期其余键不达输入框
+    }
     // desktop 视图键位面
     switch (key) {
       case 'up':
@@ -1518,6 +1775,14 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
             openGuide();
             break;
           }
+        }
+        // 管理器视图无输入框：单字符 text 即动词键。两轨的普通可打印字符恒
+        // text 事件（kitty CSI-u 文本一致→text；legacy 游程→text）——onKey
+        // 的 k/r/e/d/n/f/v/x 分支若无此桥在真终端永不可达（m/g 热键同因走
+        // text 分支先例）。多字符游程（快速连打合并）不触发——单字符闸防误触
+        if (view === 'monitor' && event.text.length === 1) {
+          onKey({ kind: 'key', key: event.text, mods: { ctrl: false, alt: false, shift: false, meta: false } });
+          break;
         }
         if (inputView) insertText(event.text);
         break;

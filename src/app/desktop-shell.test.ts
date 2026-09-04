@@ -15,6 +15,7 @@ import { createDesktopShell, type DesktopAdminFace, type DesktopShellDeps } from
 import { createDesktopService } from './desktop-service.js';
 import type { DesktopAppEntry, DesktopStatusService } from './desktop-service.js';
 import type { AssistantAnswer, AssistantService } from './assistant-app.js';
+import type { DesktopMonitorFace, MonitorPanel, MonitorTab } from './desktop-monitor.js';
 import type { DesktopStatusSnapshot } from './desktop-status.js';
 import { POWER_KILL_FAMILY_TEXT } from './host-power.js';
 import type { TerminalIO } from '../desktop/index.js';
@@ -1049,6 +1050,295 @@ describe('desktop-shell：菜单管理面（配置/卸载/卸挂载/挂载）', 
       await flushMicrotasks();
       clock.advance(17);
       expect(io.output).toContain('管理动作失败：配置炸了');
+      expect(io.output).toContain('[全部]');
+    } finally {
+      void shell.dispose();
+    }
+  });
+});
+
+/* ---------------- 刀四：统一管理器 /monitor（三页签） ---------------- */
+
+/**
+ * 断言纪律（帧 diff 产物）：引擎按单元格 diff 重写——与上一帧相同的字符不
+ * 重发（如桌面页签行与 monitor 页签行共享前缀时 '[' 不重写）。跨样式边界
+ * 的整串 toContain 会断；断言取「含首差字符起的连续重写段」或短标记词，
+ * 视图归属断言用「动词键只有该视图响应」的行为证据（ledger）。
+ */
+describe('desktop-shell：/monitor 统一管理器（刀四三页签）', () => {
+  /** 监视面假面（调用记账 + 三页签各一条仪表行两条动作行——宾语 key-1/key-2） */
+  function fakeMonitor() {
+    const calls: string[] = [];
+    // 上下文返回类型（DesktopMonitorFace 注解）保字面量窄型——无需 as const
+    const kindOf = (tab: MonitorTab) => (tab === 'proc' ? 'job' : tab === 'jobs' ? 'tick' : 'memory');
+    const face: DesktopMonitorFace = {
+      async panel(tab) {
+        calls.push(`panel:${tab}`);
+        return {
+          title: `管理面板 ${tab}`,
+          rows: [
+            { text: ` ${tab} 仪表行` },
+            { text: ` ${tab} 动作行一`, item: { kind: kindOf(tab), key: 'key-1', label: '宾语一' } },
+            { text: ` ${tab} 动作行二`, item: { kind: kindOf(tab), key: 'key-2', label: '宾语二' } },
+          ],
+        };
+      },
+      async cancelJob(id) {
+        calls.push(`cancel:${id}`);
+        return `已请求取消 ${id}`;
+      },
+      async reloadAll() {
+        calls.push('reload');
+        return { title: '全量 reload 完成', lines: ['  行一'] };
+      },
+      async tick(verb, name) {
+        calls.push(`tick:${verb}:${name}`);
+        return `tick ${verb} ${name} 回执`;
+      },
+      async memoryToggleFrozen(id) {
+        calls.push(`frozen:${id}`);
+        return `已冻结 ${id}`;
+      },
+      async memoryForget(id) {
+        calls.push(`forget:${id}`);
+        return `已忘掉 ${id}`;
+      },
+      async memoryRestore(id) {
+        calls.push(`restore:${id}`);
+        return `已恢复 ${id}`;
+      },
+      async memoryExport() {
+        calls.push('export');
+        return { title: '已导出 0 条', lines: ['  /tmp/x.jsonl'] };
+      },
+    };
+    return { face, calls };
+  }
+
+  /** 起屏 + 命令面进管理器（/monitor [tab] 全程——异步步进后冲帧） */
+  async function enterMonitor(
+    face: DesktopMonitorFace,
+    arg = '',
+  ): Promise<{
+    io: FakeIO;
+    clock: FakeClock;
+    shell: ReturnType<typeof createDesktopShell>;
+  }> {
+    const made = started({ monitor: face });
+    for (const ch of `/monitor${arg}`) press(made.io, made.clock, ch);
+    press(made.io, made.clock, KEY.enter);
+    await flushMicrotasks();
+    made.clock.advance(17);
+    return made;
+  }
+
+  it('/monitor：首帧面板 + ▸ 光标首条动作行 + 页签行；Esc 回桌面', async () => {
+    const { face } = fakeMonitor();
+    const { io, clock, shell } = await enterMonitor(face);
+    try {
+      expect(io.output).toContain('管理面板 proc');
+      expect(io.output).toContain('▸  proc 动作行一'); // 光标 = 首条动作行（reverse 标记）
+      expect(io.output).toContain('任务 / 内存（←→ 切换）'); // 页签行（含首差字符起的重写段）
+      expect(io.output).toContain('k 取消 Job'); // proc 键位提示
+      press(io, clock, KEY.escape, 50);
+      expect(io.output).toContain('[全部]'); // 回桌面
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('直达页签 /monitor jobs；非法页签诚实拒（留桌面）', async () => {
+    const { face } = fakeMonitor();
+    const made = started({ monitor: face });
+    try {
+      // 非法值先行：不进管理器（命令面在桌面仍可达）
+      for (const ch of '/monitor bogus') press(made.io, made.clock, ch);
+      press(made.io, made.clock, KEY.enter);
+      expect(made.io.output).toContain('未知页签：bogus（认 proc / jobs / mem）');
+      expect(made.io.output).toContain('[全部]'); // 仍桌面
+      for (const ch of '/monitor jobs') press(made.io, made.clock, ch);
+      press(made.io, made.clock, KEY.enter);
+      await flushMicrotasks();
+      made.clock.advance(17);
+      expect(made.io.output).toContain('jobs 仪表行'); // jobs 面板内容在场
+      expect(made.io.output).toContain('e OS 注册'); // jobs 键位提示
+    } finally {
+      void made.shell.dispose();
+    }
+  });
+
+  it('monitor 未接线：/monitor 诚实拒（面缺席非死路）', async () => {
+    const { io, clock, shell } = started();
+    try {
+      for (const ch of '/monitor') press(io, clock, ch);
+      press(io, clock, KEY.enter);
+      expect(io.output).toContain('管理器面未接线（宿主未注入 monitor 面）');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('←→/Tab 切页签重取数（panel 按页签各取；Tab = 反向）', async () => {
+    const { face, calls } = fakeMonitor();
+    const { io, clock, shell } = await enterMonitor(face);
+    try {
+      const settle = async (): Promise<void> => {
+        await flushMicrotasks();
+        clock.advance(17);
+      };
+      press(io, clock, KEY.right); // proc → jobs
+      await settle();
+      press(io, clock, KEY.tab); // jobs → proc（Tab = cycle(-1)）
+      await settle();
+      press(io, clock, KEY.right); // proc → jobs
+      press(io, clock, KEY.right); // jobs → mem
+      await settle();
+      expect(io.output).toContain('任务 / [内存]'); // mem 页签激活（页签行重写段）
+      expect(io.output).toContain('mem 仪表行');
+      // 取数序：进(1) + jobs(2) + proc(3) + jobs(4) + mem(5)——每切必重取
+      expect(calls.filter((c) => c.startsWith('panel:'))).toEqual([
+        'panel:proc',
+        'panel:jobs',
+        'panel:proc',
+        'panel:jobs',
+        'panel:mem',
+      ]);
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('proc 动词：k 取消光标宾语（↓ 后 key-2、再 ↓ 环绕回 key-1）+ 动作后重取面板', async () => {
+    const { face, calls } = fakeMonitor();
+    const { io, clock, shell } = await enterMonitor(face);
+    try {
+      const settle = async (): Promise<void> => {
+        await flushMicrotasks();
+        clock.advance(17);
+      };
+      press(io, clock, KEY.down);
+      expect(io.output).toContain('▸  proc 动作行二'); // 光标下移
+      press(io, clock, 'k');
+      await settle();
+      expect(calls).toContain('cancel:key-2'); // ↓ 一格 → 第二条动作行
+      expect(io.output).toContain('已请求取消 key-2'); // 单行回执 = notice 落 monitor
+      press(io, clock, KEY.down); // 环绕：二 → 一
+      press(io, clock, 'k');
+      await settle();
+      expect(calls).toContain('cancel:key-1');
+      // 动作后重取：panel:proc 三次（进入 + 两次动作后刷新）
+      expect(calls.filter((c) => c === 'panel:proc')).toHaveLength(3);
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('proc 动词：r 全量 reload → 结构回执 confirm（backTo monitor——回执后动词仍活）', async () => {
+    const { face, calls } = fakeMonitor();
+    const { io, clock, shell } = await enterMonitor(face);
+    try {
+      press(io, clock, 'r');
+      expect(io.output).toContain('管理动作执行中…'); // busy 占位（双发防护）
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(calls).toContain('reload');
+      expect(io.output).toContain('全量 reload 完成'); // 结构回执 = confirm 只读链
+      press(io, clock, KEY.enter); // 只读回执任意键返回——Enter 落 back 槽
+      await flushMicrotasks();
+      clock.advance(17);
+      // 行为证据：回 monitor 非 desktop——k 动词只有 monitor 视图响应
+      const cancelsBefore = calls.filter((c) => c.startsWith('cancel:')).length;
+      press(io, clock, 'k');
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(calls.filter((c) => c.startsWith('cancel:')).length).toBe(cancelsBefore + 1);
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('页签动词分域：proc 期 n 无效；jobs 页签 e/d/n 经面动词（守卫单源在面）', async () => {
+    const { face, calls } = fakeMonitor();
+    const { io, clock, shell } = await enterMonitor(face);
+    try {
+      const settle = async (): Promise<void> => {
+        await flushMicrotasks();
+        clock.advance(17);
+      };
+      press(io, clock, 'n'); // proc 期 n 不是动词（Job cancel 只住 proc——B5）
+      await settle();
+      expect(calls.filter((c) => c.startsWith('tick:'))).toEqual([]);
+      press(io, clock, KEY.right); // → jobs
+      await settle();
+      press(io, clock, 'n');
+      await settle();
+      expect(calls).toContain('tick:run:key-1');
+      press(io, clock, 'e');
+      await settle();
+      expect(calls).toContain('tick:enable:key-1');
+      press(io, clock, 'd');
+      await settle();
+      expect(calls).toContain('tick:disable:key-1');
+      expect(io.output).toContain('tick disable key-1 回执');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('mem 页签动词：f 翻转 / v 恢复 / e 导出回执；x 忘掉两段式（Esc 零调用 / Enter 落账）', async () => {
+    const { face, calls } = fakeMonitor();
+    const { io, clock, shell } = await enterMonitor(face);
+    try {
+      const settle = async (): Promise<void> => {
+        await flushMicrotasks();
+        clock.advance(17);
+      };
+      press(io, clock, KEY.right); // → jobs
+      await settle();
+      press(io, clock, KEY.right); // → mem
+      await settle();
+      press(io, clock, 'f');
+      await settle();
+      expect(calls).toContain('frozen:key-1');
+      press(io, clock, 'v');
+      await settle();
+      expect(calls).toContain('restore:key-1');
+      press(io, clock, 'e');
+      await settle();
+      expect(calls).toContain('export');
+      expect(io.output).toContain('已导出 0 条'); // 导出回执 = confirm 链
+      press(io, clock, KEY.escape, 50); // 回执链退出 → 回 monitor（非桌面）
+      // x 忘掉 = 唯一两段式动词：先确认卡
+      press(io, clock, 'x');
+      expect(io.output).toContain('忘掉记忆 宾语一？');
+      expect(io.output).toContain('确认忘掉');
+      press(io, clock, KEY.escape, 50); // 取消：零调用 + 行为证据（f 动词仍活 = 已回 monitor）
+      expect(calls.filter((c) => c.startsWith('forget:'))).toEqual([]);
+      const frozenBefore = calls.filter((c) => c.startsWith('frozen:')).length;
+      press(io, clock, 'f');
+      await settle();
+      expect(calls.filter((c) => c.startsWith('frozen:')).length).toBe(frozenBefore + 1);
+      press(io, clock, 'x');
+      press(io, clock, KEY.enter); // 确认执行
+      await settle();
+      expect(calls).toContain('forget:key-1');
+      expect(io.output).toContain('已忘掉 key-1');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('面板取数失败：错误面板诚实示（不炸视图、可 Esc 退）', async () => {
+    const face = {
+      ...fakeMonitor().face,
+      panel: async (): Promise<MonitorPanel> => {
+        throw new Error('库炸了');
+      },
+    };
+    const { io, clock, shell } = await enterMonitor(face);
+    try {
+      expect(io.output).toContain('取数失败：库炸了');
+      press(io, clock, KEY.escape, 50);
       expect(io.output).toContain('[全部]');
     } finally {
       void shell.dispose();

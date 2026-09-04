@@ -166,15 +166,29 @@ export interface BridgeFleet {
    * 返回收编数（含 0 = 该区无分域行，空区路径合法）。
    */
   terminateZone(zone: string, reason: string): number;
-  /** 观测打点：spawned/ooms/crashed/heartbeatFreezes/terminated 累计、live 现存（ooms = crashed 的内存超限归因子集） */
-  stats(): {
-    spawned: number;
-    live: number;
-    crashed: number;
-    ooms: number;
-    heartbeatFreezes: number;
-    terminated: number;
-  };
+  /**
+   * 观测打点：spawned/ooms/crashed/heartbeatFreezes/terminated 累计、live 现存
+   * （ooms = crashed 的内存超限归因子集）。命名类型 FleetStats（OS 三大管理面
+   * 研究刀四——AppRuntime.fleetStats() 扩面消费，enterApp/symbolsFor 返回值
+   * 扩面先例同构）
+   */
+  stats(): FleetStats;
+}
+
+/** 舰队观测计数（spawned/terminated 六计数——数值语义见 BridgeFleet.stats() 注释） */
+export interface FleetStats {
+  /** 累计 spawn 数（进程生命周期全程单调递增） */
+  spawned: number;
+  /** 现存活域数（spawned - 已结算终态数） */
+  live: number;
+  /** 累计崩溃数（含 ooms 子集） */
+  crashed: number;
+  /** 累计内存超限归因数（crashed 的子集） */
+  ooms: number;
+  /** 累计心跳冻结数（监督器判死签名计数） */
+  heartbeatFreezes: number;
+  /** 累计刻意终止数（reload/关停编舞——不含 crashed） */
+  terminated: number;
 }
 
 /**

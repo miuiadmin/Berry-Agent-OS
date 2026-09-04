@@ -17,12 +17,12 @@
 import { createTuiChannel, type TuiChannel, type TuiChannelOptions } from '../channels/tui.js';
 import { projectedToAgentMessages } from '../chat/index.js';
 import { createRuntime } from './assembly.js';
-import type { RuntimeOptions } from './assembly.js';
+import type { ReloadResult, RuntimeOptions } from './assembly.js';
 import type { PathsService } from './composition.js';
 import { installExitSignals } from './signals.js';
 import { appendCrashRecord } from './crash-log.js';
 import { VERSION_WITH_CODENAME as VERSION } from './version.js';
-import { dataDir } from './paths.js';
+import { dataDir, dbPath } from './paths.js';
 import { QUICK_START_ENTRY } from './guide-text.js';
 import {
   createDesktopShell,
@@ -31,6 +31,11 @@ import {
   type DesktopSessionEntry,
   type DesktopSessionsFace,
 } from './desktop-shell.js';
+import { createMonitorFace } from './desktop-monitor.js';
+import { createRootsProvider } from '../safety/index.js';
+import { MemoryStore, projectOwnerKey } from '../memory/index.js';
+import { canonicalWorkspaceRoot } from '../context/index.js';
+import { join } from 'node:path';
 import type { DesktopAppEntry, DesktopService, DesktopStatusService } from './desktop-service.js';
 import type { AssistantService } from './assistant-app.js';
 import { STORE_APP_ID, type StoreService } from './store-app.js';
@@ -593,6 +598,35 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
     tuiOnScreen = false;
   };
 
+  /* ---------------- 统一管理器面（刀四——/monitor 三页签的宿主真身） ---------------- */
+  // 服务面本地闭包构造（sessionsFace 同款直引用，骨架篇 §1.2 冷读裁决 C4/C6）：
+  // 数据组装与行投影全在 desktop-monitor 模块，此处只供料——全部活取值，随
+  // /reload 即时生效（舰队/scheduler-view 是 AppRuntime 返回值扩面，jobs/
+  // browser 是 ctx.tryGet 活取，memory 是 persist 连接上的同 DAO 单实现）
+  // 记忆库 DAO 一次构造（persist 连接生命周期 = runtime 生命周期——/reload 不换物理层；
+  // persist:false 降级 undefined = mem 页签记忆段诚实示/记忆动词诚实拒）
+  const memoryStore = runtime.persistence ? new MemoryStore(runtime.persistence.store.connection) : undefined;
+  const monitorFace = createMonitorFace({
+    fleetStats: () => runtime.fleetStats(),
+    schedulerView: () => runtime.schedulerView(),
+    jobs: () => runtime.ctx.tryGet<JobsServiceFace>('jobs'),
+    browserStatus: () =>
+      runtime.ctx
+        .tryGet<{ status(): { readonly state: 'idle' | 'starting' | 'running' | 'closed' } }>('browser')
+        ?.status(),
+    reload: () => runtime.reload(),
+    // reload 回执格式化单源（commands.formatReloadResult——窄化转型：reload 返回 unknown）
+    formatReload: (report) => formatReloadResult(report as ReloadResult),
+    dbFilePath: () => runtimeOptions.dbPath ?? dbPath(),
+    // 记忆库 DAO 活取（一次构造的常量——getter 形保 MonitorDeps 契约）
+    memoryStore: () => memoryStore,
+    memoryOwnerKeys: () => ['global', projectOwnerKey(canonicalWorkspaceRoot(runtime.workspace))],
+    workspaceRoot: () => runtime.workspace,
+    // 可写根推导单源（safety createRootsProvider 同工厂同入参——assembly :1549 同款）
+    writableRoots: createRootsProvider({ workspace: runtime.workspace, mode: () => runtime.sandboxMode }),
+    obsDbPath: () => join(dataDir(), 'apps', 'obs', 'rollup.db'),
+  });
+
   /* ---------------- 桌面壳工厂（boot 起屏与 /desktop 重试共用） ---------------- */
   const makeShell = (): DesktopShell =>
     createDesktopShell({
@@ -617,6 +651,8 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
       store: () => runtime.ctx.tryGet<StoreService>('store'),
       // 会话切换器面（批 F 五件面真身——本地闭包直引用，非 ctx 服务）
       sessions: sessionsFace,
+      // 统一管理器面（刀四三页签——本地闭包直引用同律，非 ctx 服务）
+      monitor: monitorFace,
     });
 
   /* ---------------- 内核 shell deps（兜底面的动词接线） ---------------- */

@@ -23,6 +23,13 @@ export { parseSchedule, looksLikeSchedule, evaluateDue, MIN_REFIRE_GAP_MS, ONCE_
 export type { Schedule, ScheduleParse, DueDecision } from './schedule.js';
 export { JobsStore, JOB_NAME_PATTERN } from './store.js';
 export type { AddJobOutcome, ReserveOutcome } from './store.js';
-export { createSchedulerApp, goalJobName, GOAL_JOB_OWNER } from './app.js';
-export type { SchedulerAppDeps, GoalJobsFace, OsRegistrarFace } from './app.js';
+export { createSchedulerApp, goalJobName, GOAL_JOB_OWNER, handleTickCommand } from './app.js';
+export type {
+  SchedulerAppDeps,
+  GoalJobsFace,
+  OsRegistrarFace,
+  SchedulerViewFace,
+  SchedulerViewRow,
+  TickCommandOpts,
+} from './app.js';
 export type { JobRecord, TickRunResult, RunReason } from './types.js';

@@ -101,6 +101,12 @@ export interface BuiltinHostResources {
   /** documentSymbol 桥挂载点（symbolsFace holder 留 assembly——AppRuntime.symbolsFor 直读，函数面过界） */
   readonly mountSymbols: (face: LspSymbolsFace) => () => void;
   /**
+   * scheduler-view 面挂载点（OS 三大管理面研究刀四——统一管理器 jobs 页签
+   * 供面）：schedulerViewFace holder 留 assembly——AppRuntime.schedulerView
+   * 直读，函数面过界（mountSymbols 同款形态）
+   */
+  readonly mountSchedulerView: (face: import('../scheduler/index.js').SchedulerViewFace) => () => void;
+  /**
    * 一次性鉴权面挂载点（复盘 S-1——webui 件自足 token 上交通道；
    * ephemeralAuthFace holder 留 assembly——AppRuntime.webuiEphemeralAuth 直
    * 读，函数面过界）。件本体仅 daemonAuth 注入缺席时调用（非 daemon 监听形态）
@@ -246,6 +252,9 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
       // canAfford 判据（第二刀④ never-unbounded 执法）：同一底账同一闸——
       // 复用 ④b 服务闭包（spend ledger = 日志投影，不建第二套账）
       backgroundAffordable: persistence ? () => host.llmService.canAfford('background') : () => true,
+      // scheduler-view 面挂载（刀四 jobs 页签供面）：holder 留 assembly
+      //（AppRuntime.schedulerView 直读——函数面过界，mountSymbols 同款）
+      mountSchedulerView: host.mountSchedulerView,
     },
     // mcp 件闭包（契约篇 §6.6 冷读 #1：spawn/kill 组装上提组合根——spawnServer
     // 在 app/mcp-spawn.ts，killTree 自 exec 公开面；登记簿根钉数据目录，与

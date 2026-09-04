@@ -23,7 +23,7 @@ import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
 import { discoveryGates, WAKE_CHAIN_CAP, type DiscoveryGateDecision } from './gates.js';
-import { looksLikeSchedule, parseSchedule } from './schedule.js';
+import { evaluateDue, looksLikeSchedule, parseSchedule } from './schedule.js';
 import { JobsStore, JOB_NAME_PATTERN } from './store.js';
 import type { JobRecord, TickRunResult } from './types.js';
 
@@ -98,6 +98,97 @@ export function goalJobName(goalId: string): string {
 /** goal 挂钟归属行 id（owner 列恒值——组合根行 id，非运行时字符串约定耦合） */
 export const GOAL_JOB_OWNER = 'builtin:goal';
 
+/**
+ * scheduler-view 桌面管理面（OS 三大管理面研究刀四——[运行时骨架]篇 §1.2
+ * 统一管理器 jobs 页签供面；冷读裁决 A4/B3/C5 两形状分明）：
+ * - **清单面** = 结构化行投影（同 store 同 osRegistrar 取数——非 handler 复用，
+ *   handler 出 notify 文本非结构化行）；
+ * - **动词面** = `dispatch(args)` 字符串分派到**同一 handleTickCommand**（捕获
+ *   ui 收回执）——守卫单源 by construction（goal 挂钟行拒执/系统行拒删/
+ *   gate→reserve→runner 三步编舞全在 handler 内，桌面腿零复刻）。
+ */
+export interface SchedulerViewFace {
+  /** 任务清单投影（含下次触发时刻人读串与 OS 注册态） */
+  list(): Promise<readonly SchedulerViewRow[]>;
+  /**
+   * 动词分派（'run <名>' / 'enable <名>' / 'disable <名>'——与 /tick 命令面
+   * 同参同 handler）；返回收集到的同步回执行（迟到异步回执——handleRun 完成
+   * 回执——已转发真 ui 通道，同命令面语义，不进返回值）
+   */
+  dispatch(args: string): Promise<string>;
+}
+
+/** 清单单行投影（jobs 页签呈现数据——壳/monitor 模块格式化，本件只出数据） */
+export interface SchedulerViewRow {
+  /** 任务名（主键） */
+  readonly name: string;
+  /** 触发声明原样串（null = 仅手动） */
+  readonly schedule: string | null;
+  /** 归属行（null = 用户行；'builtin:goal' = goal 挂钟行——呈现归属徽标） */
+  readonly owner: string | null;
+  /** 生命周期位（false = 行留史但编排让路） */
+  readonly enabled: boolean;
+  /** OS 定时注册态（'absent' = 注册面未装配——诊断形态） */
+  readonly osState: 'registered' | 'unregistered' | 'absent';
+  /** 最近触发时刻（从未跑 = null） */
+  readonly lastRunAt: number | null;
+  /** 最近触发记因（manual/scheduled/missed） */
+  readonly lastRunReason: string | null;
+  /**
+   * 下次触发时刻人读串（ISO 时刻，或三无值态人读词：'once 已跑' /
+   * 'once 过窗' / '已到点待触发'；仅手动行 = '仅手动'——evaluateDue nextAt
+   * 仅 wait 分支有值，冷读裁决 A4）
+   */
+  readonly nextRun: string;
+}
+
+/**
+ * 清单行投影纯函数（jobs 页签数据源）：evaluateDue 重算下次触发时刻——
+ * nextAt 仅 wait 分支有值（冷读裁决 A4），其余分支落三无值态人读词。
+ * 入参 osState 由调用侧注册器往返先行取好（纯函数不做 IO）。
+ */
+function projectSchedulerRow(job: JobRecord, osState: SchedulerViewRow['osState'], now: number): SchedulerViewRow {
+  let nextRun: string;
+  if (job.schedule === null) {
+    nextRun = '仅手动';
+  } else {
+    // 重解析存量行必须 allowPast（与 tick 到点编排同路——时刻已过是存量正常
+    // 态，过去与否交 evaluateDue 裁 done/missed/fire；缺省 false 是 add 面的
+    // 「配置错误当场拒」策略，用在投影面会把过去 once@ 行误判「坏声明串」）
+    const parsed = parseSchedule(job.schedule, now, { allowPast: true });
+    if (!parsed.ok) {
+      // 注册面词法执法在手，此态只可能来自库外手编——诊断呈现不炸清单
+      nextRun = '坏声明串';
+    } else {
+      const decision = evaluateDue(parsed.schedule, job.lastRunAt, job.createdAt, now);
+      switch (decision.action) {
+        case 'wait':
+          nextRun = new Date(decision.nextAt).toISOString();
+          break;
+        case 'done':
+          nextRun = 'once 已跑';
+          break;
+        case 'missed':
+          nextRun = 'once 过窗';
+          break;
+        case 'fire':
+          nextRun = '已到点待触发';
+          break;
+      }
+    }
+  }
+  return {
+    name: job.name,
+    schedule: job.schedule,
+    owner: job.owner,
+    enabled: job.enabled,
+    osState,
+    lastRunAt: job.lastRunAt,
+    lastRunReason: job.lastRunReason,
+    nextRun,
+  };
+}
+
 /** 官方件构造依赖（装配期闭包注入——官方件 = 宿主装配特权） */
 export interface SchedulerAppDeps {
   /** SQLite 连接（jobs 表物理载体）；缺省 = persist:false 降级 warn 空转 */
@@ -138,6 +229,13 @@ export interface SchedulerAppDeps {
    * lsp mountDiagnostics 同构）。缺省（诊断装配无 goal 通道）= 不挂面。
    */
   readonly mountGoalJobs?: (face: GoalJobsFace) => Disposer;
+  /**
+   * scheduler-view 桌面管理面回填（OS 三大管理面研究刀四——[运行时骨架]篇
+   * §1.2 统一管理器 jobs 页签供面；冷读裁决 A4 两形状分明）：scheduler 行
+   * 装载完成（store 就绪）时回调——组合根接线 holder 形同 mountGoalJobs
+   * （mountSymbols 先例同构），返回摘除器（行回卷摘面）。缺省 = 不挂面。
+   */
+  readonly mountSchedulerView?: (face: SchedulerViewFace) => Disposer;
   /** 判定时钟（缺省 Date.now——测试注入冻结） */
   readonly now?: () => number;
 }
@@ -228,6 +326,57 @@ async function applySchedulerApp(ctx: AppContext, deps: SchedulerAppDeps): Promi
     }
   }
 
+  /* ---- scheduler-view 桌面管理面构造 + 回填（刀四——mountGoalJobs 同款形态）----
+   * 清单面 = 结构化行投影（同 store 同 osRegistrar）；动词面 = dispatch 字符串
+   * 分派同一 handleTickCommand（守卫单源 by construction）。捕获 ui 的相位法：
+   * 分派期内（await 未决）的 notify 收集作回执返给桌面；分派返回后的迟到
+   * notify（handleRun fire-and-forget 完成回执）转发真 ui 通道——与命令面同
+   * 语义，异步回执不蒸发也不重复进桌面回执。回填失败止步 debug（holder 槽
+   * miss = 桌面侧诚实示「scheduler-view 未装载」） */
+  const schedulerViewFace: SchedulerViewFace = {
+    list: async () => {
+      const now = (deps.now ?? Date.now)();
+      return Promise.all(
+        store.list().map(async (job) => {
+          const osState =
+            deps.osRegistrar === undefined
+              ? 'absent'
+              : (await deps.osRegistrar.isRegistered(job.name))
+                ? 'registered'
+                : 'unregistered';
+          return projectSchedulerRow(job, osState, now);
+        }),
+      );
+    },
+    dispatch: (args) => {
+      const lines: string[] = [];
+      let settled = false; // 相位旗标：dispatch 返回前 = 收集期；返回后 = 转发期
+      return handleTickCommand(args, {
+        store,
+        deps,
+        ui: {
+          notify: (text) => {
+            if (settled) ui.notify(text);
+            else lines.push(text);
+          },
+        },
+      }).then(() => {
+        settled = true;
+        return lines.length > 0 ? lines.join('\n') : '（无回执）';
+      });
+    },
+  };
+  if (deps.mountSchedulerView !== undefined) {
+    try {
+      const disposeView = deps.mountSchedulerView(schedulerViewFace);
+      ctx.effect(() => disposeView); // 行回卷摘面——此后 holder 槽 miss，桌面侧诚实示缺席
+    } catch (err) {
+      ctx.logger.debug('scheduler-view 面回填失败（组合根未接线——桌面侧将诚实示缺席）', {
+        error: describeError(err),
+      });
+    }
+  }
+
   ctx.effect(() =>
     ctx.get<ChannelsCommandFace>('channels').registerCommand({
       name: 'tick',
@@ -239,8 +388,8 @@ async function applySchedulerApp(ctx: AppContext, deps: SchedulerAppDeps): Promi
   );
 }
 
-/** 命令面依赖束（handler 闭包持有） */
-interface TickCommandOpts {
+/** 命令面依赖束（handler 闭包持有；导出 = scheduler-view dispatch 构造同款束） */
+export interface TickCommandOpts {
   readonly store: JobsStore;
   readonly deps: SchedulerAppDeps;
   readonly ui: UiNotifyFace;
@@ -250,8 +399,11 @@ interface TickCommandOpts {
 const TICK_USAGE =
   '用法：/tick add <name> [schedule] <prompt...> | /tick list | /tick rm <name> | /tick run <name> | /tick enable|disable <name>（OS 定时注册）';
 
-/** /tick 命令体（args 子命令分派；async——enable/disable/list 含注册器往返） */
-async function handleTickCommand(args: string, opts: TickCommandOpts): Promise<void> {
+/** /tick 命令体（args 子命令分派；async——enable/disable/list 含注册器往返）。
+ * 导出面（OS 三大管理面研究刀四）：scheduler-view 桌面管理面的动词面经本
+ * handler 字符串分派——同一守卫链（goal 挂钟行拒执/系统行拒删/gate→reserve→
+ * runner），命令面与桌面面单源（冷读裁决 A4「动词面」形状） */
+export async function handleTickCommand(args: string, opts: TickCommandOpts): Promise<void> {
   const { ui } = opts;
   // 子命令分词：首词子命令，余量整体传子命令（add 的 prompt 取余量含空格）
   const spaceAt = args.indexOf(' ');
