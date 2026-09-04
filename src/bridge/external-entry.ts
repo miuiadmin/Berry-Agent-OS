@@ -49,7 +49,7 @@ const port = new StdioBridgePort(process.stdin, process.stdout, {
     });
   },
 });
-endpoint = startWorkerRealm(port, workerId);
+endpoint = startWorkerRealm(port, workerId, { realm: 'external' });
 
 /**
  * 孤儿收尾（critic #1 收割腿，2026-08-29）：stdin 断 = 宿主已亡——先组杀本域

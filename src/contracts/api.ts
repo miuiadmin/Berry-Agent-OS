@@ -54,20 +54,31 @@ export interface VirtualApiKeyEntry {
   readonly since: string;
   /** 形态适用集（现役六键全形态可用） */
   readonly formFactors: readonly FormFactor[];
+  /**
+   * 宿主驻留键旗标（API 治理进化刀 G——§1.2 桥接状态纪律终态）：true = 注入物
+   * 是宿主进程内活对象（pi-ai provider 工厂面 / 宿主同实例 better-sqlite3 包装），
+   * 跨域无等价物——分域行（worker/external 载体）装载期 import 此键由 import
+   * 门禁 realm 感知拒绝（§6.13 契约篇 §1.2「宿主驻留面禁被分域行装载引用」）。
+   * 纯转发/纯数据键（typebox 三键 + berryagent 桶）任意 realm 安全 = false。
+   * 装载器的拒收集从本表机器派生（勿手抄第二清单）。
+   */
+  readonly hostResident: boolean;
 }
 
 /**
  * 虚拟模块键表——六键全 `stable`（§6.13.3「现役六键全 stable」：berryagent/llm
  * 与 berryagent/sqlite 是已落码正路非预览）。loader.ts 的 VIRTUAL_MODULE_KEYS
  * 由本表派生（注入表不另持键单源）；实验件未来以新键 + tier 'experimental' 进。
+ * hostResident 列（刀 G）：llm/sqlite 两键注入物是宿主进程内活对象不可过界，
+ * 分域装载期拒；其余四键纯转发/纯数据面任意 realm 安全。
  */
 export const VIRTUAL_API_KEYS: readonly VirtualApiKeyEntry[] = [
-  { key: 'berryagent', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS },
-  { key: 'typebox', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS },
-  { key: 'typebox/value', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS },
-  { key: 'typebox/compile', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS },
-  { key: 'berryagent/llm', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS },
-  { key: 'berryagent/sqlite', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS },
+  { key: 'berryagent', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS, hostResident: false },
+  { key: 'typebox', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS, hostResident: false },
+  { key: 'typebox/value', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS, hostResident: false },
+  { key: 'typebox/compile', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS, hostResident: false },
+  { key: 'berryagent/llm', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS, hostResident: true },
+  { key: 'berryagent/sqlite', tier: 'stable', since: '1.0', formFactors: ALL_FORM_FACTORS, hostResident: true },
 ];
 
 /* ---------------- 真相源 #2：ctx 服务面目录（§1.5 表码面镜像） ---------------- */

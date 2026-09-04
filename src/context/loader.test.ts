@@ -652,31 +652,8 @@ describe('loadApps import 来源门禁', () => {
     expect(marker['db']).toEqual({ kind: 'db', path: ':memory:' });
   });
 
-  it('virtualFaces 缺省：两键恒在虚拟面（import 不炸），面为空由应用自查', async () => {
-    const dir = makeFixtureDir();
-    const entry = writeApp(
-      dir,
-      'empty-faces.ts',
-      [
-        'export const name = "empty-faces";',
-        "import * as llmFace from 'berryagent/llm';",
-        "import * as sqliteFace from 'berryagent/sqlite';",
-        'export default async function apply(ctx) {',
-        '  ctx.provide("fx/empty-faces-marker", {',
-        '    llmKeys: Object.keys(llmFace).length,',
-        '    sqliteKeys: Object.keys(sqliteFace).length,',
-        '  });',
-        '}',
-      ].join('\n'),
-    );
-    const root = makeRoot();
-    const result = await loadApps(root, [{ id: 'empty-faces', entry }]);
-
-    expect(result.failed).toEqual([]);
-    const marker = root.tryGet<Record<string, unknown>>('fx/empty-faces-marker')!;
-    expect(marker['llmKeys']).toBe(0);
-    expect(marker['sqliteKeys']).toBe(0);
-  });
+  // 「virtualFaces 缺省 = 空面自查」旧用例已删（刀 G：旧缺省承诺退役——哨兵
+  // 形态的回归锁见文末「宿主驻留键分域装载期拒绝」describe）
 
   // 运行期兜底三形回归锁（全面复盘 20260902 S-1，契约篇 §1.2 注记⑤勘正）：
   // 字面量早拦只认引号字面量——计算说明符（运行期拼串求值）与纯 CJS 面（jiti
@@ -758,9 +735,12 @@ describe('loadApps import 来源门禁', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadApps(root, [
-      { id: 'computed-vkey', entry, apiGate: { appId: 'demo-app', experimental: [] } },
-    ]);
+    const result = await loadApps(
+      root,
+      [{ id: 'computed-vkey', entry, apiGate: { appId: 'demo-app', experimental: [] } }],
+      // faces 传 stub（刀 G：宿主驻留键注入物缺席改哨兵——本用例锁裁决核必经非面形态）
+      { virtualFaces: { llm: { hasApi: () => true } } },
+    );
 
     expect(result.failed).toEqual([]);
     // 裁决核必经：虚拟键 + 声明集 + 应用归因，三参与字面量腿（guardTransform）同面
@@ -1547,8 +1527,9 @@ describe('实验键声明门禁送达链（gate 窗 + 行字段）', () => {
         'export default async function apply() {}',
       ].join('\n'),
     );
-    // 无第三参（gate 缺席）直载——berryagent/llm 是 stable 键放行，但必经裁决核
-    await importAppEntry(createAppJiti(), entry);
+    // 无第三参（gate 缺席）直载——berryagent/llm 是 stable 键放行，但必经裁决核。
+    // faces 传 stub（刀 G：宿主驻留键注入物缺席改哨兵——本用例锁送达链非面形态）
+    await importAppEntry(createAppJiti({ llm: { hasApi: () => true } }), entry);
     expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), undefined);
   });
 
@@ -1565,7 +1546,9 @@ describe('实验键声明门禁送达链（gate 窗 + 行字段）', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadApps(root, [{ id: 'gated', entry, apiGate: { appId: 'demo-app', experimental: [] } }]);
+    const result = await loadApps(root, [{ id: 'gated', entry, apiGate: { appId: 'demo-app', experimental: [] } }], {
+      virtualFaces: { llm: { hasApi: () => true } },
+    });
     expect(result.failed).toEqual([]);
     expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), 'demo-app');
   });
@@ -1584,14 +1567,162 @@ describe('实验键声明门禁送达链（gate 窗 + 行字段）', () => {
     );
     const root = makeRoot();
     // 现役六键全 stable——键名是任意探针值（不触发拒载语义），锁的是声明集形状过界
-    const result = await loadApps(root, [
-      {
-        id: 'gated2',
-        entry,
-        apiGate: { appId: 'demo-app', experimental: ['berryagent/future-x'] },
-      },
-    ]);
+    const result = await loadApps(
+      root,
+      [
+        {
+          id: 'gated2',
+          entry,
+          apiGate: { appId: 'demo-app', experimental: ['berryagent/future-x'] },
+        },
+      ],
+      { virtualFaces: { llm: { hasApi: () => true } } },
+    );
     expect(result.failed).toEqual([]);
     expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(['berryagent/future-x']), 'demo-app');
+  });
+});
+
+/* ---------------- 宿主驻留键分域装载期拒绝（刀 G——契约篇 §1.2 桥接状态纪律终态） ---------------- */
+
+describe('宿主驻留键分域装载期拒绝（刀 G）', () => {
+  it('worker 域拒 berryagent/llm：APP_IMPORT_FORBIDDEN + 消息带域归因与 llm 指路（修复前红：分域行静默 import 宿主活对象）', async () => {
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'worker-llm.ts',
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'worker-llm';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    // faces 缺席无所谓——realm 拒在门禁层先拦（哨兵是防御腿，另测）
+    await expect(
+      importAppEntry(createAppJiti(), entry, { appId: 'w1', experimental: new Set(), realm: 'worker' }),
+    ).rejects.toMatchObject({ code: APP_IMPORT_FORBIDDEN });
+    const err = await importAppEntry(createAppJiti(), entry, {
+      appId: 'w1',
+      experimental: new Set(),
+      realm: 'worker',
+    }).catch((e: unknown) => e as AppError);
+    // message 三段：宿主驻留面定性 + 域归因（worker 载体）+ 按键分腿指路（llm → ctx.get 服务面）
+    expect(err.message).toContain('宿主驻留面');
+    expect(err.message).toContain('worker 载体');
+    expect(err.message).toContain(`ctx.get('llm')`);
+  });
+
+  it('external 域拒 berryagent/sqlite：同一裁决核同律，sqlite 指路自开连接', async () => {
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'ext-sqlite.ts',
+      [
+        "import { openDatabase } from 'berryagent/sqlite';",
+        "export const name = 'ext-sqlite';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    await expect(
+      importAppEntry(createAppJiti(), entry, { appId: 'e1', experimental: new Set(), realm: 'external' }),
+    ).rejects.toMatchObject({
+      code: APP_IMPORT_FORBIDDEN,
+      message: expect.stringContaining('自开连接'),
+    });
+  });
+
+  it('host 域对照组：realm 缺省 host 时同键放行（键表 hostResident 只对分域生效——纯数据键任意 realm 不受辖）', async () => {
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'host-ok.ts',
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'host-ok';",
+        'export const got = typeof hasApi;',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    // gate 不带 realm（缺省 host）+ 真面注入：装载成功且命名导出取到注入物
+    const mod = await importAppEntry(createAppJiti({ llm: { hasApi: () => true } }), entry, {
+      appId: 'h1',
+      experimental: new Set(),
+    });
+    expect(mod['got']).toBe('function');
+    // 纯数据键对照组：typebox 任意 realm 安全（hostResident=false 不进拒收集）
+    const entry2 = writeApp(
+      dir,
+      'host-typebox.ts',
+      [
+        "import { Type } from 'typebox';",
+        "export const name = 'host-typebox';",
+        'export const schema = Type.Object({});',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const mod2 = await importAppEntry(createAppJiti(), entry2, {
+      appId: 'h2',
+      experimental: new Set(),
+      realm: 'worker',
+    });
+    expect(mod2['schema']).toBeTypeOf('object');
+  });
+
+  it('哨兵防御腿：faces 缺席时宿主驻留键注入物 throw-on-access（旧「空面自查」缺省退役——修复前红：静默空面）', async () => {
+    const dir = makeFixtureDir();
+    const entry = writeApp(
+      dir,
+      'sentinel.ts',
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'sentinel';",
+        // 顶层即用导入绑定——哨兵是访问期抛（未使用的命名导入不触），必在模块求值期爆
+        'export const got = typeof hasApi;',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    // virtualFaces 缺席（生产组合根必传真面——此处构造防御路径）：host 域门禁
+    // 放行（键合法），模块求值访问注入物即触哨兵——fail-loud 进失败清单
+    const result = await loadApps(root, [{ id: 'sentinel', entry }]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]!.code).toBe(APP_IMPORT_FORBIDDEN);
+    expect(result.failed[0]!.message).toContain('注入物缺席');
+    expect(result.failed[0]!.message).toContain('哨兵');
+  });
+
+  it('迟发懒腿粘性域：装载窗后的动态 import 同拒（loaderRealm 粘性——懒件二跳不因窗关而失辖）', async () => {
+    const dir = makeFixtureDir();
+    // 主模块不 import 宿主驻留键（装载成功）；lazy-llm.ts 才引——delayed() 在
+    // importAppEntry 已 resolve 后才触发编译，走 activeTreeRoots 树根定位 + 粘性
+    // loaderRealm 裁决（A18 同锚）
+    writeApp(
+      dir,
+      'lazy-llm.ts',
+      ["import { hasApi } from 'berryagent/llm';", 'export const face = typeof hasApi;'].join('\n'),
+    );
+    const entry = writeApp(
+      dir,
+      'delayed-leg.ts',
+      [
+        "export const name = 'delayed-leg';",
+        // 动态说明符拼串：拓扑闸对文件文本扫描相对导入可解性——字面量 './lazy-llm'
+        // 会被当作测试文件自身的相对导入（无法解析即红），拼串保持 fixture 语义
+        "const sub = './lazy' + '-llm';",
+        'export const delayed = async () => await import(sub);',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const mod = await importAppEntry(createAppJiti(), entry, {
+      appId: 'd1',
+      experimental: new Set(),
+      realm: 'worker',
+    });
+    expect(mod['name']).toBe('delayed-leg');
+    // 窗外二跳：树根仍在活动集、域标志仍粘 worker——懒编译即拒
+    await expect((mod['delayed'] as () => Promise<unknown>)()).rejects.toMatchObject({
+      code: APP_IMPORT_FORBIDDEN,
+      message: expect.stringContaining('宿主驻留面'),
+    });
   });
 });

@@ -20,7 +20,12 @@ import type { ContextScope } from '../context/types.js';
 import type { Logger } from '../context/logger.js';
 import { loadApps } from '../context/loader.js';
 import type { WorkerRowLoader } from '../context/loader.js';
-import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED, APP_LOAD_FAILED } from '../contracts/errors.js';
+import {
+  APP_IMPORT_FORBIDDEN,
+  BRIDGE_METHOD_NOT_FOUND,
+  BRIDGE_WORKER_EXITED,
+  APP_LOAD_FAILED,
+} from '../contracts/errors.js';
 import { spawnExternalDomain, externalEntryUrl, type ExternalDomain } from './external-domain.js';
 import { buildChildEnv } from '../exec/env.js';
 
@@ -405,17 +410,18 @@ describe('spawnExternalDomain — load 投影 apiGate 过桥（worker 腿锁的�
     gateDomain.terminate('apiGate 投影锁收尾');
   });
 
-  it('声明门随行：合法 apiGate 行装载成功且虚拟键在子域物化（fixture 经 berryagent/llm 过裁决核）', async () => {
+  it('声明门随行：合法 apiGate 行装载成功且虚拟键在子域物化（fixture 经 berryagent 契约面过裁决核——探针键身份不承载语义）', async () => {
     const gateEntry = join(fixtureDir, 'fx-gate-ext.ts');
     writeFileSync(
       gateEntry,
       [
-        "import * as llmFace from 'berryagent/llm';",
+        "import * as contractsFace from 'berryagent';",
         "export const name = 'fx-gate-ext';",
         'export default async function apply(ctx) {',
-        // 空面语义（loader.test 同款标记）：虚拟键缺省物化空命名空间——键计数
-        // 经 tap 回读即「模块真解析真物化」的物证（非类型面 import）
-        "  ctx.provide('fx/gate-ext-tap', { kind: () => 'keys:' + Object.keys(llmFace).length });",
+        // 虚拟键物化物证：berryagent 契约面在子域真解析真物化（AppError 构造器经
+        // tap 回读——typebox 禁入 bridge 域文本〔拓扑闸〕、宿主驻留键在分域拒载
+        // 〔刀 G〕，物化探针取三约束皆容的契约面键）
+        "  ctx.provide('fx/gate-ext-tap', { kind: () => 'has-AppError:' + (typeof contractsFace.AppError) });",
         '}',
       ].join('\n'),
     );
@@ -426,12 +432,36 @@ describe('spawnExternalDomain — load 投影 apiGate 过桥（worker 腿锁的�
       apiGate: { appId: 'demo-app', experimental: [] },
     });
     expect(meta.name).toBe('fx-gate-ext');
-    // 虚拟键真物化（apply + 宿主侧 tap 往返——空面计数 0）
+    // 虚拟键真物化（apply + 宿主侧 tap 往返——AppError 构造器在场）
     const scope = root.fork({ name: 'gx-gate', rowId: 'gx-gate', builtinRow: false });
     await gateDomain.applyRow({ id: 'gx-gate', sandbox: { carrier: 'external' } }, scope);
     const tap = root.get<Record<string, () => Promise<unknown>>>('fx/gate-ext-tap')!;
-    await expect(tap['kind']!()).resolves.toBe('keys:0');
+    await expect(tap['kind']!()).resolves.toBe('has-AppError:function');
     await scope.dispose();
+  });
+
+  it('宿主驻留键分域拒载：external 域 import berryagent/llm → APP_IMPORT_FORBIDDEN + external 载体归因（刀 G——契约篇 §1.2 桥接状态纪律终态；fork 进程实弹腿）', async () => {
+    const hrEntry = join(fixtureDir, 'fx-host-resident-ext.ts');
+    writeFileSync(
+      hrEntry,
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'fx-host-resident-ext';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    // fork 进程域（非线程）：域内 loader 模块实例自带 external 粘性域——真进程腿
+    const err = await rejection(
+      gateDomain.load({
+        id: 'gx-hr',
+        entry: hrEntry,
+        sandbox: { carrier: 'external' },
+        apiGate: { appId: 'demo-app', experimental: [] },
+      }),
+    );
+    expect(err.code).toBe(APP_IMPORT_FORBIDDEN);
+    expect(err.message).toContain('宿主驻留面');
+    expect(err.message).toContain('external 载体');
   });
 
   it('病态 apiGate 拒收：形状门在子域执法（投影若丢尾，病态载荷被静默放行装载成功——外侧腿 carry-over 物证）', async () => {

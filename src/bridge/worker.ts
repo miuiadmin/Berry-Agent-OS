@@ -71,10 +71,19 @@ const rows = new Map<string, RowState>();
 const modules = new Map<string, ValidatedModule>();
 
 /**
- * 本 realm 的 jiti 实例（懒建）：虚拟面第五/六键为空对象面（与 loadApps
- * 缺省同构——注入物是宿主 realm 函数不可过界，worker 域按需开面另批）。
+ * 本 realm 的 jiti 实例（懒建）：宿主驻留键（berryagent/llm、/sqlite）分域装载
+ * 拒（刀 G——注入物是宿主进程内活对象不可过界）；缺席注入由 loader 哨兵兜底
+ * （throw-on-access，旁路 import 不静默 undefined）。
  */
 let realmJiti: ReturnType<typeof createAppJiti> | undefined;
+
+/**
+ * 本域装载域档（刀 G——svc.load 门上下文自带位）：worker 线程域缺省 'worker'，
+ * external fork 域经 startWorkerRealm opts 显式传 'external'。模块级单值——
+ * 每进程一域的既定形态（realmSvcCallTimeoutMs 同款先例）；进 loader 的粘性
+ * realm 后，宿主驻留键 import 三腿（字面量/运行期兜底/Module._load）同拒。
+ */
+let realmKind: 'worker' | 'external' = 'worker';
 
 /**
  * 域半宿主服务代理腿的到点预算（毫秒，模块级单值——每进程一域的既定形态，
@@ -389,12 +398,16 @@ function makeStubCtx(
 export function startWorkerRealm(
   port: BridgePort,
   workerId: string,
-  opts?: { svcCallTimeoutMs?: number },
+  opts?: { svcCallTimeoutMs?: number; realm?: 'worker' | 'external' },
 ): BridgeEndpoint {
   // 域级预算配置（模块级单值——每进程一域的既定形态，rows/modules 注册簿同款
   // 先例）：真 worker 进程入口先于任意 svc 调用执行；直连测试在 startWorkerRealm
   // 时点注入。get/tryGet 物化代理时读取。
   realmSvcCallTimeoutMs = opts?.svcCallTimeoutMs ?? SVC_PROXY_TIMEOUT_MS;
+  // 装载域档（刀 G）：external fork 入口显式传 'external'（external-entry.ts）；
+  // worker 线程入口缺省 'worker'。同函数两载体复用（「不换协议只换 carrier」），
+  // 域档是两形态唯一分叉位。
+  realmKind = opts?.realm ?? 'worker';
   // 先声明后构造：onTell 闭包需要 endpoint 引用（回卷失败日志上行用）
   let endpoint!: BridgeEndpoint;
   const dispatchTell = (event: string, payload: unknown): void => {
@@ -444,12 +457,15 @@ export function startWorkerRealm(
         throw new AppError(APP_LOAD_FAILED, 'svc.load 载荷 apiGate 形状非法（装载管线不变量被破坏）');
       }
       realmJiti ??= createAppJiti();
-      // 数组形门上下文 → Set 形装载窗（AppPlanRow.apiGate 契约注记——主域
-      // loadApps 同一转换，两域同面执法）
-      const gate =
-        lite.apiGate === undefined
-          ? undefined
-          : { appId: lite.apiGate.appId, experimental: new Set(lite.apiGate.experimental) };
+      // 门上下文恒在场（刀 G）：数组形门上下文 → Set 形装载窗（主域 loadApps 同一
+      // 转换），且必带 realm 位——宿主驻留键分域拒绝的判据（lite.apiGate 缺席的
+      // legacy 行也带：实验键按空声明集 fail-closed + 分域拒不受清单缺席影响）。
+      // appId 归因缺省行 id（apiGate 缺席时最好可得位）。
+      const gate = {
+        appId: lite.apiGate?.appId ?? lite.id,
+        experimental: new Set(lite.apiGate?.experimental ?? []),
+        realm: realmKind,
+      };
       const mod = await importAppEntry(realmJiti, lite.entry, gate);
       const module = validateModuleShape(mod, lite.id);
       validateEventDefs(module.events, lite.id);

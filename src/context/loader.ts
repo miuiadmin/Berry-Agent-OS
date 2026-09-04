@@ -96,6 +96,30 @@ export type ValidatedModule = Omit<AppModule, 'default'> & {
 const VIRTUAL_MODULE_KEYS: readonly string[] = VIRTUAL_API_KEYS.map((entry) => entry.key);
 
 /**
+ * 宿主驻留键拒收集（API 治理进化刀 G——§1.2 桥接状态纪律终态）：从键表
+ * hostResident 列机器派生（勿手抄第二清单——键表加键即自动入册）。分域行
+ * （worker/external 载体）装载期 import 这些键由 adjudicateImport 第一道拒。
+ */
+const HOST_RESIDENT_KEYS: ReadonlySet<string> = new Set(
+  VIRTUAL_API_KEYS.filter((entry) => entry.hostResident).map((entry) => entry.key),
+);
+
+/**
+ * 宿主驻留键的按键替代路径文案（刀 G——错误消息必须自带合法路）：键清单本体
+ * 由 HOST_RESIDENT_KEYS 机器派生，本函数只挂文案——新宿主驻留键缺席分支走
+ * 缺省句（ctx 服务面指路），不静默无指引。
+ */
+function hostResidentGuidance(key: string): string {
+  if (key === 'berryagent/llm') {
+    return "替代路径：llm 走 ctx.get('llm') 服务面（宿主侧等价面，经桥 RPC 过河）";
+  }
+  if (key === 'berryagent/sqlite') {
+    return '替代路径：sqlite 自开连接（应用目录树内自带 better-sqlite3 建自管库——主库禁触同律）';
+  }
+  return '替代路径：经 ctx 服务面取宿主侧等价面';
+}
+
+/**
  * import 失败错误的虚拟面提示：消息形如「Cannot find module …」时附可用面清单。
  * 虚拟模块只在 jiti 装载期存在——第三方 IDE/文档看不到它，猜错是常态而非例外。
  */
@@ -129,6 +153,22 @@ let gateWindow: ImportGateContext | undefined;
 const EMPTY_EXPERIMENTAL: ReadonlySet<string> = new Set<string>();
 
 /**
+ * 装载域三态（刀 G——宿主驻留键分域拒绝的判据位）：host = 主域装载（含 builtin
+ * 行/防御路径）；worker / external = 分域行（进程隔离载体，§1.7）。域半各自
+ * 持 loader 模块实例——模块级域标志天然按 realm 隔离。
+ */
+export type ImportRealm = 'host' | 'worker' | 'external';
+
+/**
+ * 当前 loader 模块实例的装载域（刀 G）：importAppEntry 从 gate 参数扩展位读入
+ * （缺省 host），**装载窗后不清**（粘性）——装载窗外懒件二跳 transform / apply
+ * 期迟发 require 同受辖（分域行全寿命禁宿主驻留键，与 activeTreeRoots 行寿命
+ * 同律）。主域 loadApps 恒 host、域半 svc.load 恒各自域——粘性值与域半寿命
+ * 一致，无误染面。
+ */
+let loaderRealm: ImportRealm = 'host';
+
+/**
  * API 装载门上下文（装载门裁决结果在装载窗内的形态）：来源两腿——主域
  * loadApps 从计划行 `AppPlanRow.apiGate` 构造（组合树合成期从装机清单读出）；
  * worker/external 域 svc.load 载荷过桥重建（数组形→Set，就绪度审计 20260903
@@ -139,6 +179,11 @@ export interface ImportGateContext {
   readonly appId: string;
   /** 清单 api.experimental 声明集（空集 = 未声明任何实验键） */
   readonly experimental: ReadonlySet<string>;
+  /**
+   * 装载域（刀 G 扩展位）：分域行（worker/external 载体）装载时自带——主域
+   * loadApps 不传（缺省 host）。进 loader 模块实例粘性状态（见 loaderRealm）。
+   */
+  readonly realm?: ImportRealm;
 }
 
 /**
@@ -211,8 +256,17 @@ function insideTree(p: string, treeRoot: string): boolean {
  * 解析上逃到宿主侧/全局或不可解析即拒（symlink 归一同规，别名逃逸同拦）。
  */
 function adjudicateImport(specifier: string, fromDir: string, treeRoot: string): string | undefined {
-  // 第一道：虚拟面六键（防御式——虚拟模块 import 通常由 jiti 短路不经 transform）
-  if ((VIRTUAL_MODULE_KEYS as readonly string[]).includes(specifier)) return undefined;
+  // 第一道：虚拟面六键（防御式——虚拟模块 import 通常由 jiti 短路不经 transform）。
+  // 宿主驻留键分域拒绝（刀 G——§1.2 桥接状态纪律终态）：分域行（worker/external
+  // 载体）import 宿主驻留键（注入物是宿主进程内活对象不可过界）装载期拒——
+  // 错误码复用 APP_IMPORT_FORBIDDEN（import 白名单同执法点同码族），消息按键
+  // 分腿实指替代路径；三腿（字面量扫描/运行期兜底/Module._load）同过此处同律。
+  if ((VIRTUAL_MODULE_KEYS as readonly string[]).includes(specifier)) {
+    if (loaderRealm !== 'host' && HOST_RESIDENT_KEYS.has(specifier)) {
+      return `宿主驻留面：分域行（${loaderRealm} 载体）禁引用——注入物是宿主进程内活对象不可过界；${hostResidentGuidance(specifier)}`;
+    }
+    return undefined;
+  }
   // 第二道：显式 node: 前缀与裸 Node 内建（fs/path/crypto…——isBuiltin 视同 node: 放行）
   if (specifier.startsWith('node:') || isBuiltin(specifier)) return undefined;
   // 第三道：应用目录树内
@@ -453,6 +507,28 @@ function ensureNodeLoadGate(): void {
   nodeLoadGateInstalled = true;
 }
 
+/**
+ * 宿主驻留键注入物缺席时的 throw-on-access 哨兵（刀 G）：修前缺省 `?? {}` 是
+ * 静默空面——分域行装载门已拒宿主驻留键 import（gate 拒绝在前、正常路径哨兵
+ * 不可达），本哨兵是防御腿：纵有旁路 import 取到注入物，任意属性访问（含
+ * 命名导入绑定的求值期使用）响亮失败，不静默 undefined。实证形态：jiti 命名
+ * 导入未使用的绑定不触发属性访问（装载不爆）——首次使用即爆，防的是「静默
+ * undefined 传播」而非「装载期拦截」（装载期拦截由 realm 门禁承担）。
+ * @param key 虚拟面键名（错误消息归因）
+ */
+function hostResidentFaceSentinel(key: string): object {
+  return new Proxy(Object.create(null), {
+    get(_target, prop) {
+      throw new AppError(
+        APP_IMPORT_FORBIDDEN,
+        `宿主驻留面 ${key} 注入物缺席（访问属性 ${String(prop)} 时——本装载器实例未注入` +
+          `${loaderRealm !== 'host' ? `；分域行（${loaderRealm} 载体）禁引用此键` : ''}）；` +
+          `${hostResidentGuidance(key)}（契约篇 §1.2 桥接状态纪律——哨兵防静默空面）`,
+      );
+    },
+  });
+}
+
 export function createAppJiti(faces?: LoadAppsOptions['virtualFaces']) {
   // 运行期门禁检查面安装（S-1 兜底第一腿的宿主侧——前置守卫闭包经 globalThis
   // 键回查；幂等覆装，worker realm 各自实例化时各自装）
@@ -475,8 +551,8 @@ export function createAppJiti(faces?: LoadAppsOptions['virtualFaces']) {
               : key === 'typebox/compile'
                 ? typeboxCompile
                 : key === 'berryagent/llm'
-                  ? (faces?.llm ?? {})
-                  : (faces?.sqlite ?? {}),
+                  ? (faces?.llm ?? hostResidentFaceSentinel('berryagent/llm'))
+                  : (faces?.sqlite ?? hostResidentFaceSentinel('berryagent/sqlite')),
       ]),
     ),
   });
@@ -502,6 +578,10 @@ export async function importAppEntry(
     // API 装载门上下文随窗设置（与 currentTreeRoot 同窗——guardTransform 实验键
     // 门禁读此面；finally 同清防跨行串染）
     gateWindow = gate;
+    // 装载域粘性写入（刀 G）：不随 finally 清——装载窗外懒件二跳/迟发 require 的
+    // 门禁裁决同受辖（loaderRealm 注记）。域半（worker/external）每次 svc.load
+    // 自带同值，主域恒缺省 host——粘性值不漂移。
+    loaderRealm = gate?.realm ?? 'host';
     // 运行期兜底第二腿（S-1 + 20260902-c #3 行寿命）：CJS 面 native require
     // 直载不经 transform——Module._load 补丁首个活动树根安装后常驻
     // （ensureNodeLoadGate），树根入活动集（装载窗后不还原；集合由 loadApps
@@ -725,8 +805,9 @@ export interface LoadAppsOptions {
   /**
    * 第五/六键虚拟面注入物（P0-2，契约篇 §1.2 注记①）：组合根参数注入——
    * context 模块不 import llm/persist（拓扑护栏），类型面在此收窄为结构最小形。
-   * 缺省注入空对象（键恒在虚拟面，import 不炸 Cannot find；面为空应用自查）；
-   * 生产组合根必传真面（assembly 装配序 ⑨）。
+   * 缺席时宿主驻留键注入 throw-on-access 哨兵（刀 G：分域装载门已拒 + 哨兵防
+   * 静默空面——「面为空应用自查」的旧缺省承诺退役）；生产组合根必传真面
+   * （assembly 装配序 ⑨）。
    */
   virtualFaces?: {
     /** 第五键注入物（llm 模块 providerApiFace——pi-ai provider 工厂族背书导出） */

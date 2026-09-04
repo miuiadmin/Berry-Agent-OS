@@ -31,6 +31,7 @@ import {
   BRIDGE_HANDLER_FAILED,
   BRIDGE_METHOD_NOT_FOUND,
   BRIDGE_SURFACE_NARROWED,
+  APP_IMPORT_FORBIDDEN,
   APP_LOAD_FAILED,
   APP_SHAPE_INVALID,
 } from '../contracts/errors.js';
@@ -619,12 +620,16 @@ describe('startWorkerRealm — svc.load 载荷 apiGate 过桥（API 声明门分
   it('lite 载荷门上下文进装载窗：声明集数组→Set + 应用归因（bootstrap/external domain.load 投影同形；修复前红：载荷字段无消费方）', async () => {
     gateSpy().mockClear();
     const { ch, dir } = setup();
+    // 探针键用 berryagent 契约面（bridge 域白名单容虚拟名、typebox 禁——拓扑闸
+    // 扫文件文本连 fixture 字符串一并执法；刀 G 后宿主驻留键在分域拒载，送达锁
+    // 只关心「键过裁决核 + 声明集 + 归因」三参，键身份不承载语义）
     const entry = writeApp(
       dir,
       'fx-gate.ts',
       [
-        "import { hasApi } from 'berryagent/llm';",
+        "import { AppError } from 'berryagent';",
         "export const name = 'fx-gate';",
+        'export const probe = typeof AppError;',
         'export default async function apply() {}',
       ].join('\n'),
     );
@@ -632,23 +637,45 @@ describe('startWorkerRealm — svc.load 载荷 apiGate 过桥（API 声明门分
       { id: 'g1', entry, apiGate: { appId: 'demo-app', experimental: [] } },
     ])) as { name: string };
     expect(meta.name).toBe('fx-gate');
-    expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), 'demo-app');
+    expect(gateSpy()).toHaveBeenCalledWith('berryagent', new Set(), 'demo-app');
   });
 
-  it('载荷 apiGate 缺席 = 空门 fail-closed：裁决核仍必经（空声明集 + 未名应用；修复前红：门禁静默放行）', async () => {
+  it('载荷 apiGate 缺席 = 空门 fail-closed：裁决核仍必经（空声明集 + 行 id 归因；修复前红：门禁静默放行）', async () => {
     gateSpy().mockClear();
     const { ch, dir } = setup();
     const entry = writeApp(
       dir,
       'fx-gate2.ts',
       [
-        "import { hasApi } from 'berryagent/llm';",
+        "import { AppError } from 'berryagent';",
         "export const name = 'fx-gate2';",
+        'export const probe = typeof AppError;',
         'export default async function apply() {}',
       ].join('\n'),
     );
     await ch.host.call('svc', 'load', [{ id: 'g2', entry }]);
-    expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), undefined);
+    // 刀 G：分域 svc.load 门上下文恒在场（realm 位需要）——apiGate 缺席时归因
+    // 缺省行 id（比旧「gate 整体缺席 → 未名 undefined」归因更准，fail-closed 不变）
+    expect(gateSpy()).toHaveBeenCalledWith('berryagent', new Set(), 'g2');
+  });
+
+  it('宿主驻留键分域拒载：worker 域 import berryagent/llm → APP_IMPORT_FORBIDDEN + worker 载体归因（刀 G——契约篇 §1.2 桥接状态纪律终态；修复前红：分域静默 import 宿主活对象）', async () => {
+    const { ch, dir } = setup();
+    const entry = writeApp(
+      dir,
+      'fx-host-resident.ts',
+      [
+        "import { hasApi } from 'berryagent/llm';",
+        "export const name = 'fx-host-resident';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    // 真线程域（svc.load 经 MessageChannel 过桥）：loader 线内锁之外的实弹腿
+    const err = await rejection(ch.host.call('svc', 'load', [{ id: 'hr1', entry }]));
+    expect(err.code).toBe(APP_IMPORT_FORBIDDEN);
+    expect(err.message).toContain('宿主驻留面');
+    expect(err.message).toContain('worker 载体');
+    expect(err.message).toContain(`ctx.get('llm')`);
   });
 });
 
