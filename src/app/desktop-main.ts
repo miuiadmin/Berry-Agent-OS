@@ -503,6 +503,20 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
         const entry = id === undefined ? undefined : runtime.drivers.entries.get(id);
         return entry === undefined ? undefined : runtime.apps.get(entry.appId)?.theme?.accent;
       },
+      // 增强 7 起屏聚焦一次同解析（刀 5 补键，与 tui-main 同源接线）：桌面 Enter
+      // 先开驱动后建通道——focus 通知早于 ensureTui 订阅（错过 repaint 写点），
+      // 首绘 title 缀短 id / 回看器提示行短 id 由宿主闭包活取（D4「起屏一次同
+      // 解析」先例同款——undefined = 当前聚焦）
+      focusIdFor: () => front.focus.sessionId,
+      // todo 折叠查询面（增强 4，刀 5 补键——与 tui-main/webui SPA 呈现同源）：
+      // 桌面进应用的会话与直进 TUI 同一呈现面，缺此键则 todo 面板在桌面形态
+      // 永不渲染。键 = trackedSessionId；起屏/首 run 期 undefined = 当前聚焦
+      // 由本闭包解析（两腿单源 runtime.todoFor：活条目内存真相 ∪ 已闭 store
+      // 兜底 + goal 段锚活取——通道不 import chat 模块，结构类型注入）
+      todoFor: (sessionId) => {
+        const id = sessionId ?? front.focus.sessionId;
+        return id === undefined ? undefined : runtime.todoFor(id);
+      },
       ...(tuiTerminal === undefined ? {} : { terminal: tuiTerminal }),
     });
     runtime.ui.attach(tui.ui());

@@ -23,6 +23,16 @@ import { bootFailuresPath, clearBootFailures, currentPackageVersion } from './de
 import { dataDir } from './paths.js';
 import type { TerminalIO } from '../desktop/index.js';
 import type { TuiChannelOptions } from '../channels/tui.js';
+// 刀 5 红锁用：脚本化模型层类型（组合根全栈纪律——mock 只停在模型层）
+import type {
+  AssistantMessage,
+  AssistantStream,
+  AssistantStreamEvent,
+  LlmContext,
+  StreamFn,
+  StreamFnOptions,
+  Usage,
+} from '../contracts/llm.js';
 
 /* ---------------- 测试替身 ---------------- */
 
@@ -101,7 +111,11 @@ class FakeTuiTerminal implements NonNullable<TuiChannelOptions['terminal']> {
   clearLine(): void {}
   clearFromCursor(): void {}
   clearScreen(): void {}
-  setTitle(): void {}
+  /** setTitle 记录（刀 5 红锁：断言起屏/repaint 写点的短 id 缀——增强 7 外显） */
+  readonly titles: string[] = [];
+  setTitle(title: string): void {
+    this.titles.push(title);
+  }
   setProgress(): void {}
   /** 测试驱动：键入（只在起屏态可达——停屏后输入丢） */
   send(data: string): void {
@@ -145,6 +159,68 @@ function makeReader(output: PassThrough): () => string {
 
 /** faux 模型层（组合根全栈纪律：mock 只停在模型层） */
 const faux = () => fauxProvider({ provider: 'faux-ledger', models: [{ id: 'm1' }] });
+
+/* ---------------- 刀 5 红锁：脚本化模型层（assembly.test 同款收窄版） ---------------- */
+
+/** 零用量（脚本终值占位——用量非本测断言面） */
+const NO_USAGE: Usage = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3 };
+
+/** 工具调用 assistant 终值（stopReason=toolUse——todo 工具「写后即显」的驱动源） */
+const toolCallMessage = (name: string, args: Record<string, unknown>): AssistantMessage => ({
+  role: 'assistant',
+  content: [{ type: 'toolCall', id: `call-${name}`, name, arguments: args }],
+  usage: NO_USAGE,
+  stopReason: 'toolUse',
+  timestamp: 1,
+});
+
+/** 文本 assistant 终值（工具轮后的收尾轮） */
+const textMessage = (text: string): AssistantMessage => ({
+  role: 'assistant',
+  content: [{ type: 'text', text }],
+  usage: NO_USAGE,
+  stopReason: 'stop',
+  timestamp: 1,
+});
+
+/** 合成流：start → done（终值即脚本消息；loop 只消费事件序与 result()） */
+function syntheticStream(message: AssistantMessage): AssistantStream {
+  const events: AssistantStreamEvent[] = [
+    { type: 'start', partial: { ...message, content: [] } },
+    { type: 'done', reason: 'stop', message },
+  ];
+  return {
+    [Symbol.asyncIterator]() {
+      let index = 0;
+      return {
+        next: () =>
+          index < events.length
+            ? Promise.resolve({ value: events[index++]!, done: false as const })
+            : Promise.resolve({ value: undefined, done: true as const }),
+      };
+    },
+    result: async () => message,
+  };
+}
+
+/** 脚本化 StreamFn（按调用序取响应，末位钳住——后续轮重放末条） */
+function scriptedStream(responses: AssistantMessage[]): { streamFn: StreamFn } {
+  let calls = 0;
+  const streamFn: StreamFn = (_context: LlmContext, _options: StreamFnOptions) => {
+    calls += 1;
+    const message = responses[Math.min(calls - 1, responses.length - 1)]!;
+    return syntheticStream(message);
+  };
+  return { streamFn };
+}
+
+/** 逐字符键入 pi-tui 编辑器（输入节流/组帧安全余量——tui.test type 同款 5ms 间隔） */
+async function typeInto(terminal: FakeTuiTerminal, text: string): Promise<void> {
+  for (const ch of text) {
+    terminal.send(ch);
+    await tick(5);
+  }
+}
 
 /* ---------------- 数据目录钉扎（防污染真 ~/.berry——G1 教训） ---------------- */
 
@@ -247,6 +323,48 @@ describe('desktopMain：首启桌面 → 进应用 → Esc 回桌面 → /exit�
     await sendLine('/exit');
     const code = await done;
     expect(code).toBe(0);
+  }, 20_000);
+
+  it('刀 5 红锁：进应用视图 todo 面板与终端 title 同源接线（todoFor/focusIdFor 两键补齐）', async () => {
+    const desktopIo = new FakeDesktopIO();
+    const tuiTerminal = new FakeTuiTerminal();
+    // 脚本化模型层：第一轮 todo 工具调用（todo/write 落账——面板「写后即显」的
+    // 驱动源），第二轮文本收尾（工具轮后 loop 续跑的普通收场）
+    const { streamFn } = scriptedStream([
+      toolCallMessage('todo', {
+        items: [
+          { content: '第一步', status: 'in_progress', activeForm: '正在做第一步' },
+          { content: '第二步', status: 'pending' },
+        ],
+      }),
+      textMessage('清单已建'),
+    ]);
+    const done = desktopMain({
+      dbPath: ':memory:',
+      workspace: freshWorkspace(),
+      streamFn,
+      desktopIo,
+      tuiTerminal,
+    });
+    await waitForCond(() => desktopIo.output.includes('代码（berrycode）〔默认〕'));
+    // Enter 进默认应用：pi-tui 起屏——起屏路 title/todo 两写点在此消费两键
+    desktopIo.push('\r');
+    await waitForCond(() => tuiTerminal.started);
+    // 提交用户消息触发 run：todo 工具写后即显（进行中条目 activeForm 优先上屏）
+    await typeInto(tuiTerminal, 'make a list');
+    tuiTerminal.send('\r');
+    await waitForCond(() => tuiTerminal.output.includes('正在做第一步'));
+    expect(tuiTerminal.output).toContain('☐ 第二步');
+    // 终端 title 外显（增强 7）：基线 + ` · <短id>`——桌面 Enter 先开驱动后建
+    // 通道，focus 通知早于 ensureTui 订阅（错过 repaint 写点），起屏缀短 id 只能
+    // 经 focusIdFor 活取；缺键则桌面形态 title 永不缀会话身份
+    expect(tuiTerminal.titles.some((t) => t.startsWith('Berry ') && t.includes(' · '))).toBe(true);
+    // Esc 回桌面 → /exit 退出码 0（收场与首测同款）
+    tuiTerminal.send('\x1b');
+    await waitForCond(() => tuiTerminal.stopped && desktopIo.output.split('\x1b[?1049h').length - 1 >= 2);
+    for (const ch of '/exit') desktopIo.push(ch);
+    desktopIo.push('\r');
+    await expect(done).resolves.toBe(0);
   }, 20_000);
 });
 
