@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { AppError, API_VERSION_MISMATCH, APP_DUPLICATE, APP_INVALID, APP_NOT_FOUND } from '../contracts/errors.js';
-import { validateAppManifest, type AppManifest } from '../contracts/app.js';
+import { validateAppManifest, type AppManifest, type GateSummary } from '../contracts/app.js';
 import { adjudicateApiGate } from '../contracts/api.js';
 import { CHAT_APP_ID } from '../chat/app.js';
 import type { SubagentStart } from '../contracts/subagent.js';
@@ -149,7 +149,7 @@ export function loadOfficialApps(
  *
  * 官方 builtin 行不经此（宿主函数件不 jiti——装载期 loadOfficialApps 已裁决）。
  */
-export function readApiGateAtRoot(root: string): { appId: string; experimental: readonly string[] } | undefined {
+export function readApiGateAtRoot(root: string): GateSummary | undefined {
   let entries: string[];
   try {
     entries = readdirSync(root);
@@ -164,8 +164,16 @@ export function readApiGateAtRoot(root: string): { appId: string; experimental: 
     const manifest = validateAppManifest(doc, path);
     // 裁决单源（§6.13.4 四出口——min 地板拒载在此抛出，由调用方定失败面）
     const gate = adjudicateApiGate(manifest.api, readHostVersionFields().apiVersion, manifest.id);
-    // 数组形 = 跨桥 JSON 直通面（AppPlanRow.apiGate 契约注记）
-    return { appId: manifest.id, experimental: [...gate.experimentalKeys] };
+    // 裁决产物全量外送（API 治理进化刀 I，审计 R3-A4）：status/effectiveTarget
+    // 两键此前在此丢弃——GateSummary 传导形把出口 2/3/4 的可传导半边接进链路
+    //（activated 载荷 / legacy 聚合 warn 消费）。数组形 = 跨桥 JSON 直通面
+    //（AppPlanRow.apiGate 契约注记）
+    return {
+      appId: manifest.id,
+      status: gate.status,
+      effectiveTarget: gate.effectiveTarget,
+      experimental: [...gate.experimentalKeys],
+    };
   } catch (err) {
     // min 地板拒载穿透（fail-loud——上抛调用方定失败面）；其余（yaml 解析/
     // schema 校验失败）= 坏清单降级为 fail-closed 空门，不炸合成面

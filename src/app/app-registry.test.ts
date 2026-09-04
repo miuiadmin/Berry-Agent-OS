@@ -460,6 +460,8 @@ describe('readApiGateAtRoot：构件根 → API 声明门（§6.13.4 装载门�
     );
     expect(readApiGateAtRoot(root)).toEqual({
       appId: 'vendor/demo',
+      status: 'admit',
+      effectiveTarget: '1.0',
       experimental: ['berryagent/llm'],
     });
   });
@@ -470,12 +472,45 @@ describe('readApiGateAtRoot：构件根 → API 声明门（§6.13.4 装载门�
         '\n',
       ),
     );
-    expect(readApiGateAtRoot(root)).toEqual({ appId: 'vendor/demo', experimental: [] });
+    expect(readApiGateAtRoot(root)).toEqual({
+      appId: 'vendor/demo',
+      status: 'admit',
+      effectiveTarget: '1.0',
+      experimental: [],
+    });
   });
 
-  it('api 块缺席（legacy 容忍态）：空声明集门（不拒不静默漏门）', () => {
+  it('api 块缺席（legacy 容忍态）：status=legacy + 空声明集门（不拒不静默漏门——刀 I 裁决产物外送）', () => {
     const root = makeArtifactRoot(['id: vendor/demo', 'label: 演示', 'components:', '  - builtin:chat'].join('\n'));
-    expect(readApiGateAtRoot(root)).toEqual({ appId: 'vendor/demo', experimental: [] });
+    expect(readApiGateAtRoot(root)).toEqual({
+      appId: 'vendor/demo',
+      status: 'legacy',
+      effectiveTarget: '1.0',
+      experimental: [],
+    });
+  });
+
+  it('钳制语义外送（刀 I）：target 超宿主 → effectiveTarget 钳到宿主；target 缺省 = min 粘性锚', () => {
+    // target 99.0 超宿主 1.0 → 生效版本钳到宿主 1.0（出口 3 钳制——机器值随裁决产物外送）
+    const clamped = makeArtifactRoot(
+      [
+        'id: vendor/demo',
+        'label: 演示',
+        'components:',
+        '  - builtin:chat',
+        'api:',
+        '  minApiVersion: "0.1"',
+        '  targetApiVersion: "99.0"',
+      ].join('\n'),
+    );
+    expect(readApiGateAtRoot(clamped)).toMatchObject({ status: 'admit', effectiveTarget: '1.0' });
+    // target 缺省 = min 的值（粘性锚）→ 生效 = min(宿主, min) = '0.1'
+    const sticky = makeArtifactRoot(
+      ['id: vendor/demo', 'label: 演示', 'components:', '  - builtin:chat', 'api:', '  minApiVersion: "0.1"'].join(
+        '\n',
+      ),
+    );
+    expect(readApiGateAtRoot(sticky)).toMatchObject({ status: 'admit', effectiveTarget: '0.1' });
   });
 
   it('min 地板拒载穿透：宿主 apiVersion < 清单 min → API_VERSION_MISMATCH 原样抛（合成方捕转 unresolved）', () => {
@@ -507,6 +542,11 @@ describe('readApiGateAtRoot：构件根 → API 声明门（§6.13.4 装载门�
         '\n',
       ),
     );
-    expect(readApiGateAtRoot(root)).toEqual({ appId: 'vendor/other', experimental: [] });
+    expect(readApiGateAtRoot(root)).toEqual({
+      appId: 'vendor/other',
+      status: 'admit',
+      effectiveTarget: '1.0',
+      experimental: [],
+    });
   });
 });

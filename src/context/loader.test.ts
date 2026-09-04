@@ -737,7 +737,13 @@ describe('loadApps import 来源门禁', () => {
     const root = makeRoot();
     const result = await loadApps(
       root,
-      [{ id: 'computed-vkey', entry, apiGate: { appId: 'demo-app', experimental: [] } }],
+      [
+        {
+          id: 'computed-vkey',
+          entry,
+          apiGate: { appId: 'demo-app', status: 'admit', effectiveTarget: '1.0', experimental: [] },
+        },
+      ],
       // faces 传 stub（刀 G：宿主驻留键注入物缺席改哨兵——本用例锁裁决核必经非面形态）
       { virtualFaces: { llm: { hasApi: () => true } } },
     );
@@ -767,7 +773,11 @@ describe('loadApps import 来源门禁', () => {
     );
     const root = makeRoot();
     const result = await loadApps(root, [
-      { id: 'computed-vkey-reject', entry, apiGate: { appId: 'demo-app', experimental: [] } },
+      {
+        id: 'computed-vkey-reject',
+        entry,
+        apiGate: { appId: 'demo-app', status: 'admit', effectiveTarget: '1.0', experimental: [] },
+      },
     ]);
 
     expect(result.activated).toEqual([]);
@@ -1546,9 +1556,19 @@ describe('实验键声明门禁送达链（gate 窗 + 行字段）', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadApps(root, [{ id: 'gated', entry, apiGate: { appId: 'demo-app', experimental: [] } }], {
-      virtualFaces: { llm: { hasApi: () => true } },
-    });
+    const result = await loadApps(
+      root,
+      [
+        {
+          id: 'gated',
+          entry,
+          apiGate: { appId: 'demo-app', status: 'admit', effectiveTarget: '1.0', experimental: [] },
+        },
+      ],
+      {
+        virtualFaces: { llm: { hasApi: () => true } },
+      },
+    );
     expect(result.failed).toEqual([]);
     expect(gateSpy()).toHaveBeenCalledWith('berryagent/llm', new Set(), 'demo-app');
   });
@@ -1573,7 +1593,12 @@ describe('实验键声明门禁送达链（gate 窗 + 行字段）', () => {
         {
           id: 'gated2',
           entry,
-          apiGate: { appId: 'demo-app', experimental: ['berryagent/future-x'] },
+          apiGate: {
+            appId: 'demo-app',
+            status: 'admit',
+            effectiveTarget: '1.0',
+            experimental: ['berryagent/future-x'],
+          },
         },
       ],
       { virtualFaces: { llm: { hasApi: () => true } } },
@@ -1724,5 +1749,77 @@ describe('宿主驻留键分域装载期拒绝（刀 G）', () => {
       code: APP_IMPORT_FORBIDDEN,
       message: expect.stringContaining('宿主驻留面'),
     });
+  });
+});
+
+/* ---------------- 裁决落账（API 治理进化刀 I——审计 R3-A4/R1-A7） ---------------- */
+
+describe('loadApps 裁决落账（刀 I：activated 载荷 gate 摘要 + legacy 聚合 warn）', () => {
+  /** 最小可激活 fixture（无注入依赖——装载即激活） */
+  function writeMinimal(dir: string, file: string, name: string): string {
+    return writeApp(
+      dir,
+      file,
+      [
+        `export const name = '${name}';`,
+        'export default async function apply(ctx) {',
+        `  ctx.provide('fx/${name}-ran', true);`,
+        '}',
+      ].join('\n'),
+    );
+  }
+
+  it('gate 摘要随载荷上行：apiGate 行的 activated 载荷带 {status, effectiveTarget}；无门行键缺席', async () => {
+    const dir = makeFixtureDir();
+    const gated = writeMinimal(dir, 'gated.ts', 'gated');
+    const plain = writeMinimal(dir, 'plain.ts', 'plain');
+    const root = makeRoot();
+    const events = recordLifecycle(root);
+    const result = await loadApps(root, [
+      {
+        id: 'gated',
+        entry: gated,
+        apiGate: { appId: 'vendor/gated', status: 'admit', effectiveTarget: '1.0', experimental: [] },
+      },
+      { id: 'plain', entry: plain },
+    ]);
+
+    expect(result.failed).toEqual([]);
+    // 结果面（activated 数组）与事件面（root.on 收割）同携带两键——活体载荷
+    const gatedRow = result.activated.find((item) => item.id === 'gated')!;
+    expect(gatedRow.gate).toEqual({ status: 'admit', effectiveTarget: '1.0' });
+    const plainRow = result.activated.find((item) => item.id === 'plain')!;
+    expect('gate' in plainRow).toBe(false);
+    const gatedEvent = events.find((e) => e.kind === 'activated' && (e.payload as AppActivatedPayload).id === 'gated')!;
+    expect((gatedEvent.payload as AppActivatedPayload).gate).toEqual({ status: 'admit', effectiveTarget: '1.0' });
+  });
+
+  it('legacy 聚合 warn：status=legacy 行每次装载聚合一条（行名入载荷）；admit/空门行零噪音', async () => {
+    const dir = makeFixtureDir();
+    const legacyRow = writeMinimal(dir, 'legacy-app.ts', 'legacy-app');
+    const admitRow = writeMinimal(dir, 'admit-app.ts', 'admit-app');
+    const root = makeRoot();
+    const warnSpy = vi.spyOn(root.logger, 'warn');
+    const result = await loadApps(root, [
+      {
+        id: 'legacy-app',
+        entry: legacyRow,
+        apiGate: { appId: 'vendor/legacy', status: 'legacy', effectiveTarget: '1.0', experimental: [] },
+      },
+      {
+        id: 'admit-app',
+        entry: admitRow,
+        apiGate: { appId: 'vendor/admit', status: 'admit', effectiveTarget: '1.0', experimental: [] },
+      },
+    ]);
+
+    // legacy 容忍态照常激活（不拒不阻断——聚合提醒是 DX 面非执法面）
+    expect(result.failed).toEqual([]);
+    expect(result.activated.map((item) => item.id).sort()).toEqual(['admit-app', 'legacy-app']);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [msg, fields] = warnSpy.mock.calls[0]! as [string, { rows: string[] }];
+    expect(msg).toContain('legacy 容忍态');
+    expect(msg).toContain('点火后将拒载');
+    expect(fields.rows).toEqual(['legacy-app']);
   });
 });

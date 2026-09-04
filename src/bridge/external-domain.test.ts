@@ -429,7 +429,7 @@ describe('spawnExternalDomain — load 投影 apiGate 过桥（worker 腿锁的�
       id: 'gx-gate',
       entry: gateEntry,
       sandbox: { carrier: 'external' },
-      apiGate: { appId: 'demo-app', experimental: [] },
+      apiGate: { appId: 'demo-app', status: 'admit', effectiveTarget: '1.0', experimental: [] },
     });
     expect(meta.name).toBe('fx-gate-ext');
     // 虚拟键真物化（apply + 宿主侧 tap 往返——AppError 构造器在场）
@@ -456,7 +456,7 @@ describe('spawnExternalDomain — load 投影 apiGate 过桥（worker 腿锁的�
         id: 'gx-hr',
         entry: hrEntry,
         sandbox: { carrier: 'external' },
-        apiGate: { appId: 'demo-app', experimental: [] },
+        apiGate: { appId: 'demo-app', status: 'admit', effectiveTarget: '1.0', experimental: [] },
       }),
     );
     expect(err.code).toBe(APP_IMPORT_FORBIDDEN);
@@ -472,7 +472,12 @@ describe('spawnExternalDomain — load 投影 apiGate 过桥（worker 腿锁的�
         id: 'gx-bad',
         entry: echoEntry,
         sandbox: { carrier: 'external' },
-        apiGate: { appId: 42, experimental: [] } as unknown as { appId: string; experimental: readonly string[] },
+        apiGate: { appId: 42, experimental: [] } as unknown as {
+          appId: string;
+          status: 'admit';
+          effectiveTarget: string;
+          experimental: readonly string[];
+        },
       }),
     );
     expect(err.code).toBe(APP_LOAD_FAILED);

@@ -1016,7 +1016,12 @@ describe('loadComposition：第三方行 API 声明门（apiGate 随计划行）
     );
     const p1 = rowById(dataDir);
     expect(p1['entry']).toBeTruthy();
-    expect(p1['apiGate']).toEqual({ appId: 'vendor/demo', experimental: ['berryagent/llm'] });
+    expect(p1['apiGate']).toEqual({
+      appId: 'vendor/demo',
+      status: 'admit',
+      effectiveTarget: '1.0',
+      experimental: ['berryagent/llm'],
+    });
   });
 
   it('min 地板拒载：转 unresolved 行（消息带装载门归因——boot 断言拒启 / dump-config 行级可见）', () => {
@@ -1082,7 +1087,12 @@ describe('loadComposition：apiGate 根公式（路径形直指文件 ref）', (
     );
     const p1 = rowById(dataDir);
     expect(p1['entry']).toBeTruthy();
-    expect(p1['apiGate']).toEqual({ appId: 'vendor/demo', experimental: ['berryagent/llm'] });
+    expect(p1['apiGate']).toEqual({
+      appId: 'vendor/demo',
+      status: 'admit',
+      effectiveTarget: '1.0',
+      experimental: ['berryagent/llm'],
+    });
   });
 
   it('文件形 ref + min 99.0：行转 unresolved 拒启（修复前空门放行——min 地板缺席 fail-open）', () => {

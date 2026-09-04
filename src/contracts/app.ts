@@ -665,7 +665,34 @@ export interface AppPlanRow {
    * 容忍态）——装载期实验键按空声明集恒拒（fail-closed）。min 地板拒载在
    * 合成期即响（转 unresolved 行——boot 断言拒启，dump-config 诊断面可见）。
    */
-  apiGate?: { readonly appId: string; readonly experimental: readonly string[] };
+  apiGate?: GateSummary;
+}
+
+/**
+ * API 声明门裁决摘要（API 治理进化刀 I 传导形单源——四处共用同一形：
+ * readApiGateAtRoot 出口 / AppPlanRow.apiGate 行字段 / 装配根 quickRow·loadEntry
+ * 腿 / app/activated 载荷 gate 键）。裁决单源 = readApiGateAtRoot 内一次
+ * adjudicateApiGate 调用——status/effectiveTarget 两键此前在该出口被丢弃，
+ * 本类型把裁决产物全量接进传导链（审计 R3-A4）。
+ */
+export interface GateSummary {
+  /** 清单 id（归因键——与组合树行 id 是两物：行 id 实例标识，appId 清单身份） */
+  readonly appId: string;
+  /**
+   * 裁决出口两态（§6.13.4 出口 2/3/4 的可传导半边）：'admit' = 声明门放行
+   * （钳制/兼容统称——生效版本取 min(宿主, target)）；'legacy' = 清单在场而
+   * 缺 api 块的容忍态。min 地板拒载（出口 1）在 readApiGateAtRoot 单源点抛
+   * 出——不进传导形（拒载行无 activated 载荷可言）。
+   */
+  readonly status: 'legacy' | 'admit';
+  /**
+   * 生效目标版本（MAJOR.MINOR）：admit = min(宿主, target) 钳制值；legacy =
+   * 宿主当前（面按宿主走——不进任何兼容模式）。诊断面（/apps、dump-config）
+   * 展示用，不参与控制流。
+   */
+  readonly effectiveTarget: string;
+  /** 实验键声明集（数组形 = 跨桥 JSON 直通面——loader 侧转 Set 进装载窗） */
+  readonly experimental: readonly string[];
 }
 
 /**
@@ -686,6 +713,15 @@ export interface AppActivatedPayload {
    * 读本档（活词表优先于 data.json 账本——同一次装载的真值）。不参与控制流。
    */
   readonly events?: readonly string[];
+  /**
+   * API 声明门裁决摘要（API 治理进化刀 I——status/effectiveTarget 两键，装载
+   * 时点已算出随生命周期事件活体携带）：'admit' = 声明门放行（生效版本 =
+   * 钳制值）；'legacy' = 清单缺 api 块容忍态。undefined = 行无 apiGate（官方
+   * builtin 行 / 清单缺席——空门由 loader fail-closed 兜底）。durable 化随首
+   * 个消费面批定（冷读 CR3——本键先随活体事件走，不新增 durable 机制）；
+   * 诊断面（/apps、dump-config）与未来审计消费，不参与控制流。
+   */
+  readonly gate?: { readonly status: 'legacy' | 'admit'; readonly effectiveTarget: string };
 }
 
 /** app/failed 载荷：{ 组合树行 id, 错误码（APP_ 族）, 错误信息, 栈（可选） } */

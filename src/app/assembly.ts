@@ -124,7 +124,7 @@ import {
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
 import { chainCaller, chainSessionId, runInCallerChain } from '../context/chain.js';
-import type { CompositionRow, RowAppProbe } from '../contracts/app.js';
+import type { CompositionRow, GateSummary, RowAppProbe } from '../contracts/app.js';
 import { resolveRowCarrier } from '../contracts/app.js';
 import type { AppLoadResult } from '../contracts/app.js';
 import {
@@ -1911,7 +1911,8 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 嵌套 = 空门 fail-closed（loader 侧裁决——legacy 容忍态不破快试开发流；
     // 点火后缺块拒载在装载窗同面兜底）。
     const quickEntryDir = dirname(quickPath);
-    let quickGate: { appId: string; experimental: readonly string[] } | undefined;
+    // GateSummary 传导形（刀 I——readApiGateAtRoot 出口即此形，单源类型免重复内联）
+    let quickGate: GateSummary | undefined;
     try {
       quickGate = readApiGateAtRoot(quickEntryDir) ?? readApiGateAtRoot(dirname(quickEntryDir));
     } catch (err) {
@@ -1930,7 +1931,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 应用激活行；缺 entry = dirname(undefined) 装载必炸）。rows 行是
     // CompositionRow（无 entry 合法）；plan 行是 AppPlanRow（entry 必填）。
     // apiGate 随行（刀 H）：清单在场即随 plan 行携带——loader 装载窗与装机行
-    // 同一 adjudicateApiGate 裁决（空门 = 键缺席走 loader 侧 fail-closed）。
+    // 同一 adjudicateApiGate 裁决（空门 = 键缺席走 loader 侧 fail-closed）；
+    // GateSummary 传导形（刀 I——status/effectiveTarget 随行，activated 载荷
+    // 与 legacy 聚合 warn 消费）。
     composition = {
       rows: [...composition.rows, quickRow],
       plan: [

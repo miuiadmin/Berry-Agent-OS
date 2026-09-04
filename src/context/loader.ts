@@ -848,6 +848,18 @@ export async function loadApps(
   const activated: AppActivatedPayload[] = [];
   const failed: AppFailedPayload[] = [];
   const skipped: AppSkippedPayload[] = [];
+  // API 声明门 legacy 聚合提醒（API 治理进化刀 I，审计 R1-A7 DX 面）：清单在
+  // 场而缺 api 块的行 = legacy 容忍态（兼容执法点火后此类将拒载）。每次装载
+  // 聚合一条 warn（boot 与 /reload 同面）——第三方作者提前迁移提醒；空门行
+  //（无清单——快试开发流）与 builtin 行不在此列，零噪音。
+  const legacyGateIds = rows.filter((row) => row.apiGate?.status === 'legacy').map((row) => row.id);
+  if (legacyGateIds.length > 0) {
+    root.logger.warn(
+      `API 声明门 legacy 容忍态：${legacyGateIds.length} 个行清单缺 api 块` +
+        `（兼容执法点火后将拒载——请尽早补 api 块声明 minApiVersion，契约篇 §6.13.4）`,
+      { rows: legacyGateIds },
+    );
+  }
   // 行读链区身份（D3 装载分面分区，契约篇 §5.1）：装载行自锚 fork 级联同值——
   // Kahn 探测按行读链解析（app 区行 inject 只能命中 本区表→系统区表→根表；
   // 跨区行 zone='system' 只命中 根表∪系统区表，装载律③——区际依赖同拒）
@@ -1173,6 +1185,12 @@ async function activateOne(
       name: declaredName,
       applyMs,
       ...(eventNames.length > 0 ? { events: eventNames } : {}), // 空清单不带键（undefined = 未声明，消费面 ?? [] 归一）
+      // API 声明门裁决摘要随载荷上行（API 治理进化刀 I——status/effectiveTarget
+      // 两键，装载时点已算出随生命周期事件活体携带；行无 apiGate（builtin 行/
+      // 清单缺席空门）不带键。诊断面消费，不参与控制流）
+      ...(row.apiGate === undefined
+        ? {}
+        : { gate: { status: row.apiGate.status, effectiveTarget: row.apiGate.effectiveTarget } }),
     };
     activated.push(payload);
     root.emit('app/activated', payload);

@@ -154,7 +154,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'app/activated',
     tier: 'stable',
     mode: 'emit',
-    note: '应用行激活成功（契约篇 §2.2 增补 1 生命周期组；载荷 { id, name }——组合树行 id + 应用声明名；加载器 boot 逐行必发）',
+    note: '应用行激活成功（契约篇 §2.2 增补 1 生命周期组；载荷 { id, name, applyMs?, events?, gate? }——组合树行 id + 应用声明名 + apply 耗时打点 + 自定义事件词清单 + API 声明门裁决摘要（gate.status/gate.effectiveTarget 两键，API 治理 §6.13.4 刀 I——行无 apiGate 则键缺席）；加载器 boot 逐行必发）',
   },
   {
     name: 'app/failed',

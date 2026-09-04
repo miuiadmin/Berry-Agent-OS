@@ -396,7 +396,7 @@
         "server",
         "standalone"
       ],
-      "sig": "acbeac5fd3f5a699"
+      "sig": "e974d5f7050be3c3"
     },
     {
       "symbol": "AppApply",
@@ -540,7 +540,7 @@
         "server",
         "standalone"
       ],
-      "sig": "19532d7f9e06111b"
+      "sig": "cc52dc4e60bd1dce"
     },
     {
       "symbol": "AppSkipReason",
@@ -1477,6 +1477,18 @@
         "standalone"
       ],
       "sig": "999133c34a10997d"
+    },
+    {
+      "symbol": "GateSummary",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ],
+      "sig": "533ac9aa4d7d2066"
     },
     {
       "symbol": "HostFace",

@@ -19,7 +19,14 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
 import { canonicalWorkspaceRoot } from '../context/workspace.js';
-import type { BuiltinAppModule, CompositionRow, AppPlanRow, AppSkipReason, RowSandbox } from '../contracts/app.js';
+import type {
+  BuiltinAppModule,
+  CompositionRow,
+  AppPlanRow,
+  AppSkipReason,
+  GateSummary,
+  RowSandbox,
+} from '../contracts/app.js';
 import { AppIdPattern, exclusiveAppOf } from '../contracts/app.js';
 import { readApiGateAtRoot } from './app-registry.js';
 
@@ -737,7 +744,8 @@ export function loadComposition(
     // readdir 抛 ENOTDIR 会被吞成「空门」——文件形取其目录再读（清单与入口同
     // 目录的开发形态）；目录形原样。与 resolveAppEntry 的文件/目录两分同律。
     let gateUnresolved: string | undefined;
-    let apiGate: { appId: string; experimental: readonly string[] } | undefined;
+    // GateSummary 传导形（API 治理进化刀 I——单源类型四处共用之一）
+    let apiGate: GateSummary | undefined;
     if (entry !== undefined) {
       try {
         const gateRoot = resolveAppRoot(ref, dataDir);
