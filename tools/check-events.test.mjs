@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { discoverSessionEventRegistrars } from './session-event-sources.mjs';
 
 /** 仓库根（本文件在 tools/ 下） */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -237,6 +238,68 @@ describe('check-events 模块行版本集合锚负例（遗漏大扫 20260902-c 
       expect(run.stderr).toContain(`docs/架构总览.md memory 模块行版本锚 ≠ 代码真值 ${deriveModuleNeedle('memory')}`);
       expect(run.stderr).toContain(`AGENTS.md scheduler 模块行版本锚 ≠ 代码真值 ${deriveModuleNeedle('scheduler')}`);
       expect(run.stderr).toContain(`docs/架构总览.md goal 模块行版本锚 ≠ 代码真值 ${deriveModuleNeedle('goal')}`);
+    } finally {
+      rmSync(fixRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('宿主面注册模块推导（API 治理进化批 M5——收割清单单源化）', () => {
+  it('真树五员精确锁：双合取判据推导 = 既有手抄清单五员（漂移即红）', () => {
+    // 派生集收缩（判据漂移）在消费面表现为难归因的间接红（族 3 误报/查 1 漂移）
+    // ——本锁给出一击即中的直接红。新增注册模块是合法演进：同步更新本行即随行
+    expect(discoverSessionEventRegistrars()).toEqual([
+      'src/checkpoint/events.ts',
+      'src/compaction/events.ts',
+      'src/contracts/deprecations.ts',
+      'src/goal/events.ts',
+      'src/memory/diff.ts',
+    ]);
+  });
+
+  it('夹具树判据正负例：值导入∧非成员调用 收；类型导入/邻名/成员调用/接口签名 不收', () => {
+    const fixRoot = mkdtempSync(join(tmpdir(), 'berry-session-event-src-'));
+    try {
+      mkdirSync(join(fixRoot, 'src'), { recursive: true });
+      // 正例：名绑定值导入 + 模块级直调（真注册形）
+      writeFileSync(
+        join(fixRoot, 'src/fake-reg.ts'),
+        "import { registerSessionEventType } from '../contracts/session-events.js';\nregisterSessionEventType({ type: 'zz/fake' });\n",
+      );
+      // 负例一：类型面导入 + interface 方法签名（context/types.ts 同形——P1 不匹配）
+      writeFileSync(
+        join(fixRoot, 'src/like-types.ts'),
+        "import type { SessionEventTypeDefinition } from '../contracts/session-events.js';\nexport interface Ctx { registerSessionEventType(def: SessionEventTypeDefinition): void; }\n",
+      );
+      // 负例二：邻名值导入 + 对象方法定义（context/context.ts 同形——P1 名不匹配）
+      writeFileSync(
+        join(fixRoot, 'src/like-context.ts'),
+        "import { registerAppSessionEventType } from '../contracts/session-events.js';\nexport const ctx = { registerSessionEventType(def: unknown) { return () => {}; } };\n",
+      );
+      // 负例三：成员调用（装载面 ctx 形——调用者不导入该符号，P1 排除；成员
+      // 调用形另由 P2 前瞻独立排除。注：值导入 + 纯类型签名引用的合成形在词法
+      // 层与真调用不可分，真树不存在该形——真树五员精确锁是漂移防线）
+      writeFileSync(
+        join(fixRoot, 'src/like-caller.ts'),
+        "export function apply(ctx: { registerSessionEventType(d: unknown): void }) {\n  ctx.registerSessionEventType({ type: 'zz/x' });\n}\n",
+      );
+      // 负例四：测试文件豁免（.test.ts 不入扫描面）
+      writeFileSync(
+        join(fixRoot, 'src/zz.test.ts'),
+        "import { registerSessionEventType } from '../contracts/session-events.js';\nregisterSessionEventType({ type: 'zz/test' });\n",
+      );
+      expect(discoverSessionEventRegistrars(fixRoot)).toEqual(['src/fake-reg.ts']);
+    } finally {
+      rmSync(fixRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('空集防线：src/ 在场而零注册模块 → 炸（判据漂移 fail-loud，不静默漏收割）', () => {
+    const fixRoot = mkdtempSync(join(tmpdir(), 'berry-session-event-empty-'));
+    try {
+      mkdirSync(join(fixRoot, 'src'), { recursive: true });
+      writeFileSync(join(fixRoot, 'src/plain.ts'), 'export const zz = 1;\n');
+      expect(() => discoverSessionEventRegistrars(fixRoot)).toThrow(/推导为空/);
     } finally {
       rmSync(fixRoot, { recursive: true, force: true });
     }

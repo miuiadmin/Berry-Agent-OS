@@ -52,6 +52,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname, relative, resolve } from 'node:path';
 import { createJiti } from 'jiti';
+import { discoverSessionEventRegistrars } from './session-event-sources.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -227,24 +228,19 @@ const eventUnion = new Set();
 const jiti = createJiti(import.meta.url);
 const events = await jiti.import(fileURLToPath(new URL('../src/contracts/events.ts', import.meta.url)));
 const sessionTypes = await jiti.import(fileURLToPath(new URL('../src/session/event-types.ts', import.meta.url)));
-// 应用注册的 SessionEvent 词汇随其宿主模块导入生效（v1 首例：memory/diff 在
-// src/memory/diff.ts 顶层注册——该文件运行时依赖保持轻量，导入不连锁 SQLite）。
-// 新增应用侧注册模块时在此追加导入，否则族 3 会把其写点误报为注册表外类型。
-// 双入口纪律（2026-08-25 #19 收口）：此机制只覆盖宿主面（模块级 registerSessionEventType
-// 直调）——装载面 ctx.registerSessionEventType 注册发生在 apply 运行时、CI 静态不可
-// 见。官方件词汇一律走宿主面模块注册（会话篇 §2.1 注记），改走装载面会在族 3 撞
-// 误报且无模块可导入——那不是闸坏了，是纪律破了。
-await jiti.import(fileURLToPath(new URL('../src/memory/diff.ts', import.meta.url)));
-// compaction 四词同款（src/compaction/events.ts——宿主面顶层注册，轻依赖）
-await jiti.import(fileURLToPath(new URL('../src/compaction/events.ts', import.meta.url)));
-// checkpoint 两词同款（src/checkpoint/events.ts——快照/回退审计词，轻依赖）
-await jiti.import(fileURLToPath(new URL('../src/checkpoint/events.ts', import.meta.url)));
-// goal 轮结算账本词同款（src/goal/events.ts——goal/evidence 轮结算写点在
-// goal/tools.ts，第三十九批 T4-A；goal/summary 随第四刀沉淀④步同笔注册）
-await jiti.import(fileURLToPath(new URL('../src/goal/events.ts', import.meta.url)));
-// 废弃遥测词（src/contracts/deprecations.ts——§6.13.7 批 3：apps/deprecation-used
-// reserved 标记注册，宿主写点 = 批 4 废弃桥入口，词汇面先登记进目录）
-await jiti.import(fileURLToPath(new URL('../src/contracts/deprecations.ts', import.meta.url)));
+// 应用注册的 SessionEvent 词汇随其宿主模块导入生效（模块级 registerSessionEventType
+// 直调，加载即注册）。宿主面注册模块由源码双合取推导自动入扫描面（API 治理
+// 进化批 M5 单源化——原五处手抄导入清单结构性消灭：名绑定值导入
+// registerSessionEventType ∧ 非成员调用形，见 tools/session-event-sources.mjs；
+// v1 五员 = memory/diff、compaction/events、checkpoint/events、goal/events、
+// contracts/deprecations——新增注册模块零维护自动被导入）。
+// 双入口纪律（2026-08-25 #19 收口）：此机制只覆盖宿主面——装载面
+// ctx.registerSessionEventType 注册发生在 apply 运行时、CI 静态不可见。官方件
+// 词汇一律走宿主面模块注册（会话篇 §2.1 注记），改走装载面会在族 3 撞误报且
+// 无模块可导入——那不是闸坏了，是纪律破了。
+for (const rel of discoverSessionEventRegistrars()) {
+  await jiti.import(fileURLToPath(new URL(`../${rel}`, import.meta.url)));
+}
 // 错误码注册表（族 6 数据源——基建大扫 #46：errors.ts 头注「CI 可校验」兑现，
 // 与事件词汇面同纪律的机器执法）
 const errorsMod = await jiti.import(fileURLToPath(new URL('../src/contracts/errors.ts', import.meta.url)));

@@ -57,20 +57,27 @@ const { compareApiVersions } = await imp('../src/contracts/api.ts');
 const keyOf = (entry) => `${entry.module}::${entry.symbol}`;
 
 /**
+ * semver 形正则（三段 + 可选预发布段）——compareSemver 与 loadArchivedSnapshots
+ * 共用单源（进化批 M9：归档文件名校验前置到读取处，非法即炸）。
+ */
+const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(?:-([\w.-]+))?$/;
+
+/**
  * semver 三段比较（归档族排序专用——release 号全集是 semver 形，导出供
  * release 子步 3.5 与排序单测复用）。字典序两大陷阱在此修正：
  * ① 预发布段必须排在正式版之前（semver 优先级律：1.0.0-alpha < 1.0.0——
  *   字典序相反，'1.0.0' 是 '1.0.0-alpha.1' 的前缀而排前）；
  * ② 预发布段内数值段按数值序（alpha.2 < alpha.10——localeCompare 默认不开
  *   numeric collation，字典序必反）。
+ * 非法形态即炸（进化批 M9 删「非法沉底」兜底）：归档目录是 release 机器契约 6
+ * 专属写入位，脏文件 = 机器损坏非容错输入——fail-loud 出来看，不排序吞掉
+ * （规范：契约篇 §6.13.6）。
  * @returns {number} 负 = a 先于 b
  */
 export function compareSemver(a, b) {
   const parse = (v) => {
-    const m = /^(\d+)\.(\d+)\.(\d+)(?:-([\w.-]+))?$/.exec(v);
-    // 非法形态沉底（排最末 = 最新位，变更史尾节人眼常扫处可见；归档文件名应恒
-    // semver，此支纯防御。MAX_SAFE_INTEGER 而非 -1：-1 会排最前被夹进远古史里隐形）
-    if (m === null) return { core: [Number.MAX_SAFE_INTEGER, 0, 0], pre: null };
+    const m = SEMVER_RE.exec(v);
+    if (m === null) throw new Error(`semver 形非法：${v}（归档文件名应恒 semver——release 机器契约 6 写入位被污染）`);
     return { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ?? null };
   };
   const pa = parse(a);
@@ -105,15 +112,25 @@ export function compareSemver(a, b) {
 /**
  * 读取归档快照族（文件名 = 版本号，内容 = 该版面快照本体）。返回按 semver 升序
  * （compareSemver——字典序的预发布/数值段陷阱见其注释）。目录缺席 = 空数组
- * （基线形成前）。dir 参数化（缺省仓库归档位）：release 子步 3.5 以 workDir
- * 锚定的归档目录调用（真跑同根、测试临时 workDir——两消费面同一函数）。
+ * （基线形成前）。文件名非 semver 即炸（进化批 M9 fail-loud——前置逐名校验
+ * 点名脏文件；规范：契约篇 §6.13.6）。dir 参数化（缺省仓库归档位）：release
+ * 子步 3.5 以 workDir 锚定的归档目录调用（真跑同根、测试临时 workDir——两
+ * 消费面同一函数）。
  * @param {string} [dir] 归档目录（缺省 = 仓库 api/snapshots）
  * @returns {Array<{ version: string, surface: object }>}
  */
 export function loadArchivedSnapshots(dir = SNAPSHOTS_DIR) {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((n) => n.endsWith('.json'))
+  const names = readdirSync(dir).filter((n) => n.endsWith('.json'));
+  // 前置逐名校验（而非排序时才炸）：报错可点名文件，且坏文件无需等到参与比较
+  for (const n of names) {
+    if (!SEMVER_RE.test(n.slice(0, -'.json'.length))) {
+      throw new Error(
+        `归档目录含非 semver 文件名：${n}（release 机器契约 6 专属写入位——脏文件 = 机器损坏，fail-loud）`,
+      );
+    }
+  }
+  return names
     .map((n) => ({ version: n.slice(0, -'.json'.length), surface: JSON.parse(readFileSync(join(dir, n), 'utf8')) }))
     .sort((a, b) => compareSemver(a.version, b.version));
 }

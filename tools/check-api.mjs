@@ -89,8 +89,6 @@ const SURFACE_INJECTED =
     : undefined;
 /** 公开根（自由符号查 2 的扫描对象） */
 const BARREL_PATH = join(SCAN_ROOT, 'src/contracts/index.ts');
-/** 官方应用清单目录（查 7） */
-const APPS_DIR = join(SCAN_ROOT, 'apps');
 
 const jiti = createJiti(import.meta.url);
 /** 便利导入：仓库内相对路径 → 模块运行时面 */
@@ -127,6 +125,16 @@ function walkFiles(dirRel, suffixes, out = []) {
   }
   return out;
 }
+
+/**
+ * 根 README 四语实到集（zh 主文 + en/es/fr 镜像——进化批 M7：公开面第一入口
+ * 原本不在查 5/查 3c 扫描面，镜像译文里的符号名同受隔离与废弃对照）。缺席容忍
+ * （查 10 同款形：镜像未建不算布局红）；SCAN_ROOT 相对路径，随 CHECK_API_ROOT
+ * 缝移（夹具树零 README 亦零面）。
+ */
+const ROOT_READMES = ['README.md', 'README.en.md', 'README.es.md', 'README.fr.md'].filter((f) =>
+  existsSync(join(SCAN_ROOT, f)),
+);
 
 /* ---------------- 查 1：drift（快照 ≠ 抽取真值红） ---------------- */
 
@@ -282,7 +290,11 @@ const DEPRECATIONS =
   // —— 3c deprecated JSDoc 标签 ↔ 注册簿双向对照（标签形 = `@deprecated DEP-001
   // <说明>`——裸标签红：无编号的标签无法对账；注册行无标签红：登记不落码面
   // 标注即双源）——
-  const jsdocFiles = walkFiles('src', ['.ts']).filter((f) => !f.endsWith('.test.ts'));
+  const jsdocFiles = [
+    ...walkFiles('src', ['.ts']).filter((f) => !f.endsWith('.test.ts')),
+    ...walkFiles('api-decls', ['.d.ts']), // 进化批 M7：手稳件标签原本不在扫描面
+    ...ROOT_READMES, // 进化批 M7：公开面第一入口（四语）同入对照面
+  ];
   const taggedIds = new Set();
   for (const file of jsdocFiles) {
     const text = readFileSync(join(SCAN_ROOT, file), 'utf8');
@@ -345,7 +357,11 @@ const DEPRECATIONS =
 {
   const experimentalSymbols = surface.exports.filter((e) => e.tier === 'experimental');
   if (experimentalSymbols.length > 0) {
-    const docFiles = [...walkFiles('docs', ['.md']), ...walkFiles('examples', ['.ts', '.md'])];
+    const docFiles = [
+      ...walkFiles('docs', ['.md']),
+      ...walkFiles('examples', ['.ts', '.md']),
+      ...ROOT_READMES, // 进化批 M7：根 README 四语入面（公开面第一入口全语形）
+    ];
     for (const entry of experimentalSymbols) {
       const re = new RegExp(`\\b${entry.symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
       // 实验键（module = 虚拟键）另查键名字符串本身（import 说明符无词边界——按子串）
@@ -384,16 +400,21 @@ const DEPRECATIONS =
 {
   const appMod = await imp('../src/contracts/app.ts');
   const pkg = JSON.parse(readFileSync(join(SCAN_ROOT, 'package.json'), 'utf8'));
-  const manifests = readdirSync(APPS_DIR).filter((n) => n.endsWith('.app.yaml'));
-  for (const name of manifests) {
-    const path = join(APPS_DIR, name);
+  // 扫描 = apps/ 递归 walk（进化批 M10：子目录清单同入面——与查 3c 同一
+  // walkFiles 工具函数；单层 readdirSync 漏嵌套清单，嵌套形过查 7 门却在
+  // release crater 试跑面缺席）。目录缺席 = 红条目而非脚本崩：walkFiles 内建
+  // existsSync 守卫返 []，缺席态由下方零清单红承载（修前 ENOENT 崩闸先于
+  // problems 收口，九查其余结果被一并吞掉）
+  const manifests = walkFiles('apps', ['.app.yaml']);
+  for (const rel of manifests) {
+    const path = join(SCAN_ROOT, rel);
     const manifest = appMod.validateAppManifest(parseYaml(readFileSync(path, 'utf8')), path);
     const gate = apiContracts.adjudicateApiGate(manifest.api, pkg.apiVersion, manifest.id);
     if (gate.status === 'legacy') {
-      v(`[查 7] 官方清单 ${name} 缺 api 块（legacy 容忍态窗口内——回填 api.minApiVersion 即绿；批 4 翻必填）`);
+      v(`[查 7] 官方清单 ${rel} 缺 api 块（legacy 容忍态窗口内——回填 api.minApiVersion 即绿；批 4 翻必填）`);
     }
   }
-  if (manifests.length === 0) v(`[查 7] apps/ 目录零 .app.yaml——官方清单目录空（仓库布局异常）`);
+  if (manifests.length === 0) v(`[查 7] apps/ 目录零 .app.yaml（含缺席）——官方清单目录空（仓库布局异常）`);
 }
 
 /* ---------------- 查 8：生成物 drift（第九十一批——两生成物 ≠ 生成器真值红） ---------------- */

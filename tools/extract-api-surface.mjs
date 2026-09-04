@@ -71,6 +71,7 @@ import { fileURLToPath } from 'node:url';
 import { createJiti } from 'jiti';
 import * as ts from 'typescript/unstable/ast';
 import { KNOWLEDGE_DOMAIN_RE } from './api-doc-sections.mjs';
+import { discoverSessionEventRegistrars } from './session-event-sources.mjs';
 
 /** 仓库根（脚本位置上一级——check-topology/copy-app-assets 同款锚定） */
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -286,7 +287,10 @@ export function scanTopLevelExports(sourceText) {
       // 一块两读三载体——一次块定位三产物）
       if (moduleSpec === null) {
         const block = lastJsdocBlock(sourceText.slice(0, exportStart));
-        const m = block === null ? null : block.match(/@(stable|experimental|deprecated)\b/);
+        // 标签词形须独立（进化批 M8）：负向前瞻 (?![\w-])——\b 在 'l' 与 '-' 间
+        // 仍成立，@experimental-internal 连字符合成词会误领 experimental 级
+        // （规范：契约篇 §6.13.3 标签词形独立条款）
+        const m = block === null ? null : block.match(/@(stable|experimental|deprecated)(?![\w-])/);
         const tier = m === null ? null : m[1];
         for (const n of exported) {
           tags.set(n, tier);
@@ -1644,14 +1648,14 @@ export async function extractSurface() {
   }
 
   // —— #4b：durable 会话事件词汇（jiti 副作用收割——check-events 先例同构）——
-  await imp('../src/contracts/session-events.ts');
-  await imp('../src/session/event-types.ts');
-  await imp('../src/memory/diff.ts');
-  await imp('../src/compaction/events.ts');
-  await imp('../src/checkpoint/events.ts');
-  await imp('../src/goal/events.ts');
-  // 废弃遥测词汇（§6.13.7 批 3）：registerSessionEventType 副作用收割——导入即登记
-  await imp('../src/contracts/deprecations.ts');
+  // 宿主面注册模块由源码双合取推导（tools/session-event-sources.mjs 单源——API
+  // 治理进化批 M5：原七行手抄清单结构性消灭，与 check-events 族 3 同一推导，
+  // 新增注册模块自动入收割面）。session/event-types.ts 纯 re-export barrel 不再
+  // 单列导入：其副作用仅转递注册表本尊（注册模块自身导入已覆盖）；
+  // listSessionEventTypes 在函数内排序（导入序不入快照字节——清单序漂移零 churn）。
+  for (const rel of discoverSessionEventRegistrars()) {
+    await imp(`../${rel}`);
+  }
   const sessionEventsMod = await imp('../src/contracts/session-events.ts');
   for (const def of sessionEventsMod.listSessionEventTypes()) {
     exports.push({

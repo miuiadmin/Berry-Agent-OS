@@ -396,6 +396,62 @@ describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE �
     }
   }, 60_000);
 
+  it('【回归锁 进化批 M7】查 5 扫描面含根 README：experimental 符号漏进 README.md → 红（公开面第一入口原本不在扫描面）', () => {
+    // 修前形态：docFiles = docs/ + examples/——根 README 四语全在面外，实验符号
+    // 漏进第一入口不红；夹具根无 docs/（README 是唯一文档面——归因唯一）
+    const root = makeFixtureRoot();
+    writeFileSync(join(root, 'README.md'), '# 夹具\n\n先试用 zzFutureThing。\n');
+    const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-surface-'));
+    const fake = join(dir, 'fake-surface.json');
+    writeFileSync(
+      fake,
+      JSON.stringify({
+        exports: [
+          {
+            symbol: 'zzFutureThing',
+            module: 'berryagent',
+            tier: 'experimental',
+            since: '1.0',
+            formFactors: ['standalone'],
+          },
+        ],
+        capabilities: [],
+      }),
+    );
+    try {
+      const r = runGate({ CHECK_API_ROOT: root, CHECK_API_SURFACE: fake });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 5]');
+      expect(r.stderr).toContain('README.md');
+      expect(r.stderr).toContain('zzFutureThing');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('【回归锁 进化批 M7】查 3c 扫描面含根 README 与 api-decls：册外 DEP 标签 + 裸标签双红（手稳件标签与第一入口原本不在对照面）', () => {
+    // 两腿一次验全：README.md 带编号但真册零在册（册外腿）；api-decls/x.d.ts
+    // 裸标签无编号（无法对账腿）——修前两文件均在 jsdocFiles 面外不可见
+    const root = makeFixtureRoot();
+    writeFileSync(join(root, 'README.md'), '# 夹具\n\n/** @deprecated DEP-042 未登记 */\n');
+    mkdirSync(join(root, 'api-decls'));
+    writeFileSync(
+      join(root, 'api-decls/zz-hand.d.ts'),
+      '/** 手稳件声明 */\n/** @deprecated */\nexport declare const zzOld: number;\n',
+    );
+    try {
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 3]');
+      expect(r.stderr).toContain('DEP-042 未在 DEP 注册簿登记');
+      expect(r.stderr).toContain('api-decls/zz-hand.d.ts');
+      expect(r.stderr).toContain('裸 @deprecated 标签');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('查 5 豁免节内合法：实验符号只现于「实验面」节 → exit 0（刀 E 互锁死结回归锁——修前查 5 无豁免位，生成器一按规范渲染实验符号即恒红）', () => {
     // 夹具文档 = 生成器落盘形态：实验符号只出现在文末实验面节内（节标记常量
     // 与生成器共享单源——豁免界两端结构性同源）
@@ -508,6 +564,42 @@ describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE �
       expect(r.status).toBe(1);
       expect(r.stderr).toContain('[查 7]');
       expect(r.stderr).toContain('零 .app.yaml');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('【回归锁 进化批 M10】查 7 目录缺席 = 红条目而非脚本崩（ENOENT 不吞九查其余结果）', () => {
+    // 修前形态：readdirSync(apps/) 无 existsSync 守卫——目录缺席直接 crash，
+    // problems 收口永不执行（stderr 无任何 [查 N] 条目、exit 码非 0/1 语义）
+    const root = makeFixtureRoot();
+    try {
+      rmSync(join(root, 'apps'), { recursive: true, force: true });
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1); // 干净红（problems 收口出口）而非 crash 码
+      expect(r.stderr).toContain('[查 7]');
+      expect(r.stderr).toContain('零 .app.yaml');
+      expect(r.stderr).not.toContain('ENOENT'); // 崩闸痕迹不得在场
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('【回归锁 进化批 M10】查 7 扫描面 = apps/ 递归 walk：嵌套清单缺 api 块同红且红条目点名嵌套路径', () => {
+    // 修前形态：单层 readdirSync 漏嵌套清单——嵌套形不可见即不可红（过查 7 门
+    // 却在 release crater 试跑面缺席）；递归 walk 与查 3c 同一 walkFiles 函数
+    const root = makeFixtureRoot();
+    try {
+      mkdirSync(join(root, 'apps/nested'));
+      writeFileSync(
+        join(root, 'apps/nested/zz-deep.app.yaml'),
+        'id: vendor/deep\nlabel: 嵌套\ncomponents:\n  - builtin:chat\n', // 缺 api 块
+      );
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 7]');
+      // 红条目点名嵌套相对路径（apps/nested/zz-deep.app.yaml）——定位直达
+      expect(r.stderr).toContain('apps/nested/zz-deep.app.yaml');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -814,11 +906,18 @@ describe('compareSemver / loadArchivedSnapshots：归档族排序（第九十一
     const order = ['1.0.0-alpha.2', '1.0.0-alpha.10', '1.0.0-rc.1', '1.0.0', '1.0.1'];
     expect([...order].reverse().sort(compareSemver)).toEqual(order);
   });
-  it('compareSemver：非法形态沉底排最末（防御兜底不隐形夹进远古史）', () => {
-    // 回归锁：旧实现非法形返回 [-1,-1,-1] 排最前——与「沉底」注释相反，坏文件名
-    // 被夹进基线侧隐形；沉底 = 排最新位（变更史尾节人眼常扫处可见）
-    const order = ['1.0.0', '1.1.0', 'oops.json'];
-    expect([...order].reverse().sort(compareSemver)).toEqual(order);
+  it('compareSemver / loadArchivedSnapshots：非法 semver 形即炸（fail-loud——进化批 M9 删「非法沉底」兜底）', () => {
+    // 修前形态：非法沉底排最新位（静默兜底）——垃圾归档文件被当作查 9 比较基准；
+    // 归档目录是 release 机器契约 6 专属写入位，脏文件 = 机器损坏非容错输入，
+    // 炸出来看而非排序吞掉（规范：契约篇 §6.13.6 fail-loud 条款）
+    expect(() => compareSemver('oops.json', '1.0.0')).toThrow(/semver/);
+    const dir = mkdtempSync(join(tmpdir(), 'berry-archived-snaps-'));
+    try {
+      writeFileSync(join(dir, 'oops.json'), JSON.stringify({ apiVersion: '1.0', exports: [], capabilities: [] }));
+      expect(() => loadArchivedSnapshots(dir)).toThrow(/oops\.json/); // 报错点名脏文件
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it('loadArchivedSnapshots(dir)：目录参数化 + 版本号 semver 升序 + 缺席目录空数组', () => {
     // dir 参数化供 release 子步 3.5 以 workDir 锚定位复用（真跑同根、测试临时位）
@@ -1028,6 +1127,23 @@ describe('scanTopLevelExports：手写扫描器单测（tsgo unstable/ast 依赖
     expect(scan.tags.get('zzNoTier')).toBe(null);
     expect(scan.tags.get('zzCut')).toBe(null);
     expect(scan.tags.has('zzA')).toBe(false);
+  });
+
+  it('【回归锁 进化批 M8】tier 标签词形须独立：连字符合成词不领级（@experimental-internal ≠ experimental）', () => {
+    // 修前形态：\b 在 'l' 与 '-' 间成立——@experimental-internal 误领 experimental
+    // 级（机器判据 = 标签词后不接 [\w-]，防连字符合成词；规范：契约篇 §6.13.3）
+    const src = [
+      '/** @experimental-internal 内部机制词 */',
+      'export const zzHyphenTag = 1;',
+      '/** @experimental 试用 */',
+      'export const zzPlainTag = 2;',
+      '/** @deprecated-alias 另一合成词 */',
+      'export const zzDepHyphen = 3;',
+    ].join('\n');
+    const scan = scanTopLevelExports(src);
+    expect(scan.tags.get('zzHyphenTag')).toBe(null); // 合成词不判 experimental
+    expect(scan.tags.get('zzPlainTag')).toBe('experimental'); // 独立词形照收
+    expect(scan.tags.get('zzDepHyphen')).toBe(null); // 同律 deprecated 侧
   });
 
   it('【回归锁 第十一轮 A5】export { x }（无 from）声明形直导出入 tags 执法面：紧前 JSDoc 标级收得、无标签记 null、有 from 转译形仍不入', () => {
