@@ -26,11 +26,18 @@ import type { StreamFn } from '../contracts/llm.js';
 import {
   APP_ENTRY_UNRESOLVED,
   APP_SHUTDOWN_QUIESCE_VIOLATED,
+  API_VERSION_MISMATCH,
   AppError,
   COMPOSITION_ROW_INVALID,
   APP_LOAD_FAILED,
   describeError,
 } from '../contracts/errors.js';
+// 废弃遥测词汇注册副作用先行（API 治理进化刀 H——装载门全入口同律批）：
+// deprecations.ts 模块加载即把宿主保留词 apps/deprecation-used 登记进会话事件
+// 目录（登记处重名即抛）。装配序显式导入 = 该词在任意应用装载（装载阶段①
+// validateEventDefs 词汇登记窗）之前已在册——应用侧无从抢注同名词冒充宿主
+// 遥测面（一行防伪造）。纯副作用导入，无具名消费。
+import '../contracts/deprecations.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import { PROMPTS_CHANGE_EVENT, registerPromptsService } from './prompts.js';
 import type { ToolsService } from '../tools/registry.js';
@@ -1895,6 +1902,24 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     if (!existsSync(quickPath) || !statSync(quickPath).isFile()) {
       await refuseBoot(APP_ENTRY_UNRESOLVED, `--app-file 路径不存在或非文件：${quickPath}（须为入口文件路径）`);
     }
+    // 装载门随行（API 治理进化刀 H——装载门全入口同律）：快试行与装机行走
+    // 同一根公式（readApiGateAtRoot 文件形入口取目录 + 单层上爬 extensions/
+    // 布局——与下方 loadEntry 收割腿同款第三消费面，两常见布局两腿同值）。
+    // min 地板拒载（API_VERSION_MISMATCH 单源穿透）→ refuseBoot：装机行的
+    // 失败面是 unresolved 行（boot 断言拒启），快试行不进合成管线——直拒即
+    // 同律（快速试件即整个会话的意图，拒启是正确失败面）。清单缺席/更深层
+    // 嵌套 = 空门 fail-closed（loader 侧裁决——legacy 容忍态不破快试开发流；
+    // 点火后缺块拒载在装载窗同面兜底）。
+    const quickEntryDir = dirname(quickPath);
+    let quickGate: { appId: string; experimental: readonly string[] } | undefined;
+    try {
+      quickGate = readApiGateAtRoot(quickEntryDir) ?? readApiGateAtRoot(dirname(quickEntryDir));
+    } catch (err) {
+      await refuseBoot(
+        API_VERSION_MISMATCH,
+        `--app-file 装载门拒载：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     const quickRow: CompositionRow = {
       id: '_quick_test',
       pkg: quickPath,
@@ -1904,9 +1929,18 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // B1 冷读修：plan 行必须带 entry（AppPlanRow 三态互斥——有 entry = 文件
     // 应用激活行；缺 entry = dirname(undefined) 装载必炸）。rows 行是
     // CompositionRow（无 entry 合法）；plan 行是 AppPlanRow（entry 必填）。
+    // apiGate 随行（刀 H）：清单在场即随 plan 行携带——loader 装载窗与装机行
+    // 同一 adjudicateApiGate 裁决（空门 = 键缺席走 loader 侧 fail-closed）。
     composition = {
       rows: [...composition.rows, quickRow],
-      plan: [...composition.plan, { ...quickRow, entry: quickPath }],
+      plan: [
+        ...composition.plan,
+        {
+          ...quickRow,
+          entry: quickPath,
+          ...(quickGate === undefined ? {} : { apiGate: quickGate }),
+        },
+      ],
     };
   }
   // 安全模式（--no-apps，技术栈篇 §5）：boot 合成期过滤到 Ring 1 硬装配行
