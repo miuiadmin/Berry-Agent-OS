@@ -10,8 +10,9 @@
  * 拉投影经 opts.history() 闭包（repaint 重画与 start 起屏共用——本通道不
  * import loop/session 实现，拔掉后对话照跑）。
  *
- * 阻塞式交互（confirm/input）经提问队列占用输入框（prompt 模式）；select
- * 不支持——由 ctx.ui 聚合器降级为 input（§4.3 降级规则）。壳薄逻辑少：
+ * 阻塞式交互（confirm/input/select）经提问队列统一排队（单占面）：
+ * confirm/input 占输入框（prompt 模式）、select 占 SelectList overlay
+ * （刀 2 原生实装——overlay 是队首提问的呈现形态之一）。壳薄逻辑少：
  * 渲染格式在 render.ts、提问排队在 prompt.ts、命令在 commands.ts。
  */
 
@@ -23,6 +24,7 @@ import {
   Loader,
   Markdown,
   ScrollView,
+  SelectList,
   TUI_KEYBINDINGS,
   Text,
   TuiAltScreen,
@@ -36,6 +38,9 @@ import {
   type Component,
   type EditorTheme,
   type MarkdownTheme,
+  type OverlayHandle,
+  type SelectItem,
+  type SelectListTheme,
   type SlashCommand,
   type Terminal,
   type TUI,
@@ -205,6 +210,18 @@ const EDITOR_THEME: EditorTheme = {
     scrollInfo: identity,
     noMatch: identity,
   },
+};
+
+/**
+ * 单选 overlay 主题（刀 2 select 原生实装）：恒等函数零着色——与补全面
+ * v1 同律（着色克制：accent 专属焦点指示面，选项内容不混用主题色）。
+ */
+const SELECT_LIST_THEME: SelectListTheme = {
+  selectedPrefix: identity,
+  selectedText: identity,
+  description: identity,
+  scrollInfo: identity,
+  noMatch: identity,
 };
 
 /** 级别 → 通知行前缀（success 档 2026-08-27 第三十三批 P2-1 新增） */
@@ -512,6 +529,27 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   };
 
   /* ---- 提问队列（prompt 模式占输入框） ---- */
+  /**
+   * 在身单选 overlay 句柄（刀 2 select 原生实装；null = 无）——提问队列保证
+   * 单占（同刻至多一个 select 在身）。生命周期：showSelect 建（队首 select
+   * 占屏）→ Enter 选定/Esc 取消/abort 撤销/cancelAll 收场，四路共用
+   * closeSelectOverlay（幂等——hide 后焦点钉回编辑器）。
+   */
+  let selectOverlay: OverlayHandle | null = null;
+
+  /** 收起单选 overlay（幂等；焦点钉回编辑器——closeViewer 同款钉法） */
+  const closeSelectOverlay = (): void => {
+    if (selectOverlay === null) return;
+    const handle = selectOverlay;
+    // 先置空再 hide：hide() 路上若触发 SelectList onCancel 兜底回调，重入本
+    // 函数 = no-op（answerSelect 双结算另由队列 settled 旗挡）——先置空防重入抖动
+    selectOverlay = null;
+    handle.hide();
+    // 编辑器焦点显式钉回（主输入位恒编辑器——防焦点落到非交互组件后键盘失灵）
+    tui.setFocus(editor);
+    tui.requestRender();
+  };
+
   const prompts = createPromptQueue({
     show(question) {
       appendLines([`? ${question}`]);
@@ -523,6 +561,37 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     // reason，如「该审批已在网页端应答」；question 参数不显——提问行已在屏）
     dismiss(_question, reason) {
       appendLines([`− ${reason}`]);
+    },
+    // 单选占屏（刀 2）：问题行照落 + SelectList overlay 占焦——↑/↓ 移动、
+    // Enter 选定、Esc 取消收 ''（ctrl+c 为装配层 interrupt 语义先占——tui.
+    // select.cancel 键序里 Esc 是 overlay 期实际可达取消键）。overlay 键路
+    // release 过滤双保险：本通道拦截面统一 isKeyRelease 早滤（下方 quitKeys
+    // 监听器）+ pi-tui 聚焦组件层对非 opt-in 组件滤 release（E-1 同律）
+    showSelect(question, spec) {
+      appendLines([`? ${question}`]);
+      const items: SelectItem[] = spec.choices.map((choice) => ({
+        value: choice.value,
+        label: choice.label,
+      }));
+      const list = new SelectList(items, Math.min(items.length, 8), SELECT_LIST_THEME);
+      // 选定：收 overlay → 答案回填队列（label 回显归队列 answerSelect）
+      list.onSelect = (item) => {
+        closeSelectOverlay();
+        prompts.answerSelect(item.value);
+      };
+      // 取消兜底（主路 = 下方 Esc 拦截先消费；此腿防漏网路径——双结算由
+      // closeSelectOverlay 幂等 + answerSelect 防御面共同挡）
+      list.onCancel = () => {
+        appendLines(['− 已取消选择']);
+        closeSelectOverlay();
+        prompts.answerSelect('');
+      };
+      selectOverlay = tui.showOverlay(list);
+      tui.requestRender();
+    },
+    // 单选占屏撤销（abort/cancelAll 路）：overlay 随取消收场收起
+    hideSelect() {
+      closeSelectOverlay();
     },
   });
 
@@ -590,6 +659,18 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     // 用户长按的真实重发（pi-tui 聚焦组件层同此分档）；返回 undefined = 不消费，
     // release 事件沿链流至聚焦组件层由 pi-tui 自行丢弃。
     if (isKeyRelease(data)) return undefined;
+    // 单选 overlay 期 Esc 拦截（刀 2）：先于 escapeHook 消费——桌面形态
+    // escapeHook 会吞 Esc（编辑器退出等语义），overlay 取消路必须在此截住；
+    // 消费后 SelectList 自身 onCancel 不触发（本监听器先于聚焦组件层跑），
+    // 取消三动作（收屏行/收 overlay/回填 ''）在此单点完成——与 onCancel 兜底
+    // 腿同形。ctrl+c 不在此截：恒走下方 interrupt 全局语义（规范拍板——
+    // overlay 期实际可达取消键 = Esc）
+    if (selectOverlay !== null && matchesKey(data, 'escape')) {
+      appendLines(['− 已取消选择']);
+      closeSelectOverlay();
+      prompts.answerSelect('');
+      return { consume: true };
+    }
     if (opts.escapeHook !== undefined && matchesKey(data, 'escape')) {
       if (opts.escapeHook()) return { consume: true };
     }
@@ -1098,7 +1179,23 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       });
       return answer ?? '';
     },
-    // select/setWidget 不支持——ctx.ui 聚合器按 §4.3 降级规则处理
+    /**
+     * 单选原生实装（刀 2，技术栈篇 §4.3 实现矩阵）：经提问队列以 select 形态
+     * 入队（单占面不变），占屏 = SelectList overlay。取消收场或 signal abort
+     * 的 undefined 归一为 ''（UiService.select 的保守值语义）；'' 本身也是
+     * overlay 期 Esc 取消的回填值——两路同值，消费方零新分支。setWidget 不
+     * 支持——后端键已删面（刀 2），UiService.setWidget 恒降级 notify。
+     */
+    async select(message, choices, askOpts?: UiAskOptions) {
+      // 增强 8 同律：ask 强制收起回看器（注意力优先级 ask > 回看）
+      closeViewer();
+      const answer = await prompts.ask(message, {
+        priority: chainBackground() ? 'background' : 'interactive',
+        signal: askOpts?.signal,
+        select: { choices },
+      });
+      return answer ?? '';
+    },
   };
 
   /* ---- 非聚焦活动摘要（S3 信封分流后台腿） ---- */

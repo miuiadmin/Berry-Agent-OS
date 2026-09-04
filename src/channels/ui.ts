@@ -3,9 +3,10 @@
  *
  * 聚合在线通道的 UI 后端：非交互原语（notify/setStatus）广播全部通道；
  * 阻塞式原语（confirm/select/input）挑首个支持的后端应答，通道不支持时
- * 按降级规则回落（select→input、setWidget→notify、confirm→input 降级为
- * 同一规则的自然延伸），无任何交互通道时 fail-soft 返回保守值——应用
- * 不感知通道能力差异。
+ * 按降级规则回落（select→input、confirm→input 降级为同一规则的自然延
+ * 伸），无任何交互通道时 fail-soft 返回保守值——应用不感知通道能力差异。
+ * setWidget 后端键已删（刀 2 删面——v1 全通道零实现），UiService.setWidget
+ * 恒降级 notify（不再扫描后端能力）。
  *
  * 语义纪律（§4.3）：阻塞式交互若用于授权场景，须走 approval seam 同一条
  * 审批日志——那是调用方（审批 answerer）的接线责任，不在本聚合器。
@@ -101,13 +102,8 @@ export function createUiService(opts?: { onError?: (err: unknown, op: 'notify' |
     },
 
     setWidget(node: unknown) {
-      // 首个支持 setWidget 的后端渲染；不支持 → 降级为 notify（§4.3 降级规则）
-      for (const backend of backends) {
-        if (backend.setWidget) {
-          backend.setWidget(node);
-          return;
-        }
-      }
+      // 恒降级 notify（刀 2 后端键删面：UiBackend.setWidget 已删——v1 全通道
+      // 零实现，扫描腿为死面；WidgetSpec 定稿时随 Disposer 形态重建后端键）
       service.notify(`[widget] 自定义渲染不受支持，已降级通知（${typeof node}）`);
     },
 

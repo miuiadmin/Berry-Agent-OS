@@ -712,6 +712,119 @@ describe('输入路由回归锁（契约篇 §5.4 命令>提问>消息序 + quit
   });
 });
 
+describe('刀 2 select 原生实装（SelectList overlay 占焦——Enter 选定 / Esc 取消 / 撤销面）', () => {
+  /** 刀 2 测试共用选项集（value 程序值 / label 展示文案） */
+  const CHOICES = [
+    { value: 'red', label: '红色' },
+    { value: 'blue', label: '蓝色' },
+  ];
+
+  it('↓ 移动 + Enter 选定：resolve 程序值 + label 回显行在屏 + 焦点归编辑器', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const tui = createTuiChannel({ host, commands: makeCommands().registry, terminal });
+    tui.start();
+    await flush();
+    const answer = tui.ui().select!('选颜色', CHOICES); // select 类型面可选、TUI 原生实装（刀 2）——非空断言
+    await flush();
+    // overlay 占屏：问题行 + 两选项 label 可见
+    expect(terminal.frames.join('')).toContain('选颜色');
+    expect(terminal.frames.join('')).toContain('红色');
+    expect(terminal.frames.join('')).toContain('蓝色');
+    terminal.send('\x1b[B'); // ↓（selectedIndex 0 → 1）
+    await flush();
+    terminal.send('\r'); // Enter 选定
+    await flush(150);
+    expect(await answer).toBe('blue'); // 程序值结算
+    expect(terminal.frames.join('')).toContain('› 蓝色'); // label 回显（人读文案非 value）
+    expect(log).toEqual([]); // 全程零 submit（overlay 占焦期编辑器收不到键）
+    tui.stop();
+  });
+
+  it('Esc 取消：resolve 空串 + 取消收屏行；随后输入回正常消息流（焦点已归编辑器）', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const tui = createTuiChannel({ host, commands: makeCommands().registry, terminal });
+    tui.start();
+    await flush();
+    const answer = tui.ui().select!('选颜色', CHOICES);
+    await flush();
+    terminal.send('\x1b'); // Esc（拦截面在 escapeHook 之前消费——SelectList 自身 onCancel 不触发）
+    await flush(150);
+    expect(await answer).toBe(''); // 取消保守值
+    expect(terminal.frames.join('')).toContain('− 已取消选择'); // 取消可视化收屏行
+    // 焦点归位：后续键入 + Enter 走正常消息腿（overlay 不滞焦）
+    await type(terminal, '正常消息');
+    terminal.send('\r');
+    await flush(150);
+    expect(log).toEqual(['submit:正常消息']);
+    tui.stop();
+  });
+
+  it('overlay 期 Ctrl+C 恒走 interrupt 全局语义（不冒充取消键——规范拍板：实际可达取消键 = Esc）', async () => {
+    const terminal = new CaptureTerminal();
+    const { log, host } = makeHost();
+    const tui = createTuiChannel({ host, commands: makeCommands().registry, terminal });
+    tui.start();
+    await flush();
+    const answer = tui.ui().select!('选颜色', CHOICES);
+    await flush();
+    terminal.send('\x03'); // Ctrl+C：quitKeys 拦截面先于 overlay（全局打断语义不因 overlay 改道）
+    await flush(150);
+    expect(log).toEqual(['interrupt']);
+    // promise 仍挂起（Ctrl+C 不是取消路）——Esc 补取消收场
+    let stillPending = true;
+    void answer.then(() => {
+      stillPending = false;
+    });
+    await flush(50);
+    expect(stillPending).toBe(true);
+    terminal.send('\x1b');
+    await flush(150);
+    expect(await answer).toBe('');
+    tui.stop();
+  });
+
+  it('kitty Escape 释放形不触发取消（E-1 同律——release 早滤在拦截面统一做）', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const tui = createTuiChannel({ host, commands: makeCommands().registry, terminal });
+    tui.start();
+    await flush();
+    const answer = tui.ui().select!('选颜色', CHOICES);
+    await flush();
+    terminal.send('\x1b[27;1:3u'); // Escape release——拦截面 isKeyRelease 早滤，不冒充取消
+    await flush(150);
+    let stillPending = true;
+    void answer.then(() => {
+      stillPending = false;
+    });
+    await flush(50);
+    expect(stillPending).toBe(true); // 取消未触发（按 press 才算）
+    terminal.send('\x1b'); // press 形真取消
+    await flush(150);
+    expect(await answer).toBe('');
+    tui.stop();
+  });
+
+  it('signal abort：resolve 空串 + overlay 收起 + 撤销说明行（per-ask 撤销面同律）', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const tui = createTuiChannel({ host, commands: makeCommands().registry, terminal });
+    tui.start();
+    await flush();
+    const controller = new AbortController();
+    const answer = tui.ui().select!('选颜色', CHOICES, { signal: controller.signal });
+    await flush();
+    controller.abort('该审批已在网页端应答');
+    await flush(150);
+    // undefined 保守值归一 ''（UiService.select 语义）+ dismiss 行 + overlay 收起不滞屏
+    expect(await answer).toBe('');
+    expect(terminal.frames.join('')).toContain('− 该审批已在网页端应答');
+    tui.stop();
+  });
+});
+
 describe('TUI-8 空表分档（无命令面形态的诚实披露）', () => {
   it('空注册表 unknown → ✖ 本形态无斜杠命令面（不误导 /help；submit 零触达）', async () => {
     const terminal = new CaptureTerminal();

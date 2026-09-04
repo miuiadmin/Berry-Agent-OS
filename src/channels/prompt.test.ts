@@ -27,6 +27,19 @@ function recorderWithDismiss() {
   return { io, log };
 }
 
+/** 记录型出屏回调 + select 面（刀 2 单选占屏形态——showSelect/hideSelect） */
+function recorderWithSelect() {
+  const log: string[] = [];
+  const io: PromptIo = {
+    show: (q) => log.push(`show:${q}`),
+    echo: (a) => log.push(`echo:${a}`),
+    dismiss: (q, reason) => log.push(`dismiss:${q}:${reason}`),
+    showSelect: (q, spec) => log.push(`showSelect:${q}:${spec.choices.map((c) => c.label).join('|')}`),
+    hideSelect: () => log.push('hideSelect'),
+  };
+  return { io, log };
+}
+
 describe('PromptQueue', () => {
   it('非 prompt 期 handleSubmit 返回 false（交正常输入流）', () => {
     const { io } = recorder();
@@ -223,5 +236,122 @@ describe('PromptQueue', () => {
     expect(log).toEqual(['show:无信号问题']);
     expect(queue.handleSubmit('答')).toBe(true);
     await expect(p).resolves.toBe('答');
+  });
+
+  /* ---- 刀 2：select 队列语义（overlay = 队首提问的呈现形态之一） ---- */
+
+  /** 刀 2 测试共用选项集 */
+  const COLORS = [
+    { value: 'red', label: '红色' },
+    { value: 'blue', label: '蓝色' },
+  ];
+
+  it('刀 2：select ask 占屏走 showSelect；answerSelect 选定值结算 + label 回显 + 接续出队', async () => {
+    const { io, log } = recorderWithSelect();
+    const queue = createPromptQueue(io);
+    const p = queue.ask('选颜色', { select: { choices: COLORS } });
+    expect(queue.pending()).toBe(true);
+    // 占屏 = showSelect（问题行 + 选项集——不走 show 文本形态）
+    expect(log).toEqual(['showSelect:选颜色:红色|蓝色']);
+    expect(queue.answerSelect('red')).toBe(true);
+    await expect(p).resolves.toBe('red');
+    // 回显 label（人读文案）非 value（程序值）
+    expect(log).toEqual(['showSelect:选颜色:红色|蓝色', 'echo:红色']);
+    expect(queue.pending()).toBe(false);
+  });
+
+  it('刀 2：select 与文本 ask 混排 FIFO——在身文本问未答时 select 排队，出队序不变', async () => {
+    const { io, log } = recorderWithSelect();
+    const queue = createPromptQueue(io);
+    const text = queue.ask('文本问题');
+    const sel = queue.ask('选颜色', { select: { choices: COLORS } });
+    // 首问占屏（文本形态）；select 仍在排队
+    expect(log).toEqual(['show:文本问题']);
+    expect(queue.handleSubmit('答')).toBe(true);
+    await expect(text).resolves.toBe('答');
+    // 文本问结算后 select 接续占屏（overlay 形态）
+    expect(log.slice(-1)).toEqual(['showSelect:选颜色:红色|蓝色']);
+    expect(queue.answerSelect('blue')).toBe(true);
+    await expect(sel).resolves.toBe('blue');
+  });
+
+  it('刀 2：answerSelect("") 取消收场——结算保守值、不回显（取消可视化归壳）', async () => {
+    const { io, log } = recorderWithSelect();
+    const queue = createPromptQueue(io);
+    const p = queue.ask('选颜色', { select: { choices: COLORS } });
+    expect(queue.answerSelect('')).toBe(true);
+    await expect(p).resolves.toBe('');
+    // 无 echo 行（'' 不回显——壳自落取消行/收 overlay）
+    expect(log).toEqual(['showSelect:选颜色:红色|蓝色']);
+  });
+
+  it('刀 2：select 在身期 handleSubmit 文本 = false（防御面——不冒充答案，交正常输入流）', async () => {
+    const { io, log } = recorderWithSelect();
+    const queue = createPromptQueue(io);
+    const p = queue.ask('选颜色', { select: { choices: COLORS } });
+    // 结构性不可达路径（overlay 占焦编辑器收不到键）——防御面：文本不静默吞
+    expect(queue.handleSubmit('随便打的字')).toBe(false);
+    expect(queue.pending()).toBe(true);
+    expect(queue.answerSelect('red')).toBe(true);
+    await expect(p).resolves.toBe('red');
+    // 未消费的文本不出现在回显（只有 label 回显行）
+    expect(log).toEqual(['showSelect:选颜色:红色|蓝色', 'echo:红色']);
+  });
+
+  it('刀 2：answerSelect 防御面——无提问在身/文本问在身 = no-op 返回 false', async () => {
+    const { io } = recorderWithSelect();
+    const queue = createPromptQueue(io);
+    // 无提问在身
+    expect(queue.answerSelect('red')).toBe(false);
+    // 文本问在身（非 select 形态——文本答案路径 handleSubmit 专属）
+    const p = queue.ask('文本问题');
+    expect(queue.answerSelect('red')).toBe(false);
+    expect(queue.pending()).toBe(true);
+    expect(queue.handleSubmit('正常答')).toBe(true);
+    await expect(p).resolves.toBe('正常答');
+  });
+
+  it('刀 2：select 在身 abort = hideSelect + dismiss 行 + resolve undefined；接续提问照常出队', async () => {
+    const { io, log } = recorderWithSelect();
+    const queue = createPromptQueue(io);
+    const controller = new AbortController();
+    const sel = queue.ask('选颜色', { select: { choices: COLORS }, signal: controller.signal });
+    const next = queue.ask('接续问题');
+    controller.abort('该审批已在网页端应答');
+    await expect(sel).resolves.toBeUndefined();
+    // overlay 收起 + 撤销说明行 + 接续者占屏（照 advance 序）
+    expect(log).toEqual([
+      'showSelect:选颜色:红色|蓝色',
+      'hideSelect',
+      'dismiss:选颜色:该审批已在网页端应答',
+      'show:接续问题',
+    ]);
+    // 接续者可正常应答
+    expect(queue.handleSubmit('接续答案')).toBe(true);
+    await expect(next).resolves.toBe('接续答案');
+  });
+
+  it('刀 2：cancelAll 时 select 在身先收 overlay（hideSelect）再全量取消收场', async () => {
+    const { io, log } = recorderWithSelect();
+    const queue = createPromptQueue(io);
+    const sel = queue.ask('选颜色', { select: { choices: COLORS } });
+    const waiting = queue.ask('排队问题');
+    queue.cancelAll();
+    await expect(sel).resolves.toBeUndefined();
+    await expect(waiting).resolves.toBeUndefined();
+    expect(log).toEqual(['showSelect:选颜色:红色|蓝色', 'hideSelect']);
+    expect(queue.pending()).toBe(false);
+  });
+
+  it('刀 2：壳未实现 showSelect（headless 形态）——回落 show 文本问题行，answerSelect 程序面照常可回填', async () => {
+    const { io, log } = recorderWithDismiss();
+    const queue = createPromptQueue(io);
+    const p = queue.ask('选颜色', { select: { choices: COLORS } });
+    // headless：无 showSelect 能力 → 文本问题行占屏（answerSelect 程序面不依赖壳）
+    expect(log).toEqual(['show:选颜色']);
+    expect(queue.answerSelect('blue')).toBe(true);
+    await expect(p).resolves.toBe('blue');
+    // label 回显照常（headless 日志面也有答案可读）
+    expect(log).toEqual(['show:选颜色', 'echo:蓝色']);
   });
 });

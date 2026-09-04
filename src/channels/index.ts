@@ -22,7 +22,7 @@ export type { ChannelsService } from './types.js';
 
 export { createCommandRegistry, type CommandRegistry } from './commands.js';
 export { createUiService, parseBooleanAnswer } from './ui.js';
-export { createPromptQueue, type PromptIo, type PromptQueue } from './prompt.js';
+export { createPromptQueue, type PromptIo, type PromptQueue, type PromptSelectSpec } from './prompt.js';
 export { assistantText, assistantToolLines, joinTextContent, renderAgentMessage, truncate } from './render.js';
 export {
   createChannelsService,

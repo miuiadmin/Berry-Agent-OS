@@ -155,9 +155,9 @@ export class WebuiChannel {
   /**
    * webui 广播后端（UiBackend 能力面钉死：只实现 notify/setStatus 两广播面 +
    * hasAudience 观众探针面；不实现 confirm/input/select——防 UiService 首个
-   * 支持后端接序抢走 TUI 审批应答；setWidget 缺席 = 聚合器按 §4.3 降级规则
-   * 自动降 notify，非本面职责。hasAudience 非交互面不参与接序——只自报
-   * 「有没有人可收」：在线连接数 > 0，daemon 常开零连接 = 无观众，#44）。
+   * 支持后端接序抢走 TUI 审批应答；setWidget 后端键已删（刀 2 删面），
+   * UiService.setWidget 恒降级 notify。hasAudience 非交互面不参与接序——
+   * 只自报「有没有人可收」：在线连接数 > 0，daemon 常开零连接 = 无观众，#44）。
    */
   readonly backend: UiBackend = {
     id: 'webui',

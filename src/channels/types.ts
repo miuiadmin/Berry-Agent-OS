@@ -76,8 +76,10 @@ export interface UiChoice {
 
 /**
  * 通道 UI 后端能力面（TUI/Web/CLI 各自实现）。可选项缺省 = 通道不支持，
- * 聚合器按降级规则处理（select→input、setWidget→notify、confirm→input），
- * 应用不感知通道能力差异（技术栈篇 §4.3）。
+ * 聚合器按降级规则处理（select→input、confirm→input），应用不感知通道
+ * 能力差异（技术栈篇 §4.3）。setWidget 无后端键——v1 全通道零实现，键已
+ * 删面（刀 2：闲置可选键误导「通道可实现 setWidget」；UiService.setWidget
+ * 应用面恒降级 notify，WidgetSpec 定稿时随 Disposer 形态重建后端键）。
  */
 export interface UiBackend {
   /** 通道标识（诊断溯源） */
@@ -90,10 +92,11 @@ export interface UiBackend {
   confirm?(message: string, opts?: UiAskOptions): Promise<boolean>;
   /** 自由文本输入（可选；交互面基座——select 降级也落到这里；abort 收场 ''） */
   input?(message: string, opts?: InputOptions): Promise<string>;
-  /** 单选（可选；不支持则聚合器经 input 降级；abort 收场 ''） */
+  /**
+   * 单选（可选；TUI 通道原生实装〔刀 2——SelectList overlay 占焦，Enter 选
+   * 定/Esc 取消收 ''〕；不支持则聚合器经 input 降级；abort 收场 ''）。
+   */
   select?(message: string, choices: readonly UiChoice[], opts?: UiAskOptions): Promise<string>;
-  /** 自定义渲染槽（可选；不支持则聚合器降级为 notify） */
-  setWidget?(node: unknown): void;
   /**
    * 观众自报（可选；基建大扫 #44）：后端比聚合器更清楚「有没有人可收」——
    * TUI 不实现（缺省 = 在场即有观众）；webui 报在线连接数 > 0（常开零连接
@@ -115,7 +118,11 @@ export interface UiService {
   input(message: string, opts?: InputOptions): Promise<string>;
   /** 状态行更新：广播到全部在线通道 */
   setStatus(status: string): void;
-  /** 自定义渲染槽（通道不识别则降级为 notify） */
+  /**
+   * 自定义渲染槽：恒降级 notify（刀 2 后端键删面——v1 全通道零 setWidget
+   * 实现，应用面保留统一降级语义；WidgetSpec 定稿时随 Disposer 形态重建
+   * 后端键）。
+   */
   setWidget(node: unknown | null): void;
   /**
    * 观众探针（任一在线后端自报有观众——基建大扫 #44 修订 R-2 保守口径）：

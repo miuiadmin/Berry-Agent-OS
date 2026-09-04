@@ -7,10 +7,7 @@ import { createUiService, parseBooleanAnswer } from './ui.js';
 import type { UiBackend, UiChoice } from './types.js';
 
 /** 桩后端：记录调用；能力面按参数裁剪（缺省 = 不支持可选原语） */
-function stubBackend(
-  id: string,
-  caps: { confirm?: boolean; input?: boolean; select?: boolean; setWidget?: boolean } = {},
-) {
+function stubBackend(id: string, caps: { confirm?: boolean; input?: boolean; select?: boolean } = {}) {
   const calls: { op: string; message: string }[] = [];
   /** 桩 input 的应答脚本（逐条弹出；耗尽返回 ''） */
   const scriptedInputs: string[] = [];
@@ -35,7 +32,6 @@ function stubBackend(
           ),
         }
       : {}),
-    ...(caps.setWidget ? { setWidget: (node: unknown) => calls.push({ op: 'setWidget', message: String(node) }) } : {}),
   };
   return { backend, calls, scriptedInputs };
 }
@@ -172,13 +168,14 @@ describe('UiService 降级规则（技术栈篇 §4.3）', () => {
     await expect(ui.confirm('继续？')).resolves.toBe(false);
   });
 
-  it('setWidget 无支持者 → 降级 notify', () => {
+  it('setWidget 恒降级 notify（刀 2 后端键删面——无实现者可寻，全通道只收通知）', () => {
     const ui = createUiService();
-    const { backend, calls } = stubBackend('plain');
-    ui.attach(backend);
+    const full = stubBackend('full', { confirm: true, input: true, select: true });
+    ui.attach(full.backend);
     ui.setWidget({ kind: 'chart' });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.op).toBe('notify');
+    // 即便交互后端在线也只收 notify——UiBackend.setWidget 键已删，无路由可走
+    expect(full.calls).toHaveLength(1);
+    expect(full.calls[0]!.op).toBe('notify');
   });
 });
 
