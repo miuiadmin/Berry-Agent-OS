@@ -71,7 +71,7 @@ export const CLI_PARITY_RULES: readonly CliParityRule[] = [
   {
     desktop: '/monitor',
     cli: [],
-    note: '管理器三页签动词面分账（骨架篇 §1.2）：tick 族（e/d/n）对等 = 会话内 /tick 命令面（berry run 单发同参可执行）；Job cancel/全量 reload = 进程内交互态动词显式豁免（live 进程视角 headless 无语义）；memory 族 CLI 对等挂账二期 berry memory 命令族',
+    note: '管理器三页签动词面分账（骨架篇 §1.2，2026-09-04 刀E 勘正）：tick 族（e/d/n）无 headless 对等面——/tick 命令面是会话内 TUI 命令（channels 命令面分派），berry run 单发直投模型层不分派斜杠命令；CLI 对等挂账二期 berry tick 命令族；Job cancel/全量 reload = 进程内交互态动词显式豁免（live 进程视角 headless 无语义）；memory 族 CLI 对等挂账二期 berry memory 命令族',
   },
 ];
 

@@ -69,13 +69,16 @@ describe('CLI 对等律三向核对', () => {
     }
   });
 
-  it('monitor 对等裁决在场（刀四——分账 note 三段）', () => {
+  it('monitor 对等裁决在场（刀四——分账 note 三段；刀E 勘正断言同步）', () => {
     const rule = CLI_PARITY_RULES.find((entry) => entry.desktop === '/monitor');
     expect(rule).toBeDefined();
     expect(rule?.cli).toEqual([]);
-    // 分账三段：tick 族对等 / 进程内动词豁免 / memory 族挂账
+    // 分账三段：tick 族无 headless 面（勘正——不再伪称 berry run 可执行）/
+    // 进程内动词豁免 / memory 族挂账
     expect(rule?.note).toContain('/tick');
     expect(rule?.note).toContain('豁免');
     expect(rule?.note).toContain('二期');
+    // 勘正钉面（刀E）：run 不分派斜杠命令的诚实断言在场——回退伪称即红
+    expect(rule?.note).toContain('不分派斜杠命令');
   });
 });
