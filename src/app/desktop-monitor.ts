@@ -115,7 +115,7 @@ export interface MonitorDeps {
   readonly memoryStore: () => MemoryStore | undefined;
   /** 记忆 owner 键集活取（memory 件 ownerKeys 同式：global + projectOwnerKey） */
   readonly memoryOwnerKeys: () => readonly string[];
-  /** 工作区根活取（导出缺省路径锚 + ownerRoots 面——原始根，本件内 canonical 化） */
+  /** 工作区根活取（导出 target 锚 = **原始根**——与 /memory-export 同式不爬 git 根；ownerRoots 面本件内 canonical 化仅服务归属键展示） */
   readonly workspaceRoot: () => string;
   /** 可写根活取（导出写面判定；缺席 = 导出动词诚实拒——memory 件同律） */
   readonly writableRoots: () => readonly string[] | undefined;
@@ -194,8 +194,12 @@ export function obsTodayLine(counts: {
 
 /* ---------------- 服务面构造 ---------------- */
 
-/** 记忆条目呈现帽（刷屏护栏——全量走导出面） */
-const MEMORY_LIST_CAP = 30;
+/** 记忆条目呈现分区帽（刷屏护栏——全量走导出面）：active 段 24 + 终态段 6
+ * （遗漏大扫 20260904-c 刀C——骨架篇 §1.2 mem 页签条款分区保额帽增补）。
+ * 终态保额使 v 恢复/x 宾语在 active 满帽时仍可见：修前四态顺序拼接后总帽
+ * 30 平切，active≥31 时终态结构性不可见 = v 在管理器内不可达。 */
+const MEMORY_ACTIVE_CAP = 24;
+const MEMORY_TERMINAL_CAP = 6;
 
 /** 构造监视面（desktop-main 调用——闭包持 deps 全活取，零状态零订阅） */
 export function createMonitorFace(deps: MonitorDeps): DesktopMonitorFace {
@@ -252,14 +256,22 @@ export function createMonitorFace(deps: MonitorDeps): DesktopMonitorFace {
       superseded: byStatus.get('superseded')!.length,
       expired: byStatus.get('expired')!.length,
     };
-    // 条目行：active 在前、终态随后（v 恢复的宾语），帽 30 行防刷屏（全量走导出）
-    const records = [
-      ...byStatus.get('active')!,
+    // 条目行：active 段在前、终态段随后（v 恢复/x 的宾语域）——分区保额帽
+    // （刀C）：两段独立截断，active 满帽不吞终态保额；超帽段注记行如实示段内数
+    const activeRecords = byStatus.get('active')!;
+    const terminalRecords = [
       ...byStatus.get('dismissed')!,
       ...byStatus.get('superseded')!,
       ...byStatus.get('expired')!,
     ];
-    const shown = records.slice(0, MEMORY_LIST_CAP);
+    const shown = [...activeRecords.slice(0, MEMORY_ACTIVE_CAP), ...terminalRecords.slice(0, MEMORY_TERMINAL_CAP)];
+    // 截断注记（任一段超帽才出现——段内示数 + 全量指引）
+    const capParts = [
+      ...(activeRecords.length > MEMORY_ACTIVE_CAP ? [`active ${MEMORY_ACTIVE_CAP}/${activeRecords.length}`] : []),
+      ...(terminalRecords.length > MEMORY_TERMINAL_CAP
+        ? [`终态 ${MEMORY_TERMINAL_CAP}/${terminalRecords.length}`]
+        : []),
+    ];
     const rows: MonitorRow[] = [
       { text: memoryCountLine(counts) },
       ...(shown.length === 0
@@ -268,9 +280,7 @@ export function createMonitorFace(deps: MonitorDeps): DesktopMonitorFace {
             text: memoryRowText(record),
             item: { kind: 'memory' as const, key: record.id, label: clipText(record.summary) },
           }))),
-      ...(records.length > MEMORY_LIST_CAP
-        ? [{ text: ` （仅示前 ${MEMORY_LIST_CAP} 条 / 共 ${records.length} 条——全量经 e 导出）` }]
-        : []),
+      ...(capParts.length > 0 ? [{ text: ` （仅示 ${capParts.join(' · ')} 条——全量经 e 导出）` }] : []),
     ];
     return { counts, rows };
   };
@@ -418,13 +428,21 @@ export function createMonitorFace(deps: MonitorDeps): DesktopMonitorFace {
       if (store === undefined) return '记忆库不在场（persist:false）——导出不可用';
       const roots = deps.writableRoots();
       if (roots === undefined) return '可写根未注入——导出不可用（/memory-export 同律）';
-      // 缺省路径与 /memory-export 同式：工作区根 + 时间戳防误覆盖
-      const canonical = canonicalWorkspaceRoot(deps.workspaceRoot());
-      const target = join(canonical, `memory-export-${new Date(now()).toISOString().replace(/[:.]/g, '-')}.jsonl`);
+      // 缺省路径与 /memory-export 同式同源（遗漏大扫 20260904-c 刀C 勘正）：
+      // target 锚 = **原始工作区根**——canonicalWorkspaceRoot 是 project 归属键
+      // 语义（爬 git 根 + 别名重定向），不是写路径物理锚；修前 target 锚
+      // canonical 形，git 仓库子目录工作区（monorepo 子包/worktree）下爬到
+      // 仓库根恒落可写根外被拒，而原命令同场景恒通过——行为分叉
+      const target = join(
+        deps.workspaceRoot(),
+        `memory-export-${new Date(now()).toISOString().replace(/[:.]/g, '-')}.jsonl`,
+      );
       if (!isPathInsideRoots(target, roots)) {
         return `拒写：目标不在可写根内（${target}）——导出只写可写根内的路径。`;
       }
-      const text = exportMemoryText(store, undefined, [canonical]);
+      // ownerRoots = canonical 项目根（导出 header 人读核对面——与原命令同式：
+      // canonical 只服务归属键展示面，不进写路径判定）
+      const text = exportMemoryText(store, undefined, [canonicalWorkspaceRoot(deps.workspaceRoot())]);
       await writeExportFile(target, text);
       const count = text.split('\n').filter((line) => line.trim() !== '').length - 1; // 减 header
       return {

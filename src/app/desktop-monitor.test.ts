@@ -5,7 +5,7 @@
  */
 
 import { afterAll, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -339,6 +339,51 @@ describe('记忆动词：真库 DAO 真跑', () => {
       }),
     );
     expect(await rejecting.memoryExport()).toContain('拒写');
+  });
+
+  it('【红锁 刀C】e 导出 git 子目录工作区：target 锚原始根不爬 git 根——canonical 分叉场景照过 fence（修前恒拒「拒写」）', async () => {
+    // 受控 git 形：父目录裸 mkdir .git（findGitRoot 纯文件系统探测不 spawn
+    // git——目录形即主仓库根）；workspace = 仓库子目录（monorepo 子包形态）
+    const parent = mkdtempSync(join(tmpdir(), 'berry-monitor-git-'));
+    tmpDirs.push(parent);
+    mkdirSync(join(parent, '.git'));
+    const sub = join(parent, 'packages', 'sub');
+    mkdirSync(sub, { recursive: true });
+    const { memory, face } = assembleMemory({
+      workspaceRoot: () => sub,
+      writableRoots: () => [sub],
+    });
+    seed(memory);
+    const result = await face.memoryExport();
+    // 修前 target 锚 canonicalWorkspaceRoot(sub) = 爬 .git 到 parent 根 →
+    // 恒落可写根 [sub] 外被拒（原命令同场景通过——行为分叉）；修后与原命令
+    // 同式锚原始根 → 过 fence 真写盘
+    if (typeof result === 'string') throw new Error(`git 子目录工作区导出应成功（修前 canonical 爬根恒拒）：${result}`);
+    expect(result.title).toContain('已导出 1 条');
+    const target = result.lines[0]!.trim();
+    expect(target.startsWith(sub)).toBe(true); // 落点 = 原始工作区根（非 git 根）
+    expect(existsSync(target)).toBe(true); // 真写盘
+  });
+
+  it('【红锁 刀C】mem 页签分区保额帽：active 31 条时终态仍可见（v 恢复宾语保额——修前总帽 30 平切终态结构性不可见）', async () => {
+    const { memory, face } = assembleMemory();
+    for (let i = 0; i < 31; i++) seed(memory, { summary: `active 条目 ${i}` });
+    const dismissedId = seed(memory, { summary: '将被忘掉' });
+    memory.forget(dismissedId, 'user', 1_700_000_000_000);
+    const panel = await face.panel('mem');
+    const text = panel.rows.map((row) => row.text).join('\n');
+    // 计数行如实全量（呈现帽只作用于条目行不作用于计数）
+    expect(text).toContain('active 31 · dismissed 1 · superseded 0 · expired 0');
+    const items = panel.rows.flatMap((row) => (row.item?.kind === 'memory' ? [row.item.key] : []));
+    // 分区帽：active 段 24 + 终态段 6（终态实际 1 条全量进帽）→ 25 行
+    expect(items).toHaveLength(25);
+    // v 恢复宾语在帽内可见（修前 active 31 条平切全占帽、dismissed 永不可见）
+    expect(items).toContain(dismissedId);
+    // 截断注记如实示 active 段内数；终态段未超帽不出注记
+    expect(text).toContain('仅示 active 24/31');
+    expect(text).not.toContain('终态 6/');
+    // 段序：active 行在前、终态行殿后（分区拼接序）
+    expect(items.indexOf(dismissedId)).toBe(items.length - 1);
   });
 
   it('记忆动词缺席降级：store 缺席三动词诚实拒', async () => {
