@@ -21,6 +21,8 @@
  * 8. 生成物 drift（第九十一批）——COMPATIBILITY.md / docs/API参考.md ≠ 生成器
  *    真值（面快照 + 注册簿 + 归档族派生）即红：生成物是提交件，手改或面变更后
  *    漏再生即漂移（再生入口 = npm run build 尾挂或生成器 CLI --write）；
+ *    api-decls Face 派生两 .d.ts 同律收录（2026-09-04 进化批刀 D——手稳件升
+ *    生成物，declare 键集从提交位快照模块域派生）；
  * 9. 面动号不动（就绪度审计 20260903 P2）——执法纪元 ignited 且归档族非空时，
  *    当前快照 vs 最新归档面 diff 非零而 apiVersion 相同即红（面号是 since/
  *    removalIn 版本坐标的基准）；纪元 pre-ignition 或基线前休眠——机制常驻、
@@ -42,6 +44,7 @@ import {
   COMPATIBILITY_PATH,
 } from './generate-compatibility.mjs';
 import { renderApiReference, API_REFERENCE_PATH } from './generate-api-reference.mjs';
+import { renderFaceDecls, API_DECLS_DIR } from './generate-api-decls.mjs';
 import { stripExperimentalSection } from './api-doc-sections.mjs';
 
 /** 仓库根（脚本位置上一级） */
@@ -385,6 +388,18 @@ const DEPRECATIONS =
       want: renderApiReference({ surface: snapSurface, deprecations: DEPRECATIONS }),
     },
   ];
+  // Face 派生两 .d.ts（进化批刀 D——手稳件升生成物）同律进 drift 面：declare 键集
+  // 从提交位快照模块域派生，committed 件漂移（手改 declare 行 / Face 变更后漏
+  // 再生）即红。渲染失败（快照域缺席等）同样落 [查 8] 红而非裸炸——闸出口形态统一
+  let faceDecls = [];
+  try {
+    faceDecls = [...renderFaceDecls(snapSurface)];
+  } catch (err) {
+    v(`[查 8] Face 派生件渲染失败（快照模块域漂移？）：${err.message}`);
+  }
+  for (const [fileName, want] of faceDecls) {
+    pairs.push({ label: `api-decls/${fileName}`, path: join(API_DECLS_DIR, fileName), want });
+  }
   for (const { label, path, want } of pairs) {
     if (!existsSync(path)) {
       v(`[查 8] 生成物 ${label} 缺席（npm run build 尾挂或生成器 --write 落盘——生成物是提交件）`);

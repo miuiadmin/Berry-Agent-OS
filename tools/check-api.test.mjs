@@ -1395,3 +1395,109 @@ describe('签名指纹（刀 C——sig 稳定哈希 + classifyFaceDiff 双侧�
     expect(classifyFaceDiff(face([e('aaaa1111aaaa1111')]), face([e('aaaa1111aaaa1111')])).changed).toEqual([]);
   });
 });
+
+describe('手稳件升生成物 + 扫描器 fail-loud（刀 D——§6.13.9 手稳件条款 + §6.13.4 键表对账）', () => {
+  it('scanTopLevelExports：export default 直接炸（一名一符号——穿透修饰前缀修死）', async () => {
+    const { scanTopLevelExports } = await import('./extract-api-surface.mjs');
+    // 修前 default 被当普通修饰前缀穿透、默认名被记成顶层导出（幻影符号入口）
+    expect(() => scanTopLevelExports('export default function f() {}')).toThrow('export default');
+  });
+
+  it('scanTopLevelExports：花括深度双向断言（下穿 0 即炸 / EOF 非 0 即炸）', async () => {
+    const { scanTopLevelExports } = await import('./extract-api-surface.mjs');
+    // 下穿 0：深度 0 处再遇闭 `}`（修前 Math.max 钳制静默咽下）
+    expect(() => scanTopLevelExports('}')).toThrow('下穿 0');
+    // EOF 非 0：失衡开括（修前静默收工，符号面在失步态上记账）
+    expect(() => scanTopLevelExports('export const a = 1;\nconst y = {')).toThrow('EOF');
+    // 绿侧对照：平衡形照常收名
+    expect(scanTopLevelExports('export const a = 1;').names.has('a')).toBe(true);
+  });
+
+  it('findExportedInterfaces：角深度/头部花括下穿 0 即炸 + EOF 悬挂态即炸', async () => {
+    const { findExportedInterfaces } = await import('./extract-api-surface.mjs');
+    // 角深度下穿（修前钳制归零、后续 `{` 被误判体开器收错体）
+    expect(() => findExportedInterfaces('export interface X> {}')).toThrow('角深度');
+    // 头部花括下穿（修前钳制归零静默咽下）
+    expect(() => findExportedInterfaces('export interface X }')).toThrow('头部花括');
+    // EOF 悬挂：体收集中 / 头部态未收口（修前静默丢弃悬挂体返回空体映射）
+    expect(() => findExportedInterfaces('export interface X {')).toThrow('EOF');
+    expect(() => findExportedInterfaces('export interface X')).toThrow('EOF');
+    // EOF 花括深度非 0（扫描态失衡）
+    expect(() => findExportedInterfaces('const a = {')).toThrow('EOF');
+    // 绿侧对照：正常接口照常收体（既有刀 B 用例为全量对照，此处最小绿锚）
+    expect(findExportedInterfaces('export interface X { a: string }').get('X')).toBeTruthy();
+  });
+
+  it('assertVirtualKeyCoverage：键表有而面无即炸（键表-抽取接线漂移抽取期红）', async () => {
+    const { assertVirtualKeyCoverage } = await import('./extract-api-surface.mjs');
+    const keys = [{ key: 'berryagent' }, { key: 'berryagent/llm' }, { key: 'berryagent/sqlite' }];
+    // 缺 berryagent/llm：整键域从快照蒸发的窗口关死在抽取期
+    expect(() => assertVirtualKeyCoverage(keys, [{ module: 'berryagent' }, { module: 'berryagent/sqlite' }])).toThrow(
+      'berryagent/llm',
+    );
+    // 全覆盖：静默过
+    expect(() =>
+      assertVirtualKeyCoverage(keys, [
+        { module: 'berryagent' },
+        { module: 'berryagent/llm' },
+        { module: 'berryagent/sqlite' },
+      ]),
+    ).not.toThrow();
+  });
+
+  it('renderFaceDecls：从面快照渲染两 Face 派生 .d.ts（定格形态 + 空域即炸）', async () => {
+    const { renderFaceDecls, declareKeysOf } = await import('./generate-api-decls.mjs');
+    const surface = {
+      exports: [
+        {
+          symbol: 'createProvider',
+          module: 'berryagent/llm',
+          tier: 'stable',
+          since: '1.0',
+          formFactors: ['standalone'],
+        },
+        {
+          symbol: 'anthropicMessagesApi',
+          module: 'berryagent/llm',
+          tier: 'stable',
+          since: '1.0',
+          formFactors: ['standalone'],
+        },
+        {
+          symbol: 'openDatabase',
+          module: 'berryagent/sqlite',
+          tier: 'stable',
+          since: '1.0',
+          formFactors: ['standalone'],
+        },
+      ],
+    };
+    const rendered = renderFaceDecls(surface);
+    // llm 件：alias 行在场 + declare 行按快照序（键集派生非手写序）
+    const llm = rendered.get('berryagent-llm.d.ts');
+    expect(llm).toContain("import type { providerApiFace } from '../llm/provider-face.js';");
+    expect(llm).toContain('type Face = typeof providerApiFace;');
+    expect(llm).toContain("export declare const createProvider: Face['createProvider'];");
+    // 定格形态：恰一尾换行（生成物纪律）
+    expect(llm.endsWith('\n') && !llm.endsWith('\n\n')).toBe(true);
+    // sqlite 件：无 alias、直引 AppSqliteFace
+    const sqlite = rendered.get('berryagent-sqlite.d.ts');
+    expect(sqlite).toContain("import type { AppSqliteFace } from '../persist/app-sqlite.js';");
+    expect(sqlite).toContain("export declare const openDatabase: AppSqliteFace['openDatabase'];");
+    expect(sqlite).not.toContain('type Face');
+    // declareKeysOf：逐行识别、非 declare 行不收
+    expect(declareKeysOf(llm)).toEqual(['createProvider', 'anthropicMessagesApi']);
+    // 空域即炸：快照模块域缺席 = 派生源漂移，fail-loud
+    expect(() => renderFaceDecls({ exports: [surface.exports[0]] })).toThrow('berryagent/sqlite');
+  });
+
+  it('手稳件升生成物：committed 两 .d.ts = renderFaceDecls(提交位快照)（查 8 drift 面收录锁）', async () => {
+    const { renderFaceDecls, FACE_DECL_SPECS } = await import('./generate-api-decls.mjs');
+    const surface = JSON.parse(readFileSync(join(ROOT, 'src/contracts/api-surface.json'), 'utf8'));
+    const rendered = renderFaceDecls(surface);
+    // 修前两件为手稳件（手写 declare 序 + 无生成器头注）——本断言修复前必红
+    for (const spec of FACE_DECL_SPECS) {
+      expect(readFileSync(join(ROOT, 'api-decls', spec.fileName), 'utf8')).toBe(rendered.get(spec.fileName));
+    }
+  });
+});

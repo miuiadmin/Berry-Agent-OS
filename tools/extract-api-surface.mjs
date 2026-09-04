@@ -139,7 +139,13 @@ export function scanTopLevelExports(sourceText) {
   while (token !== ts.SyntaxKind.EndOfFile) {
     const inTemplate = templateStack.length > 0;
     if (!inTemplate && token === ts.SyntaxKind.OpenBraceToken) depth++;
-    else if (!inTemplate && token === ts.SyntaxKind.CloseBraceToken) depth = Math.max(0, depth - 1);
+    else if (!inTemplate && token === ts.SyntaxKind.CloseBraceToken) {
+      // 双向断言（刀 D——去 Math.max 钳制）：深度 0 处再遇闭 `}` = 词法失步
+      //（模板/正则协议外的花括被错吞）；修前钳制把失步静默咽下、export 认定
+      // 继续在失步态上记账
+      depth--;
+      if (depth < 0) throw new Error('scanTopLevelExports：花括深度下穿 0——词法失步 fail-loud（模板/正则协议漂移？）');
+    }
     if (token === ts.SyntaxKind.ExportKeyword && depth === 0 && !inTemplate) {
       // —— 解析一个顶层 export 语句（语句内 token 就地消费，不回流外层深度计）——
       // export 关键字自身的源内起点（skipTrivia 下 getTokenStart 即 token 起点，
@@ -149,12 +155,17 @@ export function scanTopLevelExports(sourceText) {
       let moduleSpec = null; // 非空 = reexport 形
       let star = false;
       let t = step();
-      // 穿透修饰前缀（declare/abstract/async/default 的组合与后续声明关键字）
+      // export default 直接红（刀 D——一名一符号）：公开面命名导出纪律下 default
+      // 形是发射面漂移信号；修前穿透修饰循环把它当普通前缀吃掉、默认名被当
+      // 顶层导出记进面清单（幻影符号的另一入口）
+      if (t === ts.SyntaxKind.DefaultKeyword) {
+        throw new Error('scanTopLevelExports：export default 在公开面源（命名导出纪律）——发射面漂移，先修源');
+      }
+      // 穿透修饰前缀（declare/abstract/async 的组合与后续声明关键字）
       while (
         t === ts.SyntaxKind.DeclareKeyword ||
         t === ts.SyntaxKind.AbstractKeyword ||
-        t === ts.SyntaxKind.AsyncKeyword ||
-        t === ts.SyntaxKind.DefaultKeyword
+        t === ts.SyntaxKind.AsyncKeyword
       ) {
         t = step();
       }
@@ -241,6 +252,11 @@ export function scanTopLevelExports(sourceText) {
       if (star && moduleSpec !== null) stars.push(moduleSpec);
     }
     token = step();
+  }
+  // EOF 双向断言（刀 D）：文件收尾深度非 0 = 失衡花括（正则整吞漂移类）——修前
+  // 静默收工，符号面全在失步状态上记账；正则花括失步的最常见形态即有开无闭
+  if (depth !== 0) {
+    throw new Error(`scanTopLevelExports：EOF 花括深度 ${depth} ≠ 0——词法失步 fail-loud（正则/模板协议漂移？）`);
   }
   return { names, stars, tags };
 }
@@ -507,22 +523,40 @@ export function findExportedInterfaces(sourceText) {
         }
       } else if (header === null) {
         if (token === ts.SyntaxKind.OpenBraceToken) depth++;
-        else if (token === ts.SyntaxKind.CloseBraceToken) depth--;
+        else if (token === ts.SyntaxKind.CloseBraceToken) {
+          // 双向断言（刀 D）：下穿 0 = 词法失步（与扫描态同律——见 scanTopLevelExports）
+          depth--;
+          if (depth < 0) throw new Error('findExportedInterfaces：花括深度下穿 0——词法失步 fail-loud');
+        }
         if (depth === 0 && token === ts.SyntaxKind.ExportKeyword) {
           // 预读 export 后是否 interface 名序列（非 interface 形照常前行——
           // token 已前进无妨，深度 0 才认 export，语句体内无 export）
           let t = step();
+          // 预读 token 的括号效应回补（刀 D 双向断言逼出的既有失步）：export 后
+          // 首 token 若为 `{`（具名清单形 export { A } from '…'），其配对闭 `}`
+          // 由主循环计——开器在此补计深度才平衡；修前预读吞 `{` 无计数、闭 `}`
+          // 使深度下穿 0（barrel 文件全程负深度扫描，export interface 认定静默
+          // 失明——钳制时代无断言、失步被咽下）
+          if (t === ts.SyntaxKind.OpenBraceToken) depth++;
+          else if (t === ts.SyntaxKind.CloseBraceToken) depth--;
           if (t === ts.SyntaxKind.InterfaceKeyword) {
             t = step();
             if (t === ts.SyntaxKind.Identifier) header = { name: text(), angle: 0, headerBrace: 0 };
           }
         }
       } else if (token === ts.SyntaxKind.LessThanToken) header.angle++;
-      else if (token === ts.SyntaxKind.GreaterThanToken) header.angle = Math.max(0, header.angle - 1);
-      else if (token === ts.SyntaxKind.GreaterThanGreaterThanToken) header.angle = Math.max(0, header.angle - 2);
-      else if (token === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken)
-        header.angle = Math.max(0, header.angle - 3);
-      else if (token === ts.SyntaxKind.OpenBraceToken) {
+      else if (
+        token === ts.SyntaxKind.GreaterThanToken ||
+        token === ts.SyntaxKind.GreaterThanGreaterThanToken ||
+        token === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken
+      ) {
+        // 合并 token 按 `>` 字符数折算递减 + 双向断言（刀 D——去 Math.max 钳制）：
+        // 角深度下穿 0 = 头部态失步（`>` 出现在无对应 `<` 的位置）；修前钳制归零
+        // 后续 `{` 被误判体开器收错体——接口索引静默污染
+        header.angle -=
+          token === ts.SyntaxKind.GreaterThanToken ? 1 : token === ts.SyntaxKind.GreaterThanGreaterThanToken ? 2 : 3;
+        if (header.angle < 0) throw new Error('findExportedInterfaces：泛型角深度下穿 0——词法失步 fail-loud');
+      } else if (token === ts.SyntaxKind.OpenBraceToken) {
         if (header.angle === 0 && header.headerBrace === 0) {
           // 体开器：体文本自 `{` 之后起
           pendingName = header.name;
@@ -533,10 +567,18 @@ export function findExportedInterfaces(sourceText) {
           header.headerBrace++;
         }
       } else if (token === ts.SyntaxKind.CloseBraceToken) {
-        header.headerBrace = Math.max(0, header.headerBrace - 1);
+        // 双向断言（刀 D——去 Math.max 钳制）：头部花括下穿 0 同失步信号
+        header.headerBrace--;
+        if (header.headerBrace < 0) throw new Error('findExportedInterfaces：头部花括深度下穿 0——词法失步 fail-loud');
       }
     }
     token = step();
+  }
+  // EOF 双向断言（刀 D）：三态任一悬挂（体收集中 / 头部态 / 深度非 0）= 文件
+  // 收尾词法失步——修前静默丢弃悬挂体，接口索引悄然缺源（SERVICE_CATALOG 寻址
+  // 才炸、错误指向使用者而非失步文件）
+  if (bodyStart !== -1 || header !== null || depth !== 0) {
+    throw new Error('findExportedInterfaces：EOF 词法失步（体/头部悬挂或花括深度非 0）——fail-loud');
   }
   return out;
 }
@@ -1101,6 +1143,24 @@ export function assertApiBucketPartition(apiNames, barrelFaceNames, whitelist = 
 /* ---------------- 六真相源抽取主流程 ---------------- */
 
 /**
+ * 虚拟键 × 面清单对账（刀 D——缺键即炸）：VIRTUAL_API_KEYS 每键在面清单至少
+ * 一条导出。修前键表加键而抽取主流程漏接新真相源块时，抽取静默成功、整个键域
+ * 从快照蒸发（查 1 双侧同缺不红——快照与真值一起错）；对账把「键表有而面无」
+ * 的窗口关死在抽取期。导出供回归锁直锁判据。
+ * @param {Array<{key: string}>} virtualKeys VIRTUAL_API_KEYS 键表（api.ts 单源）
+ * @param {Array<{module: string}>} exports 面清单导出（抽取产物）
+ */
+export function assertVirtualKeyCoverage(virtualKeys, exports) {
+  const present = new Set(exports.map((e) => e.module));
+  const missing = virtualKeys.filter((k) => !present.has(k.key)).map((k) => k.key);
+  if (missing.length > 0) {
+    throw new Error(
+      `VIRTUAL_API_KEYS 键在面清单零导出：${missing.join(', ')}（键表加了键而抽取主流程漏接真相源块——先补 #1 系列块再落快照）`,
+    );
+  }
+}
+
+/**
  * 抽取 API 面清单真值（check-api 查 1 与构建链共用此单源）。
  * @returns {{ apiVersion: string, exports: object[], capabilities: object[] }}
  */
@@ -1431,6 +1491,10 @@ export async function extractSurface() {
   // diff（PR 裁决标签闸强制接走——api-break: 语义）+ COMPATIBILITY.md 纪元行。
   // 散拷禁律不破：此处只读常量（与 adjudicateApiGate 消费面同源同值），不改不散播
   const enforcement = apiMod.API_ENFORCEMENT_IGNITED ? 'ignited' : 'pre-ignition';
+
+  // —— 虚拟键对账（刀 D——缺键即炸）：六键各至少一条导出；键表加键而主流程
+  // 漏接真相源块的窗口在此关死（判据单源 assertVirtualKeyCoverage，回归锁同锁）
+  assertVirtualKeyCoverage(VIRTUAL_API_KEYS, exports);
 
   exports.sort((a, b) =>
     a.module === b.module ? (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0) : a.module < b.module ? -1 : 1,
