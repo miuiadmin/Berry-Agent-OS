@@ -37,13 +37,28 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { createJiti } from 'jiti';
-import { loadArchivedSnapshots, renderCompatibility } from './generate-compatibility.mjs';
+import {
+  classifyFaceDiff,
+  eraOf,
+  judgeBreakages,
+  loadArchivedSnapshots,
+  renderCompatibility,
+} from './generate-compatibility.mjs';
 
 /** 仓库根（脚本自身位置上一级——与 copy-app-assets.mjs 同款锚定） */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -526,6 +541,184 @@ export function planSnapshotArchive({ archiveExists, identical }) {
   return { action: 'reject', reason: '同版本异内容快照已在档——版本号复用或归档损坏，先人工裁决（拒静默覆盖）' };
 }
 
+// ───────────── 子步 3.6 语料试跑（crater 骨架）纯决策函数（API 治理进化刀 M） ─────────────
+// 技术栈 §8.3 子步 3.6：语料 = 官方清单 ∪ 本机已装清单，逐清单跑现役纯函数三件
+// （adjudicateApiGate 两态注入 / readHostVersionFields / classifyFaceDiff×
+// judgeBreakages 判级）——「点火后终态」的发布时点证据（试跑的是 injected 终态，
+// pre-ignition 现态恒绿不构成证据）。三函数逐名现役零新概念（冷读 CR1）。
+
+/**
+ * 语料收集（纯读文件系统，零副作用）。两面：
+ * - 官方面 = `<workDir>/apps/*.app.yaml` 全清单（默认层各行——目录缺席 = 面
+ *   空不阻断，契约 3 files 检视另辖）；
+ * - 已装面 = `<dataDir>/apps/sources.json` 装机账本逐键定位装机物根、根下单层
+ *   发现 `*.app.yaml`（与 apps-check 面二同律：npm/git 键是 `apps/` 下相对定位
+ *   串直接拼、local 键即绝对路径原样、`skills/` 键是技能通道非应用跳过）。
+ *   账本缺席 = 首装零应用（面空——记录性）；账本在而装机物失联 = 记入 missing
+ *   披露不红（账本卫生属 apps check 诊断面职，crater 只披露不执法）。
+ * 清单坏 yaml / 缺 id 键直接抛——语料损坏 = 事故红，不静默缩语料（crater 的
+ * 证据完整性先于通过率）。
+ * @param {{workDir?: string, dataDir?: string}} opts 官方面仓库根 + 已装面数据
+ *   目录（缺省 = APP_DATA_DIR ?? ~/.berry——与 src/app/paths.ts dataDir() 同源）
+ * @returns {{corpus: Array<{appId: string, api: object|undefined, origin: string}>, missing: string[]}}
+ */
+export function collectCraterManifests({
+  workDir = REPO_ROOT,
+  dataDir = process.env.APP_DATA_DIR ?? join(homedir(), '.berry'),
+} = {}) {
+  const corpus = [];
+  const missing = [];
+  // 面一：官方清单目录（随包面——默认层各行 .app.yaml）
+  const appsDir = join(workDir, 'apps');
+  if (existsSync(appsDir)) {
+    for (const name of readdirSync(appsDir).sort()) {
+      if (!name.endsWith('.app.yaml')) continue;
+      const manifest = parseYaml(readFileSync(join(appsDir, name), 'utf8'));
+      if (manifest === null || typeof manifest !== 'object' || typeof manifest.id !== 'string') {
+        throw new Error(`官方清单坏 yaml：apps/${name}（缺 id 键——语料损坏即事故红）`);
+      }
+      corpus.push({ appId: manifest.id, api: manifest.api, origin: `official:apps/${name}` });
+    }
+  }
+  // 面二：第三方装机账本（账本 = 装机枚举——「组合树 = 装配枚举、账本 = 装机
+  // 枚举」双源原则的物理面）
+  const ledgerPath = join(dataDir, 'apps', 'sources.json');
+  if (!existsSync(ledgerPath)) return { corpus, missing };
+  const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8'));
+  for (const key of Object.keys(ledger).sort()) {
+    if (key.startsWith('skills/')) continue; // 技能通道键——非应用不进语料
+    const root = isAbsolute(key) ? key : join(dataDir, 'apps', key); // local 形 / npm·git 形同律
+    if (!existsSync(root) || !statSync(root).isDirectory()) {
+      missing.push(key); // 账本在而物不在——披露不红（重装或卸载收账属诊断面）
+      continue;
+    }
+    for (const name of readdirSync(root).sort()) {
+      if (!name.endsWith('.app.yaml')) continue;
+      const manifest = parseYaml(readFileSync(join(root, name), 'utf8'));
+      if (manifest === null || typeof manifest !== 'object' || typeof manifest.id !== 'string') {
+        throw new Error(`已装清单坏 yaml：${join(root, name)}（缺 id 键——语料损坏即事故红）`);
+      }
+      corpus.push({ appId: manifest.id, api: manifest.api, origin: `installed:${key}/${name}` });
+    }
+  }
+  return { corpus, missing };
+}
+
+/**
+ * 装载腿拒载分类（纯函数）：把 adjudicateApiGate 的 throw 归入三桶——
+ * 'missing-block'（缺 api 块——legacy 翻转拒载，设计内：crater 的发现产物）、
+ * 'below-floor'（min 超地板——两态同抛的设计内拒载）、'unexpected'（其余一切：
+ * 版本形坏 / 实验键未声明 / 能力缺席三类意外出口与非 AppError 形——两态恒红）。
+ * 判据 = AppError 码 + 执法面原文短语；短语漂移由回归锁对真函数钉死（消息改
+ * 文案必先过锁）。
+ * @param {unknown} err adjudicateApiGate 抛出的错误（或任意形）
+ * @returns {'missing-block' | 'below-floor' | 'unexpected'}
+ */
+export function classifyGateRejection(err) {
+  const code = err !== null && typeof err === 'object' && 'code' in err ? String(err.code) : '';
+  // message 走鸭子形读取（AppError 真形与测试替身对象同吃）；无 message 键才
+  // 落 String(err) 整体兜底
+  const message =
+    err !== null && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err);
+  if (code === 'API_VERSION_MISMATCH') {
+    if (message.includes('缺 api 块')) return 'missing-block';
+    if (message.includes('低于地板')) return 'below-floor';
+  }
+  return 'unexpected';
+}
+
+/**
+ * 装载腿裁决（纯函数——gate 注入缝，产码调用点传真 adjudicateApiGate）。
+ * 逐清单 × ignited 两态注入跑装载门，断言谓词写死为机器可判形（冷读 CR2/CR3）：
+ * - ignited=false 态：零拒载——任何 throw 均事故红（含 below-floor：官方件
+ *   min 超过正在发布的宿主本身就是事故）；
+ * - ignited=true 态：拒载集合 ⊆ {missing-block ∪ below-floor} 且逐项随摘要
+ *   落发布日志（机器差异可见）——非空不红只记录（发现产物：点火日预告面）；
+ * - 'unexpected' 三类意外出口：两态恒红。
+ * @param {{manifests: Array<{appId: string, api: object|undefined, origin: string}>,
+ *   hostApiVersion: string, gate: Function}} input gate = (api, hostApiVersion, appId, ignited)
+ * @returns {{pass: boolean, accidents: Array<{appId, origin, kind, message}>,
+ *   rejections: Array<{appId, origin, kind, message}>}}
+ */
+export function judgeCraterGate({ manifests, hostApiVersion, gate }) {
+  const accidents = []; // false 态拒载（全量 = 事故红）
+  const rejections = []; // true 态拒载（⊆ 两设计内桶 = 记录不红）
+  for (const { appId, api, origin } of manifests) {
+    try {
+      gate(api, hostApiVersion, appId, false);
+    } catch (err) {
+      accidents.push({
+        appId,
+        origin,
+        kind: classifyGateRejection(err),
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    try {
+      gate(api, hostApiVersion, appId, true);
+    } catch (err) {
+      rejections.push({
+        appId,
+        origin,
+        kind: classifyGateRejection(err),
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  const pass = accidents.length === 0 && rejections.every((r) => r.kind !== 'unexpected');
+  return { pass, accidents, rejections };
+}
+
+/**
+ * semver 三段号的 major 段（判级腿「已判 MAJOR」的版本号判据——判 MAJOR 即
+ * 合法破坏，版本号 major 段升位是其发布机器可见形态）。非形 → NaN（NaN 比较
+ * 恒假 → major 桶非空时恒走红支——fail-closed）。
+ * @param {string} v 宿主 release 号（semver 三段，可带 prerelease 尾）
+ */
+function majorSegmentOf(v) {
+  const m = /^(\d+)\./.exec(v);
+  return m === null ? Number.NaN : Number(m[1]);
+}
+
+/**
+ * 判级腿裁决（纯函数——纪元门镜像查 9，冷读 CR3）：classifyFaceDiff（上一档
+ * 归档快照 vs 本版快照）× judgeBreakages（§6.13.6 语义）。比较基准取归档族中
+ * **除本版外**的最新档（子步 3.5 已先归档本版——不过滤则 diff 恒零假绿；重跑
+ * 幂等态同律）。三态：
+ * - 纪元门休眠（eraOf ≠ 'ignited'）→ 'recorded'：记录性通过，输出面 diff 供
+ *   人读不阻断（pre-release 自由 rename 窗口内无 DEP 的面演进是合法变更）；
+ * - 基线门休眠（除本版外归档族空 = 首档无上一档基线）→ 'recorded'；
+ * - 执法（ignited 后）：removed/changed 逐键「有生效 DEP（sanctioned）或该版
+ *   已判 MAJOR（release 号 major 段 > 上一档 major 段）」二者其一即过；major
+ *   桶非空而版本未升 major = 无凭证破坏 → 'red'。
+ * @param {{currentSurface: object, archives: Array<{version: string, surface: object}>,
+ *   deprecations: Array<{symbol: string, dep: string, removalIn: string}>, releaseVersion: string}} input
+ * @returns {{status: 'recorded'|'pass'|'red', note?: string, base?: string,
+ *   diff?: object, breakages?: Array<{kind: 'removed'|'changed', keys: string[]}>}}
+ */
+export function judgeCraterFace({ currentSurface, archives, deprecations, releaseVersion }) {
+  if (eraOf(currentSurface) !== 'ignited') {
+    return { status: 'recorded', note: `执法纪元 ${eraOf(currentSurface)}——纪元门休眠（记录性通过）` };
+  }
+  // 基线 = 除本版外的最新归档（3.5 已先落本版档——自比恒零，必滤）
+  const prior = archives.filter((a) => a.version !== releaseVersion);
+  if (prior.length === 0) {
+    return { status: 'recorded', note: '归档族空（首档基线未成）——记录性通过' };
+  }
+  const last = prior[prior.length - 1];
+  const diff = classifyFaceDiff(last.surface, currentSurface);
+  const breakages = [];
+  for (const kind of ['removed', 'changed']) {
+    const judged = judgeBreakages(diff[kind], kind, deprecations, currentSurface.apiVersion);
+    // major 桶 = 无 DEP 凭证的破坏——合法当且仅当版本号已判 MAJOR（major 段升位）
+    if (judged.major.length > 0 && !(majorSegmentOf(releaseVersion) > majorSegmentOf(last.version))) {
+      breakages.push({ kind, keys: judged.major });
+    }
+  }
+  if (breakages.length > 0) return { status: 'red', base: last.version, diff, breakages };
+  return { status: 'pass', base: last.version, diff };
+}
+
 // ───────────────────────── 编排骨舞（io 注入缝） ─────────────────────────
 
 /**
@@ -572,8 +765,10 @@ function sha1(file) {
  * 发布主流程（六道契约编排队；决策逻辑全部上移纯函数，本函数只做接线）。
  * @param {string[]} argv CLI 参数（--dry-run / --inject <谱项>）
  * @param {{exec: Function}} io 执行缝（测试全脚本化注入）
- * @param {{workDir?: string, pkg?: {name:string,version:string,binName:string}}} opts
- *   workDir 真跑 = 仓库根（pack 落点/git 锚点）；pkg 缺省读 workDir/package.json
+ * @param {{workDir?: string, pkg?: {name:string,version:string,binName:string}, dataDir?: string}} opts
+ *   workDir 真跑 = 仓库根（pack 落点/git 锚点）；pkg 缺省读 workDir/package.json；
+ *   dataDir = 子步 3.6 已装面数据目录（缺省 APP_DATA_DIR ?? ~/.berry——与
+ *   src/app/paths.ts dataDir() 同源；测试钉临时目录防真装机态入语料）
  * @returns {Promise<object>} 发布摘要（版本/tarball/shasum/是否真发/终态）
  */
 export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
@@ -721,6 +916,76 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
         `chore(release): API surface snapshot ${pkg.version}`,
       ]);
       if (commit.code !== 0) throw new Error(`快照归档 commit 失败（退出码 ${commit.code}）`);
+    }
+
+    // ── 契约 3 子步 3.6：语料试跑（crater 骨架——技术栈 §8.3；3.5 归档之后、
+    // 契约 4 publish 之前）──
+    // 语料 = 官方清单 ∪ 本机已装清单，逐清单跑现役纯函数三件（adjudicateApiGate
+    // 两态注入 / readHostVersionFields / classifyFaceDiff×judgeBreakages 判级）。
+    // --dry-run 照跑（只读纯函数面，零 git/npm 触达）；ignited=true 态的拒载 =
+    // crater 的发现产物（点火日预告面——逐项落发布日志，非空不红只记录）。
+    {
+      const { corpus, missing } = collectCraterManifests({
+        workDir,
+        dataDir: opts.dataDir ?? process.env.APP_DATA_DIR ?? join(homedir(), '.berry'),
+      });
+      // 三函数逐名现役（冷读 CR1）：装载门 + 宿主版本双字段都走真源 jiti 装载
+      const gateMod = await imp('../src/contracts/api.ts');
+      const hostApiVersion = (await imp('../src/app/host-face.ts')).readHostVersionFields().apiVersion;
+      const gateVerdict = judgeCraterGate({ manifests: corpus, hostApiVersion, gate: gateMod.adjudicateApiGate });
+      console.log(
+        `── 子步 3.6 语料试跑（crater）：装载腿 ${corpus.length} 清单 × ignited 两态（宿主面号 ${hostApiVersion}）` +
+          (corpus.length === 0
+            ? '——语料空（首装零应用——记录性通过非跳过）'
+            : gateVerdict.rejections.length === 0
+              ? '——ignited=true 态零拒载'
+              : `——ignited=true 态拒载 ${gateVerdict.rejections.length} 项（发现产物，记录不红）`),
+      );
+      for (const key of missing) {
+        console.log(`   ⚠ 装机物失联（账本在而物不在——apps check 诊断面职）：${key}`);
+      }
+      for (const rej of gateVerdict.rejections) {
+        console.log(`   · [${rej.kind}] ${rej.appId}（${rej.origin}）——${rej.message.replace(/\n/g, ' ')}`);
+      }
+      if (gateVerdict.accidents.length > 0) {
+        const head = gateVerdict.accidents[0];
+        throw new Error(
+          `子步 3.6 装载腿拒：ignited=false 注入态须零拒载（任何 throw 均事故红）——` +
+            `${gateVerdict.accidents.length} 项：首项 [${head.kind}] ${head.appId}（${head.origin}）${head.message.replace(/\n/g, ' ')}`,
+        );
+      }
+      if (gateVerdict.rejections.some((r) => r.kind === 'unexpected')) {
+        const bad = gateVerdict.rejections.find((r) => r.kind === 'unexpected');
+        throw new Error(
+          `子步 3.6 装载腿拒：ignited=true 态出现意外出口（版本形坏/实验键未声明/能力缺席三类——两态恒红）` +
+            `：[${bad.kind}] ${bad.appId}（${bad.origin}）${bad.message.replace(/\n/g, ' ')}`,
+        );
+      }
+      // 判级腿：纪元门镜像查 9（pre-ignition 现态 = 记录性通过，机制常驻、点火
+      // 日即执法日）；归档族取真位（3.5 已先归档本版——judgeCraterFace 内滤自比）
+      const faceVerdict = judgeCraterFace({
+        currentSurface: JSON.parse(builtSurfaceText),
+        archives: loadArchivedSnapshots(archiveDir),
+        deprecations: (await imp('../src/contracts/deprecations.ts')).DEPRECATIONS,
+        releaseVersion: pkg.version,
+      });
+      if (faceVerdict.status === 'recorded') {
+        console.log(`── 子步 3.6 判级腿：${faceVerdict.note}`);
+      } else {
+        const d = faceVerdict.diff;
+        console.log(
+          `── 子步 3.6 判级腿：${faceVerdict.status === 'pass' ? '过' : '拒'}（基线 ${faceVerdict.base} → ` +
+            `面 diff 新增 ${d.added.length} / 移除 ${d.removed.length} / 改形 ${d.changed.length} / ` +
+            `重定级 ${d.reTiered.length}${d.capabilitiesChanged ? ' / capabilities 有变' : ''}）`,
+        );
+        if (faceVerdict.status === 'red') {
+          const lines = faceVerdict.breakages.map((b) => `${b.kind}: ${b.keys.join(', ')}`).join('；');
+          throw new Error(
+            `子步 3.6 判级腿拒：ignited 后 removed/changed 须有生效 DEP 凭证或该版已判 MAJOR（major 段升位）` +
+              `二者其一——无凭证破坏 ${lines}`,
+          );
+        }
+      }
     }
 
     // ── 契约 4：幂等收口与 publish 单点 ──

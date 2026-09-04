@@ -22,13 +22,17 @@ import {
   applyScenario,
   assertDistTagTerminal,
   assertNoInstallPlaceholders,
+  classifyGateRejection,
   classifyGitTag,
   classifyProbe,
+  collectCraterManifests,
   compareExtractedTrees,
   decideIdempotent,
   defaultIo,
   deepCompareTarballs,
   inspectPackEntries,
+  judgeCraterFace,
+  judgeCraterGate,
   parseNpmPackJson,
   planSnapshotArchive,
   planTagOperations,
@@ -364,8 +368,15 @@ describe('assertNoInstallPlaceholders：发布物占位锚（真发路径 fail-l
 
 /** 每测独立的临时工作目录（pack 落点/dist 清扫锚定；不污染仓库） */
 let workDir;
+/** APP_DATA_DIR 原值（afterEach 还原——子步 3.6 已装面隔离用） */
+let priorDataDir;
 beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), 'release-test-'));
+  // 子步 3.6 语料试跑的已装面读数据目录（sources.json 账本）：钉入临时目录防
+  // 真装机态入语料（installSmoke/G1 同款隔离纪律——测试不得依赖本机 ~/.berry
+  // 形态，装了第三方应用的机器上语料漂移即假红/假绿）
+  priorDataDir = process.env.APP_DATA_DIR;
+  process.env.APP_DATA_DIR = workDir;
   // 仓内官方应用清单最小真形（基建大扫 #36）：installSmoke 的「默认应用：…」
   // 断言串自 readDefaultAppId(workDir) 动态拼出——夹具须与真实仓 apps/ 形态
   // 对齐（default 键真源），否则 green 路径误报「清单缺席」
@@ -374,6 +385,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   rmSync(workDir, { recursive: true, force: true });
+  if (priorDataDir === undefined) delete process.env.APP_DATA_DIR;
+  else process.env.APP_DATA_DIR = priorDataDir;
 });
 
 /**
@@ -1160,5 +1173,220 @@ describe('契约 4 深对照编排骨舞：字节不等先对照再裁决（runR
       runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
     ).rejects.toThrow(/实质差异.*package\/README\.md/);
     expect(labels(calls)).not.toContain('publish');
+  });
+});
+
+// ───────────── 子步 3.6 语料试跑（crater 骨架——刀 M，技术栈 §8.3） ─────────────
+
+/** 临时数据目录夹具（已装面账本位—— beforeEach 的 workDir 亦充任同职） */
+const tmpCraterDataDir = () => mkdtempSync(join(tmpdir(), 'release-crater-'));
+
+describe('子步 3.6 collectCraterManifests：官方 ∪ 已装两面语料收集', () => {
+  it('两面合流 + skills 键跳过 + 失联装机物披露不红 + origin 锚定', () => {
+    // 官方面：workDir 已带 berrycode.app.yaml（beforeEach 夹具——无 api 块合法入册）
+    const dataDir = tmpCraterDataDir();
+    // 已装面：账本三键——npm 形（物在，含 api 块）、skills 键（技能通道跳过）、
+    // npm 形失联（账本在而物不在——missing 披露，账本卫生属 apps check 诊断面职）
+    mkdirSync(join(dataDir, 'apps/node_modules/pkg-a'), { recursive: true });
+    writeFileSync(join(dataDir, 'apps/node_modules/pkg-a/tool.app.yaml'), 'id: tool\napi:\n  minApiVersion: "1.0"\n');
+    writeFileSync(
+      join(dataDir, 'apps/sources.json'),
+      JSON.stringify({
+        'node_modules/pkg-a': { id: 'tool' },
+        'skills/demo': { id: 'demo' },
+        'node_modules/gone': { id: 'gone' },
+      }),
+    );
+    const { corpus, missing } = collectCraterManifests({ workDir, dataDir });
+    expect(corpus.map((c) => c.appId).sort()).toEqual(['berrycode', 'tool']);
+    expect(corpus.find((c) => c.appId === 'tool').origin).toBe('installed:node_modules/pkg-a/tool.app.yaml');
+    expect(corpus.find((c) => c.appId === 'tool').api).toEqual({ minApiVersion: '1.0' });
+    expect(corpus.find((c) => c.appId === 'berrycode').api).toBeUndefined();
+    expect(missing).toEqual(['node_modules/gone']);
+  });
+
+  it('账本缺席 = 已装面空（首装零应用——语料空态，非跳过）', () => {
+    const { corpus, missing } = collectCraterManifests({ workDir, dataDir: tmpCraterDataDir() });
+    expect(corpus.map((c) => c.appId)).toEqual(['berrycode']);
+    expect(missing).toEqual([]);
+  });
+
+  it('官方清单坏 yaml（缺 id 键）= 事故红——语料完整性先于通过率', () => {
+    writeFileSync(join(workDir, 'apps', 'broken.app.yaml'), 'label: 无身份\n');
+    expect(() => collectCraterManifests({ workDir, dataDir: tmpCraterDataDir() })).toThrow('官方清单坏 yaml');
+  });
+});
+
+describe('子步 3.6 classifyGateRejection：拒载三桶判据（码 × 执法面原文短语）', () => {
+  it('missing-block / below-floor / unexpected 三桶 + 非 AppError 形兜底', () => {
+    const mk = (code, message) => ({ code, message, name: 'AppError' });
+    expect(classifyGateRejection(mk('API_VERSION_MISMATCH', '应用 x 清单缺 api 块——兼容执法已点火'))).toBe(
+      'missing-block',
+    );
+    expect(classifyGateRejection(mk('API_VERSION_MISMATCH', '宿主 API 面版本 1.0 低于地板——拒载'))).toBe('below-floor');
+    expect(classifyGateRejection(mk('API_VERSION_MALFORMED', 'apiVersion 格式非法'))).toBe('unexpected');
+    expect(classifyGateRejection(mk('API_EXPERIMENTAL_UNDECLARED', '实验键未声明'))).toBe('unexpected');
+    expect(classifyGateRejection(mk('API_CAPABILITY_MISSING', '能力缺席'))).toBe('unexpected');
+    expect(classifyGateRejection(new Error('非 AppError 形'))).toBe('unexpected');
+  });
+});
+
+describe('子步 3.6 judgeCraterGate：装载腿两态注入（对真 adjudicateApiGate 短语锁）', () => {
+  it('api 块缺席 = true 态发现产物（missing-block 记录不红）——真函数短语锁', async () => {
+    const { adjudicateApiGate } = await import('../src/contracts/api.ts');
+    const verdict = judgeCraterGate({
+      manifests: [
+        { appId: 'legacy-app', api: undefined, origin: 'official:apps/a.app.yaml' },
+        { appId: 'floor-ok', api: { minApiVersion: '1.0' }, origin: 'official:apps/b.app.yaml' },
+      ],
+      hostApiVersion: '1.0',
+      gate: adjudicateApiGate,
+    });
+    expect(verdict.pass).toBe(true);
+    expect(verdict.accidents).toEqual([]);
+    expect(verdict.rejections.map((r) => [r.appId, r.kind])).toEqual([['legacy-app', 'missing-block']]);
+  });
+
+  it('min 超地板 = false 态事故红（官方件 min 超正在发布的宿主即事故）——两态同抛', async () => {
+    const { adjudicateApiGate } = await import('../src/contracts/api.ts');
+    const verdict = judgeCraterGate({
+      manifests: [{ appId: 'greedy', api: { minApiVersion: '9.9' }, origin: 'x' }],
+      hostApiVersion: '1.0',
+      gate: adjudicateApiGate,
+    });
+    expect(verdict.pass).toBe(false);
+    expect(verdict.accidents.map((a) => a.kind)).toEqual(['below-floor']);
+    expect(verdict.rejections.map((r) => r.kind)).toEqual(['below-floor']);
+  });
+
+  it('版本形坏 = unexpected 两态恒红（三类意外出口之一）', async () => {
+    const { adjudicateApiGate } = await import('../src/contracts/api.ts');
+    const verdict = judgeCraterGate({
+      manifests: [{ appId: 'malformed', api: { minApiVersion: 'x.y' }, origin: 'x' }],
+      hostApiVersion: '1.0',
+      gate: adjudicateApiGate,
+    });
+    expect(verdict.pass).toBe(false);
+    expect(verdict.accidents[0].kind).toBe('unexpected');
+    expect(verdict.rejections[0].kind).toBe('unexpected');
+  });
+
+  it('谓词形状（stub 门单态抛）：true 态设计内拒载全记录不红、unexpected 即红', () => {
+    // 真门 below-floor 两态同抛、无法单测「仅 true 态记录不红」——stub 门只在
+    // ignited=true 抛，隔离谓词形状（真函数分类已由上三测锁死）
+    const gateOnlyTrue = (api, _host, _id, ignited) => {
+      if (!ignited) return;
+      if (api.kind === 'below-floor') throw { code: 'API_VERSION_MISMATCH', message: '低于地板' };
+      if (api.kind === 'missing-block') throw { code: 'API_VERSION_MISMATCH', message: '缺 api 块' };
+      if (api.kind === 'unexpected') throw { code: 'API_CAPABILITY_MISSING', message: '能力缺席' };
+    };
+    const base = { hostApiVersion: '1.0', gate: gateOnlyTrue };
+    const ok = judgeCraterGate({
+      ...base,
+      manifests: [
+        { appId: 'f', api: { kind: 'below-floor' }, origin: 'x' },
+        { appId: 'm', api: { kind: 'missing-block' }, origin: 'x' },
+      ],
+    });
+    expect(ok.pass).toBe(true);
+    expect(ok.rejections.map((r) => r.kind)).toEqual(['below-floor', 'missing-block']);
+    const bad = judgeCraterGate({
+      ...base,
+      manifests: [{ appId: 'u', api: { kind: 'unexpected' }, origin: 'x' }],
+    });
+    expect(bad.pass).toBe(false);
+    expect(bad.accidents).toEqual([]); // false 态零拒载成立
+    expect(bad.rejections[0].kind).toBe('unexpected');
+  });
+});
+
+describe('子步 3.6 judgeCraterFace：判级腿（纪元门镜像查 9 + DEP 或已判 MAJOR 其一）', () => {
+  /** 最小面快照夹具（classifyFaceDiff 只消费 exports/capabilities/apiVersion/enforcement） */
+  const surface = (exports, extra = {}) => ({
+    apiVersion: '1.0',
+    enforcement: 'ignited',
+    exports,
+    capabilities: [],
+    ...extra,
+  });
+  const entry = (symbol, fields = {}) => ({ module: 'm', symbol, tier: 'stable', ...fields });
+
+  it('纪元门休眠：pre-ignition 快照 = 记录性通过（面演进不阻断）', () => {
+    const v = judgeCraterFace({
+      currentSurface: surface([entry('A')], { enforcement: 'pre-ignition' }),
+      archives: [{ version: '1.0.0', surface: surface([entry('Old')]) }],
+      deprecations: [],
+      releaseVersion: '1.1.0',
+    });
+    expect(v.status).toBe('recorded');
+  });
+
+  it('基线门休眠：ignited 但归档族空（首档基线未成）= 记录性通过', () => {
+    const v = judgeCraterFace({
+      currentSurface: surface([entry('A')]),
+      archives: [],
+      deprecations: [],
+      releaseVersion: '1.0.0',
+    });
+    expect(v.status).toBe('recorded');
+    expect(v.note).toContain('首档');
+  });
+
+  it('本版自档滤除：基准取上一档而非自比（3.5 先归档本版——自比恒零假绿的负证）', () => {
+    const curr = surface([entry('New')]);
+    const v = judgeCraterFace({
+      currentSurface: curr,
+      archives: [
+        { version: '1.0.0', surface: surface([entry('Old')]) },
+        { version: '1.1.0', surface: curr }, // 本版已归档（真跑序：3.5 先于 3.6）
+      ],
+      deprecations: [],
+      releaseVersion: '1.1.0',
+    });
+    // 误比自档则 diff 恒零 → pass 假绿；正确基准 = 1.0.0 → removed Old 无凭证 → 红
+    expect(v.status).toBe('red');
+    expect(v.base).toBe('1.0.0');
+    expect(v.breakages).toEqual([{ kind: 'removed', keys: ['m::Old'] }]);
+  });
+
+  it('已判 MAJOR：release 号 major 段升位 → 无 DEP 破坏合法（判 MAJOR 即合法破坏）', () => {
+    const v = judgeCraterFace({
+      currentSurface: surface([entry('New')]),
+      archives: [{ version: '1.9.0', surface: surface([entry('Old')]) }],
+      deprecations: [],
+      releaseVersion: '2.0.0-alpha.1',
+    });
+    expect(v.status).toBe('pass');
+  });
+
+  it('生效 DEP：死期已到 = sanctioned 销账类（合法，非 major 升位也过）', () => {
+    const v = judgeCraterFace({
+      currentSurface: surface([]),
+      archives: [{ version: '1.0.0', surface: surface([entry('Old')]) }],
+      deprecations: [{ symbol: 'm::Old', dep: 'DEP-1', removalIn: '1.0' }],
+      releaseVersion: '1.1.0',
+    });
+    expect(v.status).toBe('pass');
+  });
+
+  it('changed 无凭证 + 未升 major = 红（面号域判级——keys 载坐标）', () => {
+    const v = judgeCraterFace({
+      currentSurface: surface([entry('S', { since: '1.1' })]),
+      archives: [{ version: '1.0.0', surface: surface([entry('S')]) }],
+      deprecations: [],
+      releaseVersion: '1.1.0',
+    });
+    expect(v.status).toBe('red');
+    expect(v.breakages).toEqual([{ kind: 'changed', keys: ['m::S'] }]);
+  });
+
+  it('release 号非形 = fail-closed 红（major 段 NaN 比较恒假）', () => {
+    const v = judgeCraterFace({
+      currentSurface: surface([]),
+      archives: [{ version: '1.0.0', surface: surface([entry('Old')]) }],
+      deprecations: [],
+      releaseVersion: 'not-semver',
+    });
+    expect(v.status).toBe('red');
   });
 });
