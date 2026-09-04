@@ -179,6 +179,24 @@ describe('v14 归属族：owner/owner_key/enabled 三列（goal 挂钟承载）'
     expect(job.updatedAt).toBe(3000);
   });
 
+  it('【回归锁 遗漏大扫 20260904-c 刀A】putOwned 名冲突拒：同名异主行不覆写——修前静默吞用户行（prompt 丢失/触发史继承污染）', () => {
+    // 用户行先占名 goal-g1（/tick add 同路——owner NULL）
+    db.add('goal-g1', '我的手动任务', 1000, 'daily@08:00');
+    const out = db.putOwned(ownedJob('g1', { prompt: '续跑快照', now: 2000 }));
+    // 修前：void 返回 + ON CONFLICT 覆写——用户行被吞（owner 变 builtin:goal）
+    expect(out).toBe('conflict');
+    const row = db.get('goal-g1')!;
+    expect(row.owner).toBeNull();
+    expect(row.prompt).toBe('我的手动任务');
+  });
+
+  it('putOwned 同 owner 重挂不受冲突守卫影响（名约定内的正常覆盖路径）', () => {
+    db.putOwned(ownedJob('g1'));
+    const out = db.putOwned(ownedJob('g1', { prompt: '重挂', now: 2000 }));
+    expect(out).toBe('written');
+    expect(db.get('goal-g1')!.prompt).toBe('重挂');
+  });
+
   it('setOwnedEnabled：生命周期位翻转（终态/降级 0 · resume 1）——行留史不删', () => {
     db.putOwned(ownedJob('g1'));
     db.setOwnedEnabled('builtin:goal', 'g1', false, 2000);

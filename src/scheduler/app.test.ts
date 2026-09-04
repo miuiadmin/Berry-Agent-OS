@@ -63,6 +63,25 @@ describe('GoalJobsFace：register（词法执法 + upsert + OS 联动）', () =>
     expect(row.owner).toBe(GOAL_JOB_OWNER);
     expect(row.sessionId).toBe('s1');
   });
+
+  it('【回归锁 遗漏大扫 20260904-c 刀A】register 名冲突拒：用户先占名 goal-<id>——修前静默吞用户行（prompt 丢失/触发史继承污染）', async () => {
+    // 用户行先占名（JobsStore.add——/tick add 同路落库）
+    jobs.add('goal-g1', '我的手动任务', Date.now(), 'daily@08:00');
+    const r = await face.register({
+      goalId: 'g1',
+      sessionId: 's1',
+      schedule: 'daily@09:00',
+      promptSnapshot: '续跑快照',
+    });
+    // 修前：ok true——upsert 覆写 prompt/schedule/session_id/owner，用户行被吞
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain('占用');
+    expect(r.message).toContain('/tick rm');
+    // 用户行原样保留（owner 仍 NULL、prompt 未被覆写）
+    const row = jobs.get('goal-g1')!;
+    expect(row.owner).toBeNull();
+    expect(row.prompt).toBe('我的手动任务');
+  });
 });
 
 describe('GoalJobsFace：disable/enable/remove（生命周期位 + 幽灵行）', () => {

@@ -281,8 +281,10 @@ async function applySchedulerApp(ctx: AppContext, deps: SchedulerAppDeps): Promi
         store.removeOwned(GOAL_JOB_OWNER, input.goalId);
       }
       // 写行：名确定性 goal-<goalId>（重挂 = 同行；once 形已先删行重插——触发史
-      // 清零，every/daily 走 upsert 保留 last_run_at 触发史防补拍双跑）
-      store.putOwned({
+      // 清零，every/daily 走 upsert 保留 last_run_at 触发史防补拍双跑）。
+      // 名冲突拒（遗漏大扫 20260904-c 刀A）：用户行先占名 goal-<id> 时不再
+      // 静默吞行——响亮拒 + 腾名指引（守卫在 store.putOwned，面侧只转译回执）
+      const put = store.putOwned({
         name: goalJobName(input.goalId),
         prompt: input.promptSnapshot,
         schedule: input.schedule,
@@ -291,6 +293,14 @@ async function applySchedulerApp(ctx: AppContext, deps: SchedulerAppDeps): Promi
         ownerKey: input.goalId,
         now,
       });
+      if (put === 'conflict') {
+        return {
+          ok: false,
+          message:
+            `任务名 ${goalJobName(input.goalId)} 已被其他行占用（用户行/异主系统行）——` +
+            `先 /tick rm ${goalJobName(input.goalId)} 腾名再挂钟`,
+        };
+      }
       // OS 注册联动（K2-d 注册器；缺席 = 行已写、OS 面降级——回执如实示态）
       if (deps.osRegistrar !== undefined) {
         const osResult = await deps.osRegistrar.register(store.get(goalJobName(input.goalId))!);
@@ -499,7 +509,10 @@ async function handleList(opts: TickCommandOpts): Promise<void> {
     const reason = job.lastRunReason === null ? '' : `〔${job.lastRunReason}〕`;
     // prompt 首行截断（多行 prompt 只示首行 60 字——清单面紧凑，全文在 add 回执）
     const preview = job.prompt.split('\n')[0]!.slice(0, 60);
-    return `  ${job.name}  ${schedule}  ${osState}  ${lastRun}${reason}  ${preview}`;
+    // 系统行徽标（遗漏大扫 20260904-c 刀A——修前裸列，TUI 用户无从辨认 goal
+    // 挂钟行是系统行而误触用户动词；对齐 monitor 面 tickRowText 的 owner 呈现）
+    const owned = job.owner === null ? '' : `〔系统·${job.owner}〕`;
+    return `  ${job.name}${owned}  ${schedule}  ${osState}  ${lastRun}${reason}  ${preview}`;
   });
   opts.ui.notify(`tick 任务（${jobs.length} 个——OS 定时注册 /tick enable <name>）：\n${lines.join('\n')}`);
 }
@@ -553,14 +566,26 @@ async function handleToggle(rest: string, opts: TickCommandOpts, action: 'enable
     ui.notify(`OS 注册面未装配（诊断形态无系统操作面）——/tick ${action} 不可用；其余子命令不受影响。`);
     return;
   }
-  if (action === 'disable') {
-    const result = await deps.osRegistrar.unregister(name);
-    ui.notify(result.ok ? `已注销（${name}）：\n${result.message}` : `注销失败（${name}）：${result.message}`);
-    return;
-  }
+  // 行先查后动 + 系统行拒（遗漏大扫 20260904-c 刀A，rm 守卫同律——边界篇席 13
+  // K2-c 通用律「用户面动词只作用 owner IS NULL 用户行」补齐两动词）：修前
+  // disable 分支连行存在都不查（对幽灵名直接打 OS 注销面）；goal 挂钟行
+  // disable 从背后拆 OS 钟而 goal 侧零感知（行 enabled 不动、wakeSchedule 声明
+  // 仍在）＝active goal 静默哑钟——自愈仅剩 /goal wake 重挂或 resume
   const job = store.get(name);
   if (job === undefined) {
     ui.notify(`任务不存在：${name}（/tick list 查看）`);
+    return;
+  }
+  if (job.owner !== null) {
+    ui.notify(
+      `任务 ${name} 是系统行（归属 ${job.owner}）——不走 /tick ${action}。` +
+        `goal 挂钟行摘钟/停摆走 /goal wake off，重挂走 /goal resume。`,
+    );
+    return;
+  }
+  if (action === 'disable') {
+    const result = await deps.osRegistrar.unregister(name);
+    ui.notify(result.ok ? `已注销（${name}）：\n${result.message}` : `注销失败（${name}）：${result.message}`);
     return;
   }
   const result = await deps.osRegistrar.register(job);

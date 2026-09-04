@@ -97,6 +97,12 @@ export class JobsStore {
    * ——防补拍双跑；once 形重挂在调用侧先 removeOwned 清史再插，见 app.ts
    * goalFace.register——定向复扫 20260902 第七轮 M-3）。
    * 名确定性由调用方约定（face 侧 goal-<goalId>），同名即同行。
+   *
+   * 名冲突守卫（遗漏大扫 20260904-c 刀A）：同名行已存且 owner 不同（用户行
+   * 占名 goal-<id> / 异主系统行）＝名约定被占——返回 'conflict' 不落笔（静默
+   * 覆写会吞掉用户行：prompt 丢失、触发史继承污染）；同 owner = 正常重挂路径
+   * 返 'written'。注：SELECT-then-INSERT 非原子，跨进程竞窗下 UNIQUE 约束仍
+   * 兜底名唯一——名约定冲突是人类尺度动作，可接受（与 add 的 duplicate 同量级）。
    */
   putOwned(job: {
     readonly name: string;
@@ -106,7 +112,9 @@ export class JobsStore {
     readonly owner: string;
     readonly ownerKey: string;
     readonly now: number;
-  }): void {
+  }): 'written' | 'conflict' {
+    const existing = this.get(job.name);
+    if (existing !== undefined && existing.owner !== job.owner) return 'conflict';
     this.connection
       .prepare(
         `INSERT INTO jobs (name, prompt, cwd, schedule, last_run_at, created_at, updated_at,
@@ -118,6 +126,7 @@ export class JobsStore {
            owner_key = excluded.owner_key, enabled = 1, updated_at = excluded.updated_at`,
       )
       .run(job.name, job.prompt, job.schedule, job.now, job.now, job.sessionId, job.owner, job.ownerKey);
+    return 'written';
   }
 
   /**

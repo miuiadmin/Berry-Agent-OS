@@ -392,12 +392,13 @@ describe('scheduler 官方件全栈：OS 定时注册命令链（K2-d enable|dis
     expect(os.calls).toEqual([]); // 注册器未被触
   });
 
-  it('disable：注销回执；空名用法回执', async () => {
+  it('disable：注销回执；空名用法回执（行先查后动——刀A 后幽灵名不再直打 OS 面）', async () => {
     const os = fakeOsRegistrar();
     const runtime = await assemble({ osTickRegistrar: os.registrar });
     const { backend, notifies } = recordingBackend();
     runtime.ui.attach(backend);
 
+    await runtime.channels.commands.dispatch('/tick add morning daily@08:30 简报');
     expect(await runtime.channels.commands.dispatch('/tick disable morning')).toBe('ok');
     expect(notifies.at(-1)).toContain('已注销（morning）');
     expect(os.calls).toContainEqual({ op: 'unregister', name: 'morning' });
@@ -417,6 +418,102 @@ describe('scheduler 官方件全栈：OS 定时注册命令链（K2-d enable|dis
     expect(notifies.at(-1)).toContain('任务已删除：morning');
     expect(notifies.at(-1)).toContain('OS 定时：已注销'); // 联动回执附行
     expect(os.calls).toContainEqual({ op: 'unregister', name: 'morning' });
+  });
+
+  it('【回归锁 遗漏大扫 20260904-c 刀A】goal 挂钟行 /tick disable 拒——用户动词从背后拆 OS 钟而 goal 侧零感知（行 enabled 不动 = 静默哑钟）', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    // goal 挂钟行（真 JobsStore.putOwned——与 /goal wake register 同路落库）
+    new JobsStore(runtime.persistence!.store.connection).putOwned({
+      name: goalJobName('g1'),
+      prompt: '续跑快照',
+      schedule: 'daily@08:30',
+      sessionId: 's-target',
+      owner: GOAL_JOB_OWNER,
+      ownerKey: 'g1',
+      now: Date.now(),
+    });
+
+    expect(await runtime.channels.commands.dispatch('/tick disable goal-g1')).toBe('ok');
+    // 拒注销回执 + 正路指引（修前：「已注销（goal-g1）」看似成功——OS 钟被拆、
+    // goal 行 enabled 仍 1、wakeSchedule 声明仍在＝active goal 静默哑钟）
+    expect(notifies.at(-1)).toContain('系统行');
+    expect(notifies.at(-1)).toContain('/goal');
+    // OS 注销未发生（修前：os.calls 含 unregister goal-g1）
+    expect(os.calls).toEqual([]);
+    // 行 enabled 不动（恒 1——goal 生命周期位只有 goal 侧可拨）
+    const row = runtime
+      .persistence!.store.connection.prepare(`SELECT enabled FROM jobs WHERE name = 'goal-g1'`)
+      .get() as { enabled: number };
+    expect(row.enabled).toBe(1);
+  });
+
+  it('【回归锁 遗漏大扫 20260904-c 刀A】goal 挂钟行 /tick enable 拒（同律）+ disable 幽灵名不到注册器', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    new JobsStore(runtime.persistence!.store.connection).putOwned({
+      name: goalJobName('g1'),
+      prompt: '续跑快照',
+      schedule: 'daily@08:30',
+      sessionId: 's-target',
+      owner: GOAL_JOB_OWNER,
+      ownerKey: 'g1',
+      now: Date.now(),
+    });
+
+    expect(await runtime.channels.commands.dispatch('/tick enable goal-g1')).toBe('ok');
+    expect(notifies.at(-1)).toContain('系统行');
+    expect(os.calls).toEqual([]); // 注册器未被触
+
+    // 幽灵名：行不存在即拒（修前 disable 分支连行存在都不查——对不存在名直接打 OS 注销面）
+    expect(await runtime.channels.commands.dispatch('/tick disable ghost')).toBe('ok');
+    expect(notifies.at(-1)).toContain('任务不存在：ghost');
+    expect(os.calls).toEqual([]);
+  });
+
+  it('用户行 disable/enable 回归（守卫只护系统行——owner IS NULL 正常动）', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    await runtime.channels.commands.dispatch('/tick add morning daily@08:30 简报');
+    expect(await runtime.channels.commands.dispatch('/tick disable morning')).toBe('ok');
+    expect(notifies.at(-1)).toContain('已注销（morning）');
+    expect(await runtime.channels.commands.dispatch('/tick enable morning')).toBe('ok');
+    expect(notifies.at(-1)).toContain('已注册 OS 定时（morning）');
+  });
+
+  it('【回归锁 遗漏大扫 20260904-c 刀A】list：goal 挂钟行带 owner 徽标（修前裸列——TUI 用户无从辨认系统行）', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    await runtime.channels.commands.dispatch('/tick add mine daily@08:00 我的手动任务');
+    new JobsStore(runtime.persistence!.store.connection).putOwned({
+      name: goalJobName('g1'),
+      prompt: '续跑快照',
+      schedule: 'daily@08:30',
+      sessionId: 's-target',
+      owner: GOAL_JOB_OWNER,
+      ownerKey: 'g1',
+      now: Date.now(),
+    });
+
+    expect(await runtime.channels.commands.dispatch('/tick list')).toBe('ok');
+    const listing = notifies.at(-1)!;
+    // goal 行带系统徽标（修前：与用户行同形裸列）
+    expect(listing).toContain(`goal-g1〔系统·${GOAL_JOB_OWNER}〕`);
+    // 用户行不带徽标（回归面）
+    expect(listing).toContain('mine  daily@08:00');
+    expect(listing).not.toContain(`mine〔`);
   });
 
   it('list：OS 注册态逐行探测（已注册/未注册两态）', async () => {
