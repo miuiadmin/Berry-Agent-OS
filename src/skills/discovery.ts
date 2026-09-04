@@ -318,6 +318,15 @@ const factorySkillRoot: string = join(dirname(fileURLToPath(import.meta.url)), '
  *   进 v1 拍板 17；与官方件注册表同源分发 = 宿主信任，无需目录信任判定，
  *   恒扫描；置末位 = local-fs 内最低优先，用户同名技能恒压过出厂件）。
  */
+/**
+ * 用户全局技能层目录（② `~/.berry/skills`——单一来源）：技能发现序的 user 层
+ * 与应用商店挂载目标（skill-store 通道）同位，两消费面共用本函数防漂移。
+ * homeDir 缺省 = 真实 homedir（测试缝注入）。
+ */
+export function userSkillsDir(homeDir?: string): string {
+  return join(homeDir ?? homedir(), '.berry', 'skills');
+}
+
 export function defaultSkillLocations(workspace: string, opts?: DefaultSkillLocationsOptions): SkillLocation[] {
   const home = opts?.homeDir ?? homedir();
   const locations: SkillLocation[] = [];
@@ -325,8 +334,8 @@ export function defaultSkillLocations(workspace: string, opts?: DefaultSkillLoca
   if (opts?.trusted) {
     locations.push({ dir: join(workspace, '.agents', 'skills'), source: 'project' });
   }
-  // ② 用户全局技能目录
-  locations.push({ dir: join(home, '.berry', 'skills'), source: 'user' });
+  // ② 用户全局技能目录（userSkillsDir 单源——发现序与商店挂载目标同位）
+  locations.push({ dir: userSkillsDir(home), source: 'user' });
   // ③ 跨库目录（agentskills.io 生态两目录原生扫描）
   locations.push({ dir: join(home, '.agents', 'skills'), source: 'user' });
   locations.push({ dir: join(home, '.claude', 'skills'), source: 'user' });

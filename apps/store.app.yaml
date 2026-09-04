@@ -1,0 +1,15 @@
+# 官方应用清单：应用商店（第八十五批批 F，契约篇 §6.12）
+#
+# 纯清单应用（assistant 先例同构）：桌面清单一行，真身是行 provide 的 store
+# 服务面（三市场动作单源——桌面商店视图与 berry apps CLI 对等族同一消费面）。
+# 无 default 键（默认位归 berrycode，回落锚归 chat）；无 agent 段（商店不是
+# 对话件——无对话形态）。
+#
+# components = 在场断言：builtin:store（本件）。行被 overlay 禁用 → 组件缺场
+# → 清单行「不可进入」+ 桌面商店入口回落不可用，核心循环不破（Ring 2 真·可卸）。
+id: store
+label: 应用商店
+components:
+  - builtin:store
+api:
+  minApiVersion: "1.0"

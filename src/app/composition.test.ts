@@ -68,6 +68,7 @@ const DEFAULT_LAYER_IDS = new Set([
   'obs',
   'browser',
   'desktop',
+  'store',
   'assistant',
 ]);
 
@@ -133,8 +134,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'browser', pkg: 'builtin:browser' },
       { id: 'desktop', pkg: 'builtin:desktop' },
       { id: 'assistant', pkg: 'builtin:assistant' },
+      { id: 'store', pkg: 'builtin:store' },
     ]);
-    expect(report.plan).toHaveLength(18);
+    expect(report.plan).toHaveLength(19);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -607,6 +609,7 @@ describe('builtin: 保留前缀解析', () => {
     const stubBrowser = { name: 'browser-stub', apply: async () => {} };
     const stubDesktop = { name: 'desktop-stub', apply: async () => {} };
     const stubAssistant = { name: 'assistant-stub', apply: async () => {} };
+    const stubStore = { name: 'store-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -626,6 +629,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:browser': stubBrowser,
       'builtin:desktop': stubDesktop,
       'builtin:assistant': stubAssistant,
+      'builtin:store': stubStore,
     });
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -646,6 +650,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'browser', pkg: 'builtin:browser' },
       { id: 'desktop', pkg: 'builtin:desktop' },
       { id: 'assistant', pkg: 'builtin:assistant' },
+      { id: 'store', pkg: 'builtin:store' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', pkg: 'builtin:chat', builtin: stubChat },
@@ -666,6 +671,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'browser', pkg: 'builtin:browser', builtin: stubBrowser },
       { id: 'desktop', pkg: 'builtin:desktop', builtin: stubDesktop },
       { id: 'assistant', pkg: 'builtin:assistant', builtin: stubAssistant },
+      { id: 'store', pkg: 'builtin:store', builtin: stubStore },
     ]);
   });
 

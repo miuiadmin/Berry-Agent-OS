@@ -34,6 +34,7 @@ export {
   createLocalSkillsProvider,
   createPackageSkillsProvider,
   defaultSkillLocations,
+  userSkillsDir,
 } from './discovery.js';
 
 /* 注册表 + 渐进披露清单 + ctx 挂载（骨架篇 §9.2） */

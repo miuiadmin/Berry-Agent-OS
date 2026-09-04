@@ -24,9 +24,17 @@ import { appendCrashRecord } from './crash-log.js';
 import { VERSION_WITH_CODENAME as VERSION } from './version.js';
 import { dataDir } from './paths.js';
 import { QUICK_START_ENTRY } from './guide-text.js';
-import { createDesktopShell, type DesktopShell, type DesktopAdminFace } from './desktop-shell.js';
+import {
+  createDesktopShell,
+  type DesktopShell,
+  type DesktopAdminFace,
+  type DesktopSessionEntry,
+  type DesktopSessionsFace,
+} from './desktop-shell.js';
 import type { DesktopAppEntry, DesktopService, DesktopStatusService } from './desktop-service.js';
 import type { AssistantService } from './assistant-app.js';
+import { STORE_APP_ID, type StoreService } from './store-app.js';
+import { deriveMessages } from '../session/index.js';
 import { createDesktopStatusAggregator, type DesktopCredentialIssue } from './desktop-status.js';
 import { runPowerAction, POWER_KILL_FAMILY_TEXT, type PowerResult } from './host-power.js';
 import { formatReloadResult, formatUninstallExec, formatUninstallReport } from './commands.js';
@@ -265,7 +273,9 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
         group: source === 'npm' || source === 'git' || source === 'local' ? 'thirdparty' : 'official',
         openable: missing === undefined,
         isDefault: manifest.id === defaultId,
-        ...(missing !== undefined ? { note: `组件缺场（${missing.join('、')}）` } : {}),
+        ...(missing === undefined ? {} : { note: `组件缺场（${missing.join('、')}）` }),
+        // 商店行分流（批 F）：Enter 进桌面商店视图而非 enterApp（清单行是入口皮）
+        ...(manifest.id === STORE_APP_ID ? { desktopView: 'store' as const } : {}),
       });
     }
     // 仓库态（已装未挂载）行：只读披露——装机面不是断头路（/apps 同款指引语义）
@@ -283,12 +293,166 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
     return entries;
   };
 
+  /* ---------------- 会话切换器面（批 F，骨架篇 §1.2 line 80 五件面的宿主真身） ---------------- */
+  // 动词全部单源走既有运行时面：list/preview 两源合并投影（webui sessionsFor 同
+  // 律）、search 走 session-search 窄面（session_fts 真跑）、close 走
+  // registry.retire、openNew 走 runtime.enterApp（默认应用）、resume 走
+  // registry.open({resume})。desktop-main 本地闭包直引用（非 ctx 服务——切换器
+  // 是桌面壳私有面）。
+
+  /** 投影消息取文本（content 两形态：纯串/块数组取 text 块——呈现专用小 helper） */
+  const projectionText = (content: unknown): string => {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      const parts: string[] = [];
+      for (const block of content) {
+        if (typeof block === 'object' && block !== null && 'text' in block) {
+          const text = (block as { readonly text?: unknown }).text;
+          if (typeof text === 'string') parts.push(text);
+        }
+      }
+      return parts.join(' ');
+    }
+    return '';
+  };
+
+  /** 呈现截断（一行宽纪律——预览行不撑爆终端） */
+  const clip = (text: string, max = 72): string => {
+    const one = text.replace(/\s+/g, ' ').trim();
+    return one.length <= max ? one : `${one.slice(0, max)}…`;
+  };
+
+  /** 末活动时刻人读串（确定性格式——不随 locale 漂移） */
+  const formatTime = (ms: number): string => new Date(ms).toISOString().replace('T', ' ').slice(0, 16);
+
+  /** 应用域键 → 人读标签（清单 label 单源；未装载应用回落域键原值） */
+  const appLabel = (appId: string): string => runtime.apps.get(appId)?.label ?? appId;
+
+  /** 会话标题（首条用户消息摘要——空会话 '(空会话)'；投影单源 deriveMessages） */
+  const sessionTitle = (events: Parameters<typeof deriveMessages>[0]): string => {
+    for (const message of deriveMessages(events)) {
+      if (message.type === 'user') {
+        const text = clip(projectionText(message.content));
+        return text === '' ? '(空会话)' : text;
+      }
+    }
+    return '(空会话)';
+  };
+
+  /**
+   * 两源合并清单（webui sessionsFor 同律）：注册表条目（活/退役——内存真相）∪
+   * store 近史 50（存档会话——write-behind 迟滞无害，活条目必在注册表）。
+   * 按末活动降序；active = 在册未退役；current = 前台聚焦位。
+   */
+  const sessionsFace: DesktopSessionsFace = {
+    list() {
+      const recent = runtime.persistence ? runtime.persistence.store.recentSessions(50) : [];
+      const seen = new Set<string>();
+      const result: DesktopSessionEntry[] = [];
+      // 腿一：注册表条目（含退役保留者——已闭可读不可写如实呈现）
+      for (const entry of runtime.drivers.entries.values()) {
+        const id = entry.session.header.sessionId;
+        seen.add(id);
+        const row = recent.find((r) => r.id === id);
+        const updatedAt = entry.session.events.at(-1)?.time ?? row?.lastEventAt ?? undefined;
+        result.push({
+          id,
+          appId: entry.appId,
+          label: appLabel(entry.appId),
+          title: sessionTitle(entry.session.events),
+          updatedAt: updatedAt === undefined ? undefined : formatTime(updatedAt),
+          active: !entry.retired,
+          current: runtime.drivers.focus.sessionId === id,
+        });
+      }
+      // 腿二：store 近史行（注册表未见的存档会话——本进程未开过的历史）
+      for (const row of recent) {
+        if (seen.has(row.id)) continue;
+        result.push({
+          id: row.id,
+          appId: row.app ?? 'chat',
+          label: appLabel(row.app ?? 'chat'),
+          title: row.lastEventAt === null ? '(空会话·存档)' : '(存档会话)',
+          updatedAt: row.lastEventAt === null ? undefined : formatTime(row.lastEventAt),
+          active: false,
+          current: false,
+        });
+      }
+      // 末活动降序（无时刻者沉底——空会话垫后）
+      result.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+      return result;
+    },
+    /** 预览（首末消息——deriveMessages 单源；存档腿走 loadSession 纯读派生） */
+    preview(id) {
+      const entry = runtime.drivers.entries.get(id);
+      const events =
+        entry === undefined ? (runtime.persistence?.loadSession(id)?.events ?? undefined) : entry.session.events;
+      if (events === undefined) return undefined;
+      const texts = deriveMessages(events)
+        .filter((m) => m.type === 'user' || m.type === 'assistant')
+        .map((m) => clip(projectionText(m.content)));
+      if (texts.length === 0) return { first: '（无消息）', last: '（无消息）' };
+      return { first: texts[0]!, last: texts.at(-1)! };
+    },
+    /** 全文搜索（session-search 窄面 → session_fts 命中集过滤清单；面缺席诚实拒） */
+    search(query) {
+      const face = runtime.ctx.tryGet<{
+        search(query: string, limit?: number): readonly { readonly sessionId: string }[];
+      }>('session-search');
+      if (face === undefined) {
+        return { ok: false, error: '全文检索面不在场（memory 行未装载或被禁用）——清单浏览照常可用' };
+      }
+      try {
+        const hits = face.search(query, 50);
+        const rank = new Map(hits.map((hit, index) => [hit.sessionId, index]));
+        const entries = sessionsFace
+          .list()
+          .filter((entry) => rank.has(entry.id))
+          .sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
+        return { ok: true, entries };
+      } catch (err) {
+        return { ok: false, error: `检索失败：${err instanceof Error ? err.message : String(err)}` };
+      }
+    },
+    /** 关闭（registry.retire——运行中/不在册/已闭各拒；不动 focus） */
+    close(id) {
+      const result = runtime.drivers.retire(id);
+      if (result) return { ok: true };
+      const entry = runtime.drivers.entries.get(id);
+      if (entry === undefined) {
+        return { ok: false, error: '会话不在本进程册上（存档态——本就未在跑，无需关闭）' };
+      }
+      if (entry.retired) return { ok: false, error: '会话已关闭（只读态）' };
+      return { ok: false, error: '会话运行中——打断（Ctrl+C）后再关闭' };
+    },
+    /** 开新（默认应用域 enterApp 单源路由——与清单 Enter 同一条龙） */
+    openNew() {
+      const target = resolveDefaultApp(runtime.apps, runtime.appGaps);
+      if (target === undefined) {
+        return { ok: false, error: '默认应用不可用（组件缺场/被禁用）——dump-config 查看装配' };
+      }
+      return runtime.enterApp(target.id);
+    },
+    /** 续接（registry.open({resume:id})——活条目幂等切前台；进程内已闭诚实拒） */
+    resume(id) {
+      const entry = runtime.drivers.entries.get(id);
+      if (entry !== undefined && entry.retired) {
+        return { ok: false, error: '已闭会话（本进程内只读）——重启进程后经近史清单正常续接' };
+      }
+      const opened = runtime.drivers.open({ resume: id });
+      if (opened === undefined) {
+        return { ok: false, error: '续接失败（无持久层或会话不存在）' };
+      }
+      return { ok: true, sessionId: opened.session.header.sessionId };
+    },
+  };
+
   /* ---------------- 应用视图（pi-tui 通道）装配：首次进应用时惰性一次 ---------------- */
   /** 应用视图 Esc 路由（通道 escapeHook——桌面态回桌面/内核态回内核 shell） */
   const escapeFromAppView = (): boolean => {
     if (desktopActive) {
       // 桌面态：换防回桌面（服务路由到壳 face；序在壳内单源——先还屏再复位引擎）
-      const result = shell !== undefined ? shell.backToDesktop() : { ok: false as const, error: '桌面壳不在场' };
+      const result = shell === undefined ? { ok: false as const, error: '桌面壳不在场' } : shell.backToDesktop();
       return result.ok;
     }
     // 内核 shell 态：出应用视图回内核 REPL（停屏 + 收场等待者）
@@ -339,7 +503,7 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
         const entry = id === undefined ? undefined : runtime.drivers.entries.get(id);
         return entry === undefined ? undefined : runtime.apps.get(entry.appId)?.theme?.accent;
       },
-      ...(tuiTerminal !== undefined ? { terminal: tuiTerminal } : {}),
+      ...(tuiTerminal === undefined ? {} : { terminal: tuiTerminal }),
     });
     runtime.ui.attach(tui.ui());
     // 横幅族（与 tui-main 同源）：attach 后 notify 才可达——随应用视图首屏补发
@@ -418,7 +582,7 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
   /* ---------------- 桌面壳工厂（boot 起屏与 /desktop 重试共用） ---------------- */
   const makeShell = (): DesktopShell =>
     createDesktopShell({
-      ...(desktopIo !== undefined ? { io: desktopIo } : {}),
+      ...(desktopIo === undefined ? {} : { io: desktopIo }),
       listApps,
       enterApp: (appId) => runtime.enterApp(appId),
       enterAppView,
@@ -426,14 +590,19 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
       requestExit: () => {
         front.requestQuit();
       },
-      ...(desktopService !== undefined ? { service: desktopService } : {}),
-      ...(statusService !== undefined ? { status: statusService } : {}),
+      ...(desktopService === undefined ? {} : { service: desktopService }),
+      ...(statusService === undefined ? {} : { status: statusService }),
       requestPower, // 恒杀全家动词（批 D——host-power 单源编舞的桌面入口）
       admin: adminFace, // 管理面薄壳（批 D——AppsService 同源投影）
       // 系统助手服务面（批 E 默认应答者）：getter 活取——行被 overlay 禁用 +
       // /apps-toggle 后 tryGet 即时 undefined，无前缀文本回落帮助文案
       // （carve-out 第四条），不随 boot 时点固化
       assistant: () => runtime.ctx.tryGet<AssistantService>('assistant'),
+      // 商店服务面（批 F）：getter 活取同律——store 行被禁用时 /store 与清单行
+      // Enter 诚实拒（Ring 2 真·可卸的核心循环不破语义）
+      store: () => runtime.ctx.tryGet<StoreService>('store'),
+      // 会话切换器面（批 F 五件面真身——本地闭包直引用，非 ctx 服务）
+      sessions: sessionsFace,
     });
 
   /* ---------------- 内核 shell deps（兜底面的动词接线） ---------------- */
@@ -476,8 +645,8 @@ export async function desktopMain(options: DesktopMainOptions = {}): Promise<num
 
   const kernelShellDeps = {
     // stdio 注入面（缺省 process stdio——测试注 PassThrough 不抢真 stdin）
-    ...(kernelInput !== undefined ? { input: kernelInput } : {}),
-    ...(kernelOutput !== undefined ? { output: kernelOutput } : {}),
+    ...(kernelInput === undefined ? {} : { input: kernelInput }),
+    ...(kernelOutput === undefined ? {} : { output: kernelOutput }),
     listApps: () => listApps().map((entry) => ({ id: entry.id, label: entry.label })),
     startApp: kernelStartApp,
     retryDesktop,

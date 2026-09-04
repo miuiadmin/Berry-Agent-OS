@@ -1258,6 +1258,35 @@ describe('/history 全屏回看器（增强 8——副屏生命周期与渲染�
     tui.stop();
   });
 
+  it('鼠标模式配对字节（刀 6 设备态复原族）：开屏启用族/收屏复原族成对在场', async () => {
+    const terminal = new CaptureTerminal();
+    const { host } = makeHost();
+    const { registry } = makeRoutingRegistry();
+    const history = () => [userHistory('配对探针')];
+    const tui = createTuiChannel({ host, commands: registry, terminal, history });
+    tui.start();
+    await flush();
+    await type(terminal, '/history');
+    terminal.send('\r');
+    await flush(200);
+    // 开屏启用族（镜像 tui-alt-screen.js start 写）：?1049h 进屏 + ?7l 自动换行关 +
+    // ?1000h 鼠标追踪族首写（1000/1002/1003/1004/1006 一串写——拖选即复制的设备态）
+    const openMark = terminal.frames.length;
+    const opened = terminal.frames.join('');
+    expect(opened).toContain('\x1b[?1049h');
+    expect(opened).toContain('\x1b[?7l');
+    expect(opened).toContain('\x1b[?1000h');
+    terminal.send('q');
+    await flush(200);
+    // 收屏复原族（镜像 stop 写序列——viewerExitRestore 硬退腿同族字节）：鼠标五写
+    // 逆序关（?1006l 首字节）+ ?7h 回绕复原 + ?1049l 退屏
+    const closed = terminal.frames.slice(openMark).join('');
+    expect(closed).toContain('\x1b[?1006l');
+    expect(closed).toContain('\x1b[?7h');
+    expect(closed).toContain('\x1b[?1049l');
+    tui.stop();
+  });
+
   it('Esc 收起同 q（裸 Esc 形态）', async () => {
     const terminal = new CaptureTerminal();
     const { host } = makeHost();

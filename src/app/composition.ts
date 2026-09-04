@@ -116,6 +116,12 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 首启引导真身（凭证配置分步指引）。无自有会话域零新表族；卸掉即无前缀文本
   // 回落帮助文案（carve-out 第四条——桌面不是死路），核心循环不破
   { id: 'assistant', pkg: 'builtin:assistant' },
+  // 第十九行 = store 行（第八十五批批 F「应用商店」，契约篇 §6.12——Ring 2
+  // 真·可卸轻件）：三市场（技能/MCP/应用）动作面单源——行 provide `store`
+  // 服务面（桌面商店视图与 berry apps CLI 对等族同一消费面）。技能市场走独立
+  // 技能件通道（§6.1 line 911）；应用市场吃 D2 既有装机管道；MCP 市场走 mcp
+  // 行 config servers 合并写入。卸掉即桌面商店入口回落不可用，核心循环不破
+  { id: 'store', pkg: 'builtin:store' },
 ];
 
 /**

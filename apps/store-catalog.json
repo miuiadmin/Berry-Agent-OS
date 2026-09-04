@@ -1,0 +1,45 @@
+{
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "commit-message",
+      "title": "提交信息起草",
+      "description": "按仓库 git 暂存 diff 起草规范提交信息：类型/范围/主语一行 + 正文列要点，中文描述对齐仓库惯例。",
+      "version": "1.0.0"
+    },
+    {
+      "name": "code-review",
+      "title": "代码评审清单",
+      "description": "按结构/边界/错误处理/测试四维过一遍改动：先架构后细节，产出分级意见（blocker/建议/记档）。",
+      "version": "1.0.0"
+    },
+    {
+      "name": "release-notes",
+      "title": "发版说明整理",
+      "description": "从提交历史整理面向用户的发版说明：新功能/修复/破坏性变更三段，按用户视角措辞而非罗列哈希。",
+      "version": "1.0.0"
+    }
+  ],
+  "mcp": [
+    {
+      "name": "context7",
+      "label": "Context7 文档检索",
+      "description": "库文档实时检索（Upstash context7）——给模型接最新版文档，克制幻觉 API。需本机可执行文件绝对路径。",
+      "commandHint": "npx -y @upstash/context7-mcp"
+    },
+    {
+      "name": "sequential-thinking",
+      "label": "顺序思考",
+      "description": "分步推理脚手架（结构化思维链）——长任务的中间态外置。需本机可执行文件绝对路径。",
+      "commandHint": "npx -y @modelcontextprotocol/server-sequential-thinking"
+    }
+  ],
+  "apps": [
+    {
+      "id": "tool-echo",
+      "label": "示例应用·工具回声",
+      "description": "官方示例应用（examples/tool-echo 随包）：注册一个回声工具演示扩展型应用三件套。本地直引装机，零下载。",
+      "ref": "examples/tool-echo"
+    }
+  ]
+}

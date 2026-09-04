@@ -277,6 +277,15 @@ async function applyMemoryApp(ctx: AppContext, config: MemoryConfig | undefined,
   // persist:false 降级路早退不达此处——面缺席即消费方 tryGet 直通语义。
   ctx.provide('memory-review', { idle: () => review.idle() });
 
+  /* session-search 窄面（第八十五批批 F 多会话切换器——骨架篇 §1.2 line 80
+   * 「搜索」件面）：单法 search——session_fts 全文命中行（sessionId + seq 锚点
+   * + snippet）。唯一消费方 = 桌面切换器搜索框（ctx.tryGet 晚绑——行缺席直通
+   * 全列表）；memory-review 同律窄面（不进 SERVICE_CATALOG——行内窄面非跨件
+   * 公共 API）。persist:false 降级路早退不达此处 = 面缺席。 */
+  ctx.provide('session-search', {
+    search: (query: string, limit?: number) => fts.search(query, { limit }),
+  });
+
   /* ---- ⑤ 跨会话索引：激活期对账（尽力而为）+ session/event 活体镜像增量 ---- */
   try {
     fts.synchronize(deps.store);

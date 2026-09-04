@@ -35,6 +35,7 @@ import type { WebuiApprovalMount, WebuiEphemeralAuthFace, WebuiSessionSummary } 
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import { defaultAgentLocations } from './agents-md.js';
 import type { AgentLocation } from './agents-md.js';
+import { userSkillsDir } from '../skills/index.js';
 import { resolveDefaultApp } from './app-registry.js';
 import type { AppManifest, BuiltinAppModule, RowAppProbe } from '../contracts/app.js';
 import type { UiService } from '../channels/index.js';
@@ -293,6 +294,10 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
     // 声明式子代理发现位置（镜像 skills 装配形态：workspace 同源 + homeDir 测试缝）
     agentLocations:
       host.agentLocations ?? defaultAgentLocations(host.workspace, { homeDir: host.homeDir, trusted: true }),
+    // store 件闭包（默认层第十九行，契约篇 §6.12 批 F）：用户技能层目录 =
+    // userSkillsDir 单源（skills 发现序 user 层同位——商店挂载目标即发现面，
+    // 结构上不漂）
+    storeDeps: { userSkillsDir: userSkillsDir(host.homeDir) },
     // in-process 子装配工厂（subagent 件与 delegable 应用注册共用同一实例——
     // 每子独立装配 dsh-10，委派目标形态差异只在 mergeRequest 静态半边）
     subagentFactory: host.subagentFactory,

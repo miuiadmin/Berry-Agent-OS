@@ -35,7 +35,7 @@ function fakeLlm(script: { text?: string; throwMsg?: string }) {
   const face: AssistantLlmFace = {
     async complete(req) {
       calls.push({
-        ...(req.systemPrompt !== undefined ? { systemPrompt: req.systemPrompt } : {}),
+        ...(req.systemPrompt === undefined ? {} : { systemPrompt: req.systemPrompt }),
         messages: req.messages,
       });
       if (script.throwMsg !== undefined) throw new Error(script.throwMsg);
@@ -149,10 +149,10 @@ describe('assistant-app：carve-out 四条（核心命题篇 §3.5）', () => {
     const module = createAssistantApp();
     expect(module.name).toBe('assistant');
     expect(module.inject).toEqual(['llm', 'desktop-status']);
-    // 组合树默认层末行 = assistant（真 loadComposition + stub 注册表——注册命中非 unresolved）
+    // 组合树默认层末行 = store（第十九行——assistant 是第十八行；真 loadComposition + stub 注册表）
     const dataDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'assistant-app-')));
     const report = loadComposition(dataDir, createBuiltinRegistryForTest());
-    expect(report.rows.at(-1)).toEqual({ id: 'assistant', pkg: 'builtin:assistant' });
+    expect(report.rows.at(-1)).toEqual({ id: 'store', pkg: 'builtin:store' });
     expect(report.plan.at(-1)!.unresolved).toBeUndefined();
     expect(RING1_REQUIRED_ROW_IDS).not.toContain('assistant'); // Ring 2 真·可卸
   });
@@ -203,5 +203,6 @@ function createBuiltinRegistryForTest(): Record<string, BuiltinAppModule> {
     'builtin:browser': stub('browser'),
     'builtin:desktop': stub('desktop'),
     'builtin:assistant': createAssistantApp(),
+    'builtin:store': stub('store'),
   };
 }

@@ -25,7 +25,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { spawn, ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { type AppError, COMPOSITION_ROW_INVALID, APP_CONFIG_INVALID, APP_INSTALL_FAILED } from '../contracts/errors.js';
@@ -95,7 +95,8 @@ function userRows(dataDir: string): unknown[] {
       row.id !== 'obs' &&
       row.id !== 'browser' &&
       row.id !== 'desktop' &&
-      row.id !== 'assistant',
+      row.id !== 'assistant' &&
+      row.id !== 'store',
   );
 }
 
@@ -915,7 +916,8 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
           row.id !== 'obs' &&
           row.id !== 'browser' &&
           row.id !== 'desktop' &&
-          row.id !== 'assistant',
+          row.id !== 'assistant' &&
+          row.id !== 'store',
       ),
     };
 
@@ -987,7 +989,8 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
           row.id !== 'obs' &&
           row.id !== 'browser' &&
           row.id !== 'desktop' &&
-          row.id !== 'assistant',
+          row.id !== 'assistant' &&
+          row.id !== 'store',
       ),
     };
     // 混合前态：一 activated + 一 skipped——域死不挑前态，任一在册行可转

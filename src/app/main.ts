@@ -32,6 +32,7 @@ import { desktopMain } from './desktop-main.js';
 import { runOnceMain } from './run-main.js';
 import { tickMain } from './tick-main.js';
 import { appsCheckMain } from './apps-check.js';
+import { appsCliMain, sessionsCliMain } from './apps-cli.js';
 import { dumpConfigMain } from './dump-config.js';
 import { relaunchUnderHostSandbox } from './host-sandbox.js';
 import { daemonCommandMain, daemonDoctorMain, daemonForegroundMain, detectDaemonHandshake } from './daemon.js';
@@ -67,6 +68,17 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
   berry apps check      应用 API 体检（契约篇 §6.13.9）：全部已装应用 × 当前
                          apiVersion 三色（✓ 通过 / ⚠ 用废弃·容忍窗 / ✗ 断裂）；
                          只读零装配——退出码 0 无断裂 / 1 有断裂
+  berry apps <动词>     应用管理对等族（批 F，技术栈篇 §5 对等律③——桌面管理面/
+                         商店同一单源）：list 装载态 | install <ref> 装机（仓库态
+                         零生效）| mount <id> <app…>/unmount <rowId> 挂载两刀 |
+                         uninstall <id> [--yes] 两段式（数据域恒 keep）| toggle
+                         <id> 禁启用 | update <id> 按源更新 | skill-install/
+                         skill-mount/skill-unmount/skill-uninstall <名> 技能件
+                         四刀（独立技能件通道）| mcp-add <名> <命令绝对路径>
+                         [参数…]/mcp-remove <名> MCP 配置分发
+  berry sessions <list|search <词…>>
+                         会话只读族（批 F 对等律③）：list 近史 50 清单 |
+                         search 全文检索（session_fts）——零会话污染直开库
   berry dump-config      打印实际生效的组合树
 
 旗标：
@@ -624,12 +636,47 @@ function main(argv: string[]): number {
         // 安全模式同径可见：诊断面打印的就是实际生效装配（Ring 1 行 + 标记行）
         return dumpConfigMain({ ...(noApps ? { noApps: true } : {}) });
       case 'apps': {
-        // 第九动词的子命令族首位（契约篇 §6.13.9，第八十七批批 3）：`berry apps
-        // check` 应用 API 体检——只读面零装配零主库（migrate 批 5 预留）。互斥
-        // 面同 upgrade/shutdown 律（形态面互斥——run 族/端口/前台旗标不属体检）
+        // 子命令族（两支）：check（第九动词首位，第八十七批批 3——应用 API 体检，
+        // 只读面零装配零主库）+ 对等族动词（批 F，技术栈篇 §5 对等律③——薄壳分派
+        // 进 apps-cli，形态旗标互斥在彼处同律执法）
+        if (args[0] === 'check') {
+          // 互斥面同 upgrade/shutdown 律（形态面互斥——run 族/端口/前台旗标不属体检）
+          if (
+            args.length > 1 ||
+            readOnly ||
+            background ||
+            tick !== undefined ||
+            app !== undefined ||
+            port !== undefined ||
+            noApps ||
+            sandboxHost ||
+            foreground ||
+            appFile !== undefined
+          ) {
+            process.stderr.write('用法：berry apps check（无旗标——只读体检动词不与运行形态旗标并用）\n');
+            return 2;
+          }
+          return appsCheckMain();
+        }
+        return appsCliMain({
+          args,
+          yes,
+          formFlagsPresent:
+            readOnly ||
+            background ||
+            tick !== undefined ||
+            app !== undefined ||
+            port !== undefined ||
+            noApps ||
+            sandboxHost ||
+            foreground ||
+            appFile !== undefined,
+        });
+      }
+      case 'sessions': {
+        // 会话只读族（批 F 对等律③）：list/search——形态旗标互斥同 upgrade 律
+        //（只读诊断面不与运行形态并用；--yes 无消费位亦拒）
         if (
-          args[0] !== 'check' ||
-          args.length > 1 ||
           readOnly ||
           background ||
           tick !== undefined ||
@@ -638,12 +685,13 @@ function main(argv: string[]): number {
           noApps ||
           sandboxHost ||
           foreground ||
-          appFile !== undefined
+          appFile !== undefined ||
+          yes
         ) {
-          process.stderr.write('用法：berry apps check（无旗标——只读体检动词不与运行形态旗标并用）\n');
+          process.stderr.write('用法：berry sessions <list | search <关键词…>>（只读面——run 族旗标不适用）\n');
           return 2;
         }
-        return appsCheckMain();
+        return sessionsCliMain(args);
       }
       default:
         process.stderr.write(`未知命令：${command}\n\n${HELP}\n`);

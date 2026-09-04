@@ -15,13 +15,17 @@
  * 打开/配置/卸载/卸挂载/挂载/详情——管理四项批 D 起接 admin 服务面薄壳，壳零
  * 管理逻辑）/ detail（详情）/ confirm（二次确认与回执——恒杀全家确认 + 管理
  * 回执/两段式共用原语）/ guide（首启凭证引导——批 E 起助手在场走助手指路面）/
- * prompt（管理补参输入）/ answer（系统助手应答卡——批 E 无前缀文本默认应答）。
+ * prompt（管理补参输入）/ answer（系统助手应答卡——批 E 无前缀文本默认应答）/
+ * store（应用商店三市场——批 F：技能/MCP/应用 tab，←→ 切换照桌面分组语义，
+ * 动作回执走 applyAdminResult 同一回执链）/ sessions（多会话完整切换器——批 F
+ * 骨架篇 §1.2 line 80 五件面：列表分组/预览/搜索/关闭/开新+续接）。
  *
  * 命令前缀（底部 SingleLineInput）：/exit（真退）/shutdown /reboot（恒杀全家
  * ——过 confirm 原语后走宿主 requestPower 单源编舞）/desktop（回桌面视图）
- * /guide（首启引导）。**无 / 前缀文本 = 询问系统助手**（批 E 默认应答者——
- * 应答进 answer 卡；助手行缺席回落帮助文案〔carve-out 第四条〕）。Ctrl+D =
- * /exit。键位：↑↓ 移动光标、←→/Tab 切分组（全部/官方/第三方）、Enter 打开
+ * /guide（首启引导）/store（进商店视图）/sessions（进会话切换器）。**无 /
+ * 前缀文本 = 询问系统助手**（批 E 默认应答者——应答进 answer 卡；助手行缺席
+ * 回落帮助文案〔carve-out 第四条〕）。Ctrl+D =
+ * /exit。键位：↑↓ 移动光标、←→/Tab 切分组（全部/官方/第三方），Enter 打开
  * 或提交、m 菜单、g 引导（警示在场时）、Esc 返回。
  */
 
@@ -38,7 +42,19 @@ import {
 } from '../desktop/index.js';
 import type { DesktopAppEntry, DesktopFace, DesktopService, DesktopStatusService } from './desktop-service.js';
 import type { AssistantService } from './assistant-app.js';
+import type { StoreService } from './store-app.js';
 import { POWER_KILL_FAMILY_TEXT, type PowerAction, type PowerResult } from './host-power.js';
+
+/** 桌面命令面全集（对等门禁的桌面侧真相源——cli-parity 交叉核对消费） */
+export const DESKTOP_COMMANDS: readonly string[] = [
+  '/exit',
+  '/shutdown',
+  '/reboot',
+  '/guide',
+  '/desktop',
+  '/store',
+  '/sessions',
+];
 
 /** 时序三件注入面（缺省 Date.now/setTimeout/clearTimeout——测试假钟缝合位；与引擎注入面同构） */
 export interface ShellTiming {
@@ -118,6 +134,59 @@ export interface DesktopShellDeps {
    * undefined，无前缀文本回落帮助文案（carve-out 第四条），不用重启。
    */
   readonly assistant?: () => AssistantService | undefined;
+  /**
+   * 应用商店服务面（Ring 2 store 行 provide 的 `store` 键——批 F 三市场动作
+   * 单源）。getter 活取值（assistant 同律）：行被 overlay 禁用后即时 undefined
+   * ——/store 与商店行 Enter 诚实拒（回落提示行），不用重启。
+   */
+  readonly store?: () => StoreService | undefined;
+  /**
+   * 多会话切换器面（宿主 desktop-main 本地闭包实现——骨架篇 §1.2 line 80
+   * 五件面：列表/预览/搜索/关闭/开新+续接）。缺席 = /sessions 诚实拒。
+   */
+  readonly sessions?: DesktopSessionsFace;
+}
+
+/**
+ * 切换器会话条目（宿主两源合并投影——registry 在册条目 ∪ store 近史，builtin-deps
+ * sessionsFor 同款合并律；壳只呈现不持账）。
+ */
+export interface DesktopSessionEntry {
+  /** 会话 id（呈现截短在壳；动作动词吃全串） */
+  readonly id: string;
+  /** 应用域 id（分组呈现键） */
+  readonly appId: string;
+  /** 应用人读名（清单 label；缺 = appId） */
+  readonly label: string;
+  /** 首条用户消息摘要（列表行标题；空会话 = '(空会话)'） */
+  readonly title: string;
+  /** 末活动时刻人读串（缺 = 无事件） */
+  readonly updatedAt: string | undefined;
+  /** 活会话（在册未退役）——false = 已闭（可读不可写：预览可见，续接被拒） */
+  readonly active: boolean;
+  /** 前台聚焦位（★ 标记——续接/开新由 open 切 focus） */
+  readonly current: boolean;
+}
+
+/**
+ * 多会话切换器面（骨架篇 §1.2 line 80 五件面的宿主实现契约——desktop-main
+ * 本地闭包真身；动作动词全部单源走既有运行时面：list/preview 两源合并投影、
+ * search 走 session-search 窄面（FTS 真跑）、close 走 registry.retire、
+ * openNew 走 runtime.enterApp（默认应用）、resume 走 registry.open({resume})）。
+ */
+export interface DesktopSessionsFace {
+  /** 会话清单（两源合并——按末活动降序） */
+  list(): readonly DesktopSessionEntry[];
+  /** 预览（首末消息投影——deriveMessages 单源；会话不存在 undefined） */
+  preview(id: string): { readonly first: string; readonly last: string } | undefined;
+  /** 全文搜索（session_fts 命中 → 条目过滤；面缺席诚实拒非静默空集） */
+  search(query: string): { ok: true; entries: readonly DesktopSessionEntry[] } | { ok: false; error: string };
+  /** 关闭（registry.retire——停摆可读不可写；运行中/已闭/不在册拒） */
+  close(id: string): { ok: true } | { ok: false; error: string };
+  /** 开新会话（默认应用域——runtime.enterApp 单源路由） */
+  openNew(): { ok: true; sessionId: string } | { ok: false; error: string };
+  /** 续接（registry.open({resume:id})——活条目幂等切前台；进程内已闭拒） */
+  resume(id: string): { ok: true; sessionId: string } | { ok: false; error: string };
 }
 
 /** 桌面壳面（宿主入口持有） */
@@ -145,6 +214,22 @@ const GROUP_LABELS: Record<GroupFilter, string> = {
 
 /** 菜单项（打开/详情壳内直实现；配置/卸载/卸挂载/挂载批 D 起接 admin 服务面薄壳） */
 const MENU_ITEMS = ['打开', '配置', '卸载', '卸挂载', '挂载', '详情'] as const;
+
+/** 商店三市场 tab 序与标签（←→ 循环——技能 → MCP → 应用；分组页签切换同语义） */
+const STORE_TABS: readonly ('skills' | 'mcp' | 'apps')[] = ['skills', 'mcp', 'apps'];
+const STORE_TAB_LABELS: Record<'skills' | 'mcp' | 'apps', string> = {
+  skills: '技能',
+  mcp: 'MCP',
+  apps: '应用',
+};
+
+/** 技能装机状态人读词（store 清单行——呈现面） */
+const STORE_SKILL_STATE_LABELS: Record<string, string> = {
+  none: '未装',
+  staged: '已装机·零生效',
+  mounted: '已挂载',
+  'user-owned': '用户层已有同名',
+};
 
 /**
  * 助手缺席回落文案（carve-out 第四条执法面：无前缀文本默认问助手，助手不在场
@@ -187,15 +272,16 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     cancelSchedule: (h) => clearTimeout(h as NodeJS.Timeout),
   };
   const engine = new DesktopEngine({
-    ...(deps.io !== undefined ? { io: deps.io } : {}),
+    ...(deps.io === undefined ? {} : { io: deps.io }),
     now: timing.now,
     schedule: timing.schedule,
     cancelSchedule: timing.cancelSchedule,
   });
 
   /* ---------------- 视图状态（单根渲染树整树换装，状态全在壳） ---------------- */
-  /** 当前视图（desktop 主面 / menu 应用菜单 / detail 应用详情 / confirm 确认与回执 / guide 引导 / prompt 补参输入 / answer 助手应答卡） */
-  let view: 'desktop' | 'menu' | 'detail' | 'confirm' | 'guide' | 'prompt' | 'answer' = 'desktop';
+  /** 当前视图（desktop 主面 / menu 应用菜单 / detail 应用详情 / confirm 确认与回执 / guide 引导 / prompt 补参输入 / answer 助手应答卡 / store 应用商店 / sessions 会话切换器） */
+  let view: 'desktop' | 'menu' | 'detail' | 'confirm' | 'guide' | 'prompt' | 'answer' | 'store' | 'sessions' =
+    'desktop';
   /** 分组过滤（desktop 视图） */
   let groupFilter: GroupFilter = 'all';
   /** 清单光标（过滤后投影的下标） */
@@ -204,6 +290,14 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
   let menuCursor = 0;
   /** 详情目标（detail 视图） */
   let detailApp: DesktopAppEntry | undefined;
+  /** 商店当前 tab（store 视图——三市场序：技能 → MCP → 应用） */
+  let storeTab: 'skills' | 'mcp' | 'apps' = 'skills';
+  /** 商店清单光标（store 视图——当前 tab 条目下标） */
+  let storeCursor = 0;
+  /** 切换器搜索词（sessions 视图——undefined = 全列表；空提交 = 清除搜索） */
+  let sessionsQuery: string | undefined;
+  /** 切换器光标（sessions 视图——当前清单〔搜索过滤后〕下标） */
+  let sessionsCursor = 0;
   /** 确认/回执视图载荷（/shutdown 恒杀全家二次确认 + 管理面回执/两段式第二段共用原语） */
   let confirmPane:
     | {
@@ -257,7 +351,7 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
   function appRowText(entry: DesktopAppEntry, isCursor: boolean): string {
     const marker = isCursor ? '▸ ' : '  ';
     const def = entry.isDefault === true ? '〔默认〕' : '';
-    const note = entry.note !== undefined ? ` — ${entry.note}` : entry.openable ? '' : ' — 不可进入';
+    const note = entry.note === undefined ? (entry.openable ? '' : ' — 不可进入') : ` — ${entry.note}`;
     return `${marker}${entry.label}（${entry.id}）${def}${note}`;
   }
 
@@ -285,18 +379,18 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
         // 顶栏（骨架篇 §1.2 五槽位）：品牌 + 时间/CPU/内存/后台/应用——聚合器活取值；
         // status 缺席回落占位时钟（批 C 形态——熔断回锁/服务缺场不假死）
         new Text({ content: topBarText(), style: { bold: true } }),
-        ...(issue !== undefined
-          ? [
+        ...(issue === undefined
+          ? []
+          : [
               new Text({
                 content: ` ⚠ 凭证未配置（${issue.provider}）——/guide 进引导`,
                 style: { fg: 1, bold: true },
               }),
-            ]
-          : []),
+            ]),
         new Text({ content: groupTabLine(groupFilter) }),
         // 清单主体（Flex 吸收全部余量；溢出底部截断——批 D 再上滚动视口）
         new Flex({ child: new Column({ children: rows }) }),
-        ...(notice !== undefined ? [new Text({ content: ` ${notice}`, style: { dim: true } })] : []),
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
         input,
         new Text({ content: ' ↑↓ 选择 · Enter 打开 · m 菜单 · /exit 退出', style: { dim: true } }),
       ],
@@ -326,9 +420,9 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     return new Column({
       children: [
         new Text({ content: ' Berry 桌面 — 应用菜单', style: { bold: true } }),
-        new Text({ content: app !== undefined ? ` ${app.label}（${app.id}）` : ' （无选中应用）' }),
+        new Text({ content: app === undefined ? ' （无选中应用）' : ` ${app.label}（${app.id}）` }),
         new Flex({ child: new Column({ children: items }) }),
-        ...(notice !== undefined ? [new Text({ content: ` ${notice}`, style: { dim: true } })] : []),
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
         new Text({ content: ' ↑↓ 选择 · Enter 执行 · Esc 返回', style: { dim: true } }),
       ],
     });
@@ -345,7 +439,7 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
             new Text({ content: ` 名称：${app.label}` }),
             new Text({ content: ` 分组：${GROUP_LABELS[app.group]}` }),
             new Text({
-              content: ` 可进入：${app.openable ? '是' : '否'}${app.note !== undefined ? `（${app.note}）` : ''}`,
+              content: ` 可进入：${app.openable ? '是' : '否'}${app.note === undefined ? '' : `（${app.note}）`}`,
             }),
             new Text({ content: ` 默认位：${app.isDefault === true ? '是' : '否'}` }),
           ];
@@ -353,7 +447,7 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       children: [
         new Text({ content: ' Berry 桌面 — 应用详情', style: { bold: true } }),
         new Flex({ child: new Column({ children: lines }) }),
-        ...(notice !== undefined ? [new Text({ content: ` ${notice}`, style: { dim: true } })] : []),
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
         new Text({ content: ' 管理动作经菜单（m）：配置/卸载/卸挂载/挂载 · Esc 返回', style: { dim: true } }),
       ],
     });
@@ -373,7 +467,7 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       children: [
         new Text({ content: ' Berry 桌面', style: { bold: true } }),
         new Flex({ child: new Column({ children: lines }) }),
-        ...(notice !== undefined ? [new Text({ content: ` ${notice}`, style: { dim: true } })] : []),
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
         new Text({
           content:
             pane?.run !== undefined || pane?.confirmLabel !== undefined
@@ -394,7 +488,7 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       children: [
         new Text({ content: ' Berry 桌面 — 首启引导', style: { bold: true } }),
         new Flex({ child: new Column({ children: lines }) }),
-        ...(notice !== undefined ? [new Text({ content: ` ${notice}`, style: { dim: true } })] : []),
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
         new Text({ content: ' Esc 返回桌面（引导不阻塞使用——桌面照常可操作）', style: { dim: true } }),
       ],
     });
@@ -407,7 +501,7 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
         new Text({ content: ` ${promptPane?.title ?? '输入'}`, style: { bold: true } }),
         new Text({ content: ` ${promptPane?.hint ?? ''}`, style: { dim: true } }),
         new Flex({ child: new Column({ children: [] }) }),
-        ...(notice !== undefined ? [new Text({ content: ` ${notice}`, style: { dim: true } })] : []),
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
         input,
         new Text({ content: ' Enter 提交 · Esc 取消', style: { dim: true } }),
       ],
@@ -423,8 +517,113 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       children: [
         new Text({ content: ` ${answerPane?.title ?? '系统助手'}`, style: { bold: true } }),
         new Flex({ child: new Column({ children: lines }) }),
-        ...(notice !== undefined ? [new Text({ content: ` ${notice}`, style: { dim: true } })] : []),
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
         new Text({ content: ' Esc 返回桌面（继续提问：回桌面再输，无前缀即问）', style: { dim: true } }),
+      ],
+    });
+  }
+
+  /** store 视图主体（三市场 tab + 条目清单——状态活取自 store 服务面 catalog()；包损坏时错误行呈现不炸壳） */
+  function buildStoreTree(): Renderable {
+    const face = deps.store?.();
+    const rows: Renderable[] = [];
+    if (face === undefined) {
+      rows.push(
+        new Text({ content: ' 应用商店行不在场（被禁用或未装载）——/apps-toggle store 装回', style: { dim: true } }),
+      );
+    } else {
+      let catalog: ReturnType<StoreService['catalog']> | undefined;
+      try {
+        catalog = face.catalog();
+      } catch (err) {
+        rows.push(
+          new Text({ content: ` 精选清单损坏：${err instanceof Error ? err.message : String(err)}`, style: { fg: 1 } }),
+        );
+      }
+      if (catalog !== undefined) {
+        const listings = storeListings(catalog);
+        if (listings.length > 0) storeCursor = Math.min(storeCursor, listings.length - 1);
+        rows.push(
+          ...listings.map((row, index) =>
+            index === storeCursor
+              ? new Text({ content: `▸ ${row}`, style: { reverse: true } })
+              : new Text({ content: `  ${row}` }),
+          ),
+        );
+        if (listings.length === 0) {
+          rows.push(new Text({ content: ` （${STORE_TAB_LABELS[storeTab]}市场暂无条目）`, style: { dim: true } }));
+        }
+      }
+    }
+    return new Column({
+      children: [
+        new Text({ content: ' Berry 桌面 — 应用商店（内置精选·已审）', style: { bold: true } }),
+        new Text({ content: storeTabLine() }),
+        new Flex({ child: new Column({ children: rows }) }),
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
+        new Text({ content: ' ←→ 切市场 · ↑↓ 选择 · Enter 动作 · Esc 返回', style: { dim: true } }),
+      ],
+    });
+  }
+
+  /** sessions 视图主体（五件面呈现：清单〔搜索过滤〕+ 光标条目预览 + 动作提示） */
+  function buildSessionsTree(): Renderable {
+    const face = deps.sessions;
+    const rows: Renderable[] = [];
+    if (face === undefined) {
+      rows.push(new Text({ content: ' 切换器面未接线（宿主未注入 sessions 面）', style: { dim: true } }));
+    } else {
+      const entries = sessionsEntries(face);
+      if (entries.length > 0) sessionsCursor = Math.min(sessionsCursor, entries.length - 1);
+      rows.push(
+        ...entries.map((entry, index) =>
+          index === sessionsCursor
+            ? new Text({ content: `▸ ${sessionRowText(entry)}`, style: { reverse: true } })
+            : new Text({ content: `  ${sessionRowText(entry)}` }),
+        ),
+      );
+      if (entries.length === 0) {
+        rows.push(
+          new Text({
+            content:
+              sessionsQuery === undefined
+                ? ' （无会话——n 开新）'
+                : ` 「${sessionsQuery}」无命中（s 重搜 / 空提交清除）`,
+            style: { dim: true },
+          }),
+        );
+      }
+    }
+    // 光标条目预览（首末消息——deriveMessages 投影单源，壳只呈现）
+    const current = face === undefined ? undefined : sessionsEntries(face)[sessionsCursor];
+    const preview =
+      current !== undefined && face !== undefined
+        ? (() => {
+            try {
+              return face.preview(current.id);
+            } catch {
+              return undefined;
+            }
+          })()
+        : undefined;
+    const previewLines: Renderable[] =
+      current === undefined
+        ? []
+        : [
+            new Text({ content: ` ─ 预览（${current.label}）`, style: { dim: true } }),
+            new Text({ content: ` 首：${preview?.first ?? '（无消息）'}` }),
+            new Text({ content: ` 末：${preview?.last ?? '（无消息）'}` }),
+          ];
+    return new Column({
+      children: [
+        new Text({ content: ' Berry 桌面 — 会话', style: { bold: true } }),
+        new Text({
+          content: sessionsQuery === undefined ? ' 全部会话（registry 在册 ∪ 近史）' : ` 搜索「${sessionsQuery}」`,
+        }),
+        new Flex({ child: new Column({ children: rows }) }),
+        ...previewLines,
+        ...(notice === undefined ? [] : [new Text({ content: ` ${notice}`, style: { dim: true } })]),
+        new Text({ content: ' ↑↓ 选择 · Enter 续接 · c 关闭 · n 开新 · s 搜索 · Esc 返回', style: { dim: true } }),
       ],
     });
   }
@@ -444,7 +643,11 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
                 ? buildPromptTree()
                 : view === 'answer'
                   ? buildAnswerTree()
-                  : buildDesktopTree();
+                  : view === 'store'
+                    ? buildStoreTree()
+                    : view === 'sessions'
+                      ? buildSessionsTree()
+                      : buildDesktopTree();
     engine.setRoot(tree);
   }
 
@@ -505,20 +708,66 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     cursor = 0;
   }
 
-  /** 打开应用（换防序：enterApp → 引擎交出 → 宿主起应用视图；失败各自回执） */
-  function openApp(app: DesktopAppEntry | undefined): void {
-    if (app === undefined) return;
-    if (!app.openable) {
-      setNotice(app.note ?? '此应用暂不可进入');
-      return;
+  /* ---------------- 商店视图取数与投影（状态活取——每次建树重取 catalog） ---------------- */
+  /** 商店 tab 页签行（active 方括号标记——分组页签同形） */
+  function storeTabLine(): string {
+    return (
+      ' ' +
+      STORE_TABS.map((tab) => (tab === storeTab ? `[${STORE_TAB_LABELS[tab]}]` : STORE_TAB_LABELS[tab])).join(' / ') +
+      '（←→ 切换）'
+    );
+  }
+
+  /** 当前 tab 的清单行文本（呈现行 = 名（人读名）+ 版本/命令提示 + 状态位） */
+  function storeListings(catalog: ReturnType<StoreService['catalog']>): readonly string[] {
+    if (storeTab === 'skills') {
+      return catalog.skills.map(
+        (s) =>
+          `${s.name}（${s.title}）v${s.version} — ${
+            s.payloadReady ? (STORE_SKILL_STATE_LABELS[s.state] ?? s.state) : '载荷缺失（包损坏）'
+          }${s.state === 'staged' ? '〔Enter 挂载〕' : s.state === 'mounted' ? '〔Enter 卸载〕' : ''}`,
+      );
     }
-    const result = deps.enterApp(app.id);
+    if (storeTab === 'mcp') {
+      return catalog.mcp.map((m) => `${m.name}（${m.label}）— ${m.configured ? '已添加' : '未添加〔Enter 添加〕'}`);
+    }
+    return catalog.apps.map(
+      (a) =>
+        `${a.id}（${a.label}）— ${a.state === 'none' ? '未装〔Enter 安装〕' : a.state === 'installed' ? '已装未挂〔Enter 挂载〕' : '已挂载〔管理经菜单 m〕'}`,
+    );
+  }
+
+  /** 循环切商店 tab（光标归零——分组切换同律） */
+  function cycleStoreTab(step: -1 | 1): void {
+    const index = STORE_TABS.indexOf(storeTab);
+    storeTab = STORE_TABS[(index + step + STORE_TABS.length) % STORE_TABS.length]!;
+    storeCursor = 0;
+  }
+
+  /* ---------------- 会话切换器取数与投影（活取——不持第二账本） ---------------- */
+  /** 当前清单（搜索词在场走 FTS 过滤；面错误降级全列表 + 提示行） */
+  function sessionsEntries(face: DesktopSessionsFace): readonly DesktopSessionEntry[] {
+    if (sessionsQuery === undefined) return face.list();
+    const result = face.search(sessionsQuery);
     if (!result.ok) {
-      setNotice(`进入失败：${result.error}`);
-      return;
+      setNotice(`搜索不可用：${result.error}`);
+      return face.list();
     }
-    // 换防序（契约 §6.11 桌面→应用）：先引擎 suspend 三件套交出 TTY，再 pi-tui
-    // 起屏——挂起后残余渲染请求被引擎静默短路，两栈不抢写
+    return result.entries;
+  }
+
+  /** 会话行文本（id 截短 8 位 + 应用域 + 标题摘要 + 末活动 + 状态位） */
+  function sessionRowText(entry: DesktopSessionEntry): string {
+    const state = entry.current ? '★前台' : entry.active ? '活' : '已闭（只读）';
+    return `${entry.id.slice(0, 8)} [${entry.label}] ${entry.title}${entry.updatedAt === undefined ? '' : `（${entry.updatedAt}）`} — ${state}`;
+  }
+
+  /**
+   * 进应用视图的换防共舞（契约 §6.11 序的壳侧执法——openApp 与切换器续接/开新
+   * 三入口共用）：引擎 suspend 三件套交出 TTY → 顶栏活性停 → 宿主 pi-tui 起屏；
+   * 起屏失败回滚桌面（resume 备屏重进 + 全量首帧 + 提示行）。
+   */
+  function handoffToAppView(): void {
     engine.suspend();
     stopStatusClock(); // 顶栏活性停（挂起期零轮询零帧）
     try {
@@ -529,6 +778,245 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       startStatusClock();
       setNotice(`应用视图起屏失败：${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /** 打开应用（换防序：enterApp → 引擎交出 → 宿主起应用视图；失败各自回执） */
+  function openApp(app: DesktopAppEntry | undefined): void {
+    if (app === undefined) return;
+    if (!app.openable) {
+      setNotice(app.note ?? '此应用暂不可进入');
+      return;
+    }
+    // 桌面内置视图分流（批 F）：desktopView 行（store）Enter 进桌面内置视图而非
+    // enterApp——清单行只是入口皮，真身是行 provide 的服务面
+    if (app.desktopView === 'store') {
+      openStore();
+      return;
+    }
+    const result = deps.enterApp(app.id);
+    if (!result.ok) {
+      setNotice(`进入失败：${result.error}`);
+      return;
+    }
+    handoffToAppView();
+  }
+
+  /* ---------------- 商店视图动作（回执链走 applyAdminResult——管理面共用原语） ---------------- */
+  /** 开商店视图（/store 命令与清单 store 行 Enter 共用入口；行不在场诚实拒） */
+  function openStore(): void {
+    if (deps.store === undefined || deps.store() === undefined) {
+      setNotice('应用商店行不在场（被禁用或未装载）——/apps-toggle store 装回');
+      return;
+    }
+    storeTab = 'skills';
+    storeCursor = 0;
+    view = 'store';
+  }
+
+  /** 商店动作失败收口（回商店视图 + 诚实转述——adminFailure 同律） */
+  function storeFailure(err: unknown, what: string): void {
+    view = 'store';
+    setNotice(`${what}失败：${err instanceof Error ? err.message : String(err)}`);
+    rerender();
+  }
+
+  /** 执行商店条目动作（Enter——按 tab 与装机状态分派；回执/两段式全走 applyAdminResult） */
+  function runStoreAction(): void {
+    const face = deps.store?.();
+    if (face === undefined) {
+      setNotice('应用商店行不在场（被禁用或未装载）');
+      return;
+    }
+    let catalog: ReturnType<StoreService['catalog']>;
+    try {
+      catalog = face.catalog();
+    } catch (err) {
+      setNotice(`精选清单损坏：${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    const listings = storeListings(catalog);
+    if (listings.length === 0) return;
+    storeCursor = Math.min(storeCursor, listings.length - 1);
+    if (storeTab === 'skills') {
+      const entry = catalog.skills[storeCursor];
+      if (entry === undefined) return;
+      // 按状态分派：未装 → 安装检视（两段式）；已装机 → 挂载；已挂载 → 卸载检视
+      // （两段式三清）；user-owned → inspect 自拒（服务面单源判）
+      const action =
+        entry.state === 'staged'
+          ? face.mountSkill(entry.name)
+          : entry.state === 'mounted'
+            ? Promise.resolve(face.skillUninstallInspect(entry.name))
+            : Promise.resolve(face.skillInstallInspect(entry.name));
+      view = 'confirm';
+      confirmPane = { title: '商店动作执行中…', lines: ['执行中…'] };
+      void action.then((result) => applyAdminResult(result)).catch((err: unknown) => storeFailure(err, '商店动作'));
+      return;
+    }
+    if (storeTab === 'mcp') {
+      const entry = catalog.mcp[storeCursor];
+      if (entry === undefined) return;
+      if (entry.configured) {
+        // 移除是可逆但需重输命令的动作——过 confirm 原语（不静默删）；回执经
+        // applyAdminResult 落 confirm 视图（confirm.run 恒 void——结果自管）
+        confirmPane = {
+          title: `移除 MCP 服务器 ${entry.name}？`,
+          lines: [`  ${entry.description}`, '', 'config.servers 键删除（既有其他服务器保留）；/reload 后生效。'],
+          confirmLabel: '确认移除',
+          run: () => {
+            void face
+              .removeMcpServer(entry.name)
+              .then((result) => applyAdminResult(result))
+              .catch((err: unknown) => storeFailure(err, '移除 MCP'));
+          },
+        };
+        view = 'confirm';
+        rerender();
+        return;
+      }
+      // 添加需补参（绝对路径启动命令——v1 不认 npx/相对路径）：prompt 视图
+      promptPane = {
+        title: `添加 MCP 服务器 ${entry.name}（${entry.label}）`,
+        hint: `输入启动命令（首个词须可执行文件绝对路径，空格分隔 args）· 参考：${entry.commandHint} · Enter 提交 · Esc 取消`,
+        onSubmit: (text) =>
+          submitStore(text, (t) => {
+            const parts = t.split(/\s+/).filter(Boolean);
+            return face.addMcpServer(entry.name, parts[0] ?? '', parts.slice(1));
+          }),
+      };
+      view = 'prompt';
+      return;
+    }
+    // apps tab
+    const entry = catalog.apps[storeCursor];
+    if (entry === undefined) return;
+    if (entry.state === 'none') {
+      // 两段式第一段：安装确认披露（provenance + 两态说明）
+      applyAdminResult(face.appInstallInspect(entry.id));
+      return;
+    }
+    if (entry.state === 'installed') {
+      // 已装未挂 → 挂载补参（目标应用 id——prompt 视图，挂载目标先例同形）
+      promptPane = {
+        title: `挂载应用 ${entry.label}（${entry.id}）`,
+        hint: '输入挂载目标应用 id（逗号分隔多个 = 共享件；缺省建议 chat）· Enter 提交 · Esc 取消',
+        onSubmit: (text) => submitStore(text, (t) => face.mountApp(entry.id, t.split(/[,，\s]+/).filter(Boolean))),
+      };
+      view = 'prompt';
+      return;
+    }
+    // 已挂载：卸载/卸挂载走应用管理面单源（菜单 m——商店不做第二管理入口）
+    setNotice('已挂载——卸载/卸挂载经应用菜单（m）管理面（单源）');
+  }
+
+  /** 商店补参提交（prompt 视图 onSubmit 落点——空输入拒；回执链 applyAdminResult） */
+  function submitStore(text: string, call: (t: string) => Promise<DesktopAdminResult>): void {
+    if (text === '') {
+      view = 'store';
+      setNotice('空输入——未执行');
+      rerender();
+      return;
+    }
+    confirmPane = { title: '商店动作执行中…', lines: ['执行中…'] };
+    view = 'confirm';
+    void Promise.resolve(call(text))
+      .then((result) => applyAdminResult(result))
+      .catch((err: unknown) => storeFailure(err, '商店动作'));
+    rerender();
+  }
+
+  /* ---------------- 会话切换器动作（五件面的动词半边——面缺席诚实拒） ---------------- */
+  /** 开切换器视图（/sessions 命令入口——桌面级；应用内 chat 的 /sessions 既有面不动） */
+  function openSessions(): void {
+    if (deps.sessions === undefined) {
+      setNotice('会话切换器未接线（宿主未注入 sessions 面）');
+      return;
+    }
+    sessionsQuery = undefined;
+    sessionsCursor = 0;
+    view = 'sessions';
+  }
+
+  /** 切换器光标条目（空清单/越界钳制后取） */
+  function currentSession(): DesktopSessionEntry | undefined {
+    const face = deps.sessions;
+    if (face === undefined) return undefined;
+    const entries = sessionsEntries(face);
+    if (entries.length === 0) return undefined;
+    sessionsCursor = Math.min(sessionsCursor, entries.length - 1);
+    return entries[sessionsCursor];
+  }
+
+  /** 续接光标会话（Enter——registry.open({resume}) 单源 + 换防共舞进应用视图） */
+  function resumeSession(): void {
+    const face = deps.sessions;
+    const entry = currentSession();
+    if (face === undefined || entry === undefined) return;
+    const result = face.resume(entry.id);
+    if (!result.ok) {
+      setNotice(`续接失败：${result.error}`);
+      return;
+    }
+    handoffToAppView();
+  }
+
+  /** 关闭光标会话（c——停摆可读不可写；过 confirm 原语不静默关） */
+  function closeSession(): void {
+    const face = deps.sessions;
+    const entry = currentSession();
+    if (face === undefined || entry === undefined) return;
+    confirmPane = {
+      title: `关闭会话 ${entry.id.slice(0, 8)}（${entry.label}）？`,
+      lines: [
+        `  标题：${entry.title}`,
+        '',
+        '关闭 = 停摆（本进程内只读不可写；预览仍可见）——不删任何会话数据，',
+        '重启后可经近史清单正常续接。',
+      ],
+      confirmLabel: '确认关闭',
+      run: () => {
+        // close 是同步面——结果即算即落（confirm.run 恒 void，回执自管）
+        const result = face.close(entry.id);
+        if (!result.ok) {
+          applyAdminResult(`关闭失败：${result.error}`);
+          return;
+        }
+        sessionsCursor = 0;
+        applyAdminResult({
+          title: `已关闭会话 ${entry.id.slice(0, 8)}`,
+          lines: ['  已停摆（只读）——清单即见状态翻已闭'],
+        });
+      },
+    };
+    view = 'confirm';
+    rerender();
+  }
+
+  /** 开新会话（n——默认应用域 enterApp 单源 + 换防共舞） */
+  function openNewSession(): void {
+    const face = deps.sessions;
+    if (face === undefined) return;
+    const result = face.openNew();
+    if (!result.ok) {
+      setNotice(`开新失败：${result.error}`);
+      return;
+    }
+    handoffToAppView();
+  }
+
+  /** 搜索会话（s——prompt 视图补参；空提交 = 清除搜索回全列表） */
+  function searchSessions(): void {
+    promptPane = {
+      title: '搜索会话',
+      hint: '输入关键词（session_fts 全文检索）· Enter 搜索 · 空提交清除搜索 · Esc 取消',
+      onSubmit: (text) => {
+        sessionsQuery = text === '' ? undefined : text;
+        sessionsCursor = 0;
+        view = 'sessions';
+        rerender();
+      },
+    };
+    view = 'prompt';
   }
 
   /** 提交命令输入（/ 前缀命令面；空提交忽略） */
@@ -594,8 +1082,16 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
         view = 'desktop';
         setNotice('已在桌面');
         return;
+      case '/store':
+        // 商店视图入口（批 F）——命令与清单 store 行 Enter 同一动作函数
+        openStore();
+        return;
+      case '/sessions':
+        // 会话切换器入口（批 F 桌面级五件面——应用内 chat 的 /sessions 既有面不动）
+        openSessions();
+        return;
       default:
-        setNotice(`未知命令：${head}（认 /exit /shutdown /reboot /guide /desktop）`);
+        setNotice(`未知命令：${head}（认 ${DESKTOP_COMMANDS.join(' ')}）`);
     }
   }
 
@@ -683,8 +1179,9 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     confirmPane = {
       title: result.title,
       lines: result.lines,
-      ...(result.confirm !== undefined
-        ? {
+      ...(result.confirm === undefined
+        ? {}
+        : {
             confirmLabel: result.confirm.label,
             run: () => {
               void Promise.resolve(result.confirm!.run())
@@ -695,8 +1192,7 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
                   rerender();
                 });
             },
-          }
-        : {}),
+          }),
     };
     view = 'confirm';
     rerender();
@@ -917,6 +1413,43 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       editKey(event); // 补参输入框编辑（可打印/退格/删/行首行尾）
       return;
     }
+    if (view === 'store') {
+      // 商店视图键位面（批 F）：←→/Tab 切市场照桌面分组切换语义；Enter 按条目
+      // 装机状态分派动作（安装/挂载/卸载检视/补参）；Esc 回桌面
+      if (key === 'escape') view = 'desktop';
+      else if (key === 'left' || key === 'tab') cycleStoreTab(-1);
+      else if (key === 'right') cycleStoreTab(1);
+      else if (key === 'up' || key === 'down') {
+        const face = deps.store?.();
+        if (face !== undefined) {
+          const count = storeListings(face.catalog()).length;
+          if (count > 0) {
+            const step = key === 'up' ? -1 : 1;
+            storeCursor = (storeCursor + step + count) % count;
+          }
+        }
+      } else if (key === 'enter') runStoreAction();
+      return; // 商店期其余键不达输入框
+    }
+    if (view === 'sessions') {
+      // 切换器键位面（批 F 五件面的交互半边）：↑↓ 选 · Enter 续接 · c 关闭 ·
+      // n 开新 · s 搜索（FTS）· Esc 回桌面
+      if (key === 'escape') view = 'desktop';
+      else if (key === 'up' || key === 'down') {
+        const face = deps.sessions;
+        if (face !== undefined) {
+          const count = sessionsEntries(face).length;
+          if (count > 0) {
+            const step = key === 'up' ? -1 : 1;
+            sessionsCursor = (sessionsCursor + step + count) % count;
+          }
+        }
+      } else if (key === 'enter') resumeSession();
+      else if (key === 'c' && !mods.ctrl && !mods.alt && !mods.meta) closeSession();
+      else if (key === 'n' && !mods.ctrl && !mods.alt && !mods.meta) openNewSession();
+      else if (key === 's' && !mods.ctrl && !mods.alt && !mods.meta) searchSessions();
+      return; // 切换器期其余键不达输入框
+    }
     // desktop 视图键位面
     switch (key) {
       case 'up':
@@ -935,8 +1468,8 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       case 'enter': {
         // Enter 双语义：输入框有文 → 提交命令；空 → 打开光标应用（桌面主动词——
         // 空回车不是「什么都没提交」而是「打开我选中的」）
-        if (input.text.trim() !== '') submitInput();
-        else openApp(currentApp());
+        if (input.text.trim() === '') openApp(currentApp());
+        else submitInput();
         return;
       }
       case 'escape':

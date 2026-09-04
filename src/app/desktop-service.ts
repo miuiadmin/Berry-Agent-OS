@@ -34,6 +34,12 @@ export interface DesktopAppEntry {
   readonly note?: string;
   /** 当前默认解析位标记（无 app 会话打开的目标域——清单面即见默认落谁家） */
   readonly isDefault?: boolean;
+  /**
+   * 桌面内置视图分流（第八十五批批 F）：'store' = Enter 进桌面商店视图而非
+   * enterApp——清单行只是入口皮，真身是行 provide 的 `store` 服务面（壳消费
+   * DesktopShellDeps.store getter，不硬编码应用 id）。缺省 = 常规 enterApp。
+   */
+  readonly desktopView?: 'store';
 }
 
 /** 桌面回接结果（应用视图 → 桌面换防的执行回执） */

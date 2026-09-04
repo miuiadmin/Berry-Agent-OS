@@ -71,8 +71,23 @@ import {
   type AppStatusRow,
 } from './composition.js';
 
-/** 应用源三分类（§6.1 三源分发） */
-export type AppSource = 'npm' | 'git' | 'local';
+/**
+ * 应用源四分类（§6.1 三源分发 + 第八十五批批 F 第四形）：npm/git/local 三源
+ * 走 install 装机管道；skill = 独立技能件通道（§6.1 line 911——商店技能件
+ * staged 装机，键域 `skills/<名>`，不进组合树行、不经 mount 写行——挂载走
+ * 用户技能层，与本管道正交）。
+ */
+export type AppSource = 'npm' | 'git' | 'local' | 'skill';
+
+/**
+ * app 装机管道三源（AppSource 剔除 skill 的窄型）：install/update/mount/
+ * uninstall 反查面只见这三源——skill 记录在 provenanceById/list 差集两入口
+ * 被跳过后，经本类型让编译器持有「通道分职」的不变式（免逐点断言）。
+ */
+export type InstallSource = Exclude<AppSource, 'skill'>;
+
+/** app 通道视角的装机记录（source 收窄到三源——provenanceById 过滤后的类型面投影） */
+export type AppChannelRecord = ProvenanceRecord & { readonly source: InstallSource };
 
 /** 装机子进程执行器（可注入——测试替身免真跑 npm/git；真面 spawn 子进程） */
 export type InstallRunner = (command: string, args: readonly string[], opts: { cwd: string }) => Promise<void>;
@@ -717,9 +732,13 @@ export function createAppsService(opts: {
       }
       const ledger = loadProvenance(dataDir);
       for (const [key, record] of ledger) {
-        const artifact = artifactPathOfKey(dataDir, key, record.source);
+        // 技能件记录（键域第四形 skills/<名>）不属本清单——技能装机面走商店
+        // 件/CLI 技能动词族披露，混入会把技能当「已装未挂载应用」误报
+        if (record.source === 'skill') continue;
+        const appRecord = record as AppChannelRecord; // 跳过 skill 后的三源窄型（同 provenanceById 律）
+        const artifact = artifactPathOfKey(dataDir, key, appRecord.source);
         if (mountedKeys.has(resolve(artifact))) continue;
-        rows.push({ id: record.id, status: 'installed-unmounted', source: record.source });
+        rows.push({ id: appRecord.id, status: 'installed-unmounted', source: appRecord.source });
       }
       return rows;
     },
@@ -1447,13 +1466,64 @@ function removeProvenanceRecord(dataDir: string, key: string): void {
   saveProvenanceEntries(dataDir, ledger);
 }
 
-/** 按装机推导 id 反查账本（0 条 = 未装/已卸；多条 = 同名异物歧义，调用方响亮） */
-function provenanceById(dataDir: string, id: string): [string, ProvenanceRecord][] {
-  const hits: [string, ProvenanceRecord][] = [];
+/**
+ * 按装机推导 id 反查账本（0 条 = 未装/已卸；多条 = 同名异物歧义，调用方响亮）。
+ * **skill 源记录跳过**（第八十五批批 F）：技能件通道有专属动词族（skill-install/
+ * mount/unmount/uninstall——键域 `skills/<名>` 直取），本管道的 mount/update/
+ * uninstall 反查不该命中它们——两通道同账本不同键域，各管各的记录（跳过后
+ * 经 AppChannelRecord 持有「只见三源」的不变式）。
+ */
+function provenanceById(dataDir: string, id: string): [string, AppChannelRecord][] {
+  const hits: [string, AppChannelRecord][] = [];
   for (const [key, record] of loadProvenance(dataDir)) {
-    if (record.id === id) hits.push([key, record]);
+    if (record.source === 'skill') continue; // 技能件记录归技能通道动词管
+    if (record.id === id) hits.push([key, record as AppChannelRecord]);
   }
   return hits;
+}
+
+/* ------- 技能件通道账本窄面（第八十五批批 F——§6.1 line 911 独立通道） ------- */
+
+/**
+ * 技能件装机记录键（sources.json 键域**第四形**：`skills/<名>`——npm 形
+ * `node_modules/<包>`、git 形 `git/<relDir>`、local 形绝对路径之后的第四种定位
+ * 串）。单点收口：技能通道的读写删全经本函数拼键，禁手拼。
+ */
+export function skillProvenanceKey(name: string): string {
+  return `skills/${name}`;
+}
+
+/**
+ * 写一条技能件装机记录（staged 装机落账——装机两态在技能通道的投影：install =
+ * 拷入 staged 子树 + 本落账，**零生效**；生效 = mountSkill 进用户技能层）。
+ */
+export function upsertSkillProvenance(dataDir: string, name: string, record: { ref: string; version?: string }): void {
+  upsertProvenanceRecord(dataDir, skillProvenanceKey(name), {
+    source: 'skill',
+    ref: record.ref,
+    id: name,
+    ...(record.version === undefined ? {} : { version: record.version }),
+    installedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * 读一条技能件装机记录（undefined = 未装/已卸——键直取零扫描，与 app 通道的
+ * 按装机 id 反查不同：技能名即装机 id 即键尾，单射无歧义）。
+ */
+export function readSkillProvenance(dataDir: string, name: string): ProvenanceRecord | undefined {
+  return loadProvenance(dataDir).get(skillProvenanceKey(name));
+}
+
+/**
+ * 删一条技能件装机记录（卸载三清的第三清——账本条目）。@returns 是否真删
+ *（false = 记录本就不在——幂等收尾语义与 removeProvenanceRecord 同律）。
+ */
+export function removeSkillProvenance(dataDir: string, name: string): boolean {
+  const ledger = loadProvenance(dataDir);
+  if (!ledger.delete(skillProvenanceKey(name))) return false;
+  saveProvenanceEntries(dataDir, ledger);
+  return true;
 }
 
 /**

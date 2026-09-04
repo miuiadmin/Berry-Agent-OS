@@ -37,6 +37,7 @@ import { createObsApp } from '../obs/index.js';
 import { createSubagentApp } from './subagent-app.js';
 import { createDesktopApp } from './desktop-service.js';
 import { createAssistantApp } from './assistant-app.js';
+import { createStoreApp, type StoreAppDeps } from './store-app.js';
 import type { AgentLocation } from './agents-md.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import type { DatabaseConnection, MigrationSpec } from '../persist/index.js';
@@ -124,6 +125,13 @@ export interface BuiltinRegistryOptions {
    * 行缺省 enabled:false 惰性零监听——deps 恒传不随 enabled 变
    */
   readonly webuiDeps: WebuiAppDeps;
+  /**
+   * store 件闭包依赖束（默认层第十九行，契约篇 §6.12——第八十五批批 F）：
+   * 用户技能层目录（技能市场挂载目标 = <userSkillsDir>/<名>，与 skills 发现
+   * 序 user 源同位——assembly 以 homeDir 同源注入）。缺省不传 = 挂载动词拒
+   * （真装配恒传）
+   */
+  readonly storeDeps?: StoreAppDeps;
 }
 
 /**
@@ -247,6 +255,11 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     // 恒注册（卸行靠 overlay 禁用——缺席时桌面回落帮助文案〔carve-out 第四条〕，
     // 核心循环不破）
     'builtin:assistant': createAssistantApp(),
+    // store 官方件（默认层第十九行，第八十五批批 F「应用商店」——Ring 2 真·
+    // 可卸轻件）：三市场动作面单源（行 provide `store` 服务——桌面商店视图与
+    // berry apps CLI 对等族同一消费面）。deps 缺省不注册（诊断装配可省）——
+    // 真装配恒传（用户技能层定基挂载动词）
+    ...(opts.storeDeps ? { 'builtin:store': createStoreApp(opts.storeDeps) } : {}),
   };
 }
 

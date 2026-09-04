@@ -13,14 +13,18 @@
  * pty 探针可靠」（第八轮教训），终端态竞速同律。python3 pty 中继挂真终端，
  * 子进程以 tsx 起真 createTuiChannel（真 ProcessTerminal 缺省构造）。
  *
- * 两腿（字节计数判据，扫描探针 entry-rawmode-probe 同款 on/off 归因）：
+ * 三腿（字节计数判据，扫描探针 entry-rawmode-probe 同款 on/off 归因）：
  * - graceful 对照腿：channel.stop() 后退——tui.stop() 单源复位（?2004l +
  *   kitty 弹栈必须在场）——验收计数法本身能看见复位写（防假绿：坏计数法
  *   会让 fatal 腿也假绿）；
  * - fatal 腿：起屏后直接 process.exit(1)（镜像 signals.ts onFatalExit 的
  *   surface.exit(1)——同为 process.exit，'exit' 钩子是唯一兜底位）——修前
  *   复位写零在场（红），修后复原钩子补位（?2004l + kitty 弹栈 +
- *   modifyOtherKeys 复位全在场）。
+ *   modifyOtherKeys 复位全在场）；另传 title 锁增强 7 标题腿（起屏写 +
+ *   复原钩子基线写回 = OSC 0 两写）与 OSC 9;4 进度态清零首写；
+ * - viewer 腿（TUI 强化批 4 刀 6 设备态复原族）：/history 副屏在场时硬退
+ *   ——viewerExitRestore（?1049l + 鼠标五关 + ?7h）挂复原钩子首位，修前
+ *   副屏期硬退这些写零在场（复原全落副屏缓冲等于没写）。
  *
  * 纪律同 kernel-shell：子脚本经 cfg 注入源路径（临时目录无相对链）、子进程
  * 登记 afterEach 兜杀、真 pty 缺席即跳过不失信。
@@ -139,38 +143,59 @@ function hasPtyRelay(): boolean {
 
 /**
  * 复原锁子脚本：真 createTuiChannel + 真 ProcessTerminal（terminal 不注入 =
- * 工厂缺省构造——本锁唯一标的；起屏即写私有模式开启序列）。cfg.mode 两形态：
+ * 工厂缺省构造——本锁唯一标的；起屏即写私有模式开启序列）。cfg 三形态：
  * graceful 走 channel.stop() 正常停屏（对照腿）；fatal 起屏后直接
- * process.exit(1) 硬退（修前零复位写的红位）。
+ * process.exit(1) 硬退（修前零复位写的红位；可选 cfg.title 传增强 7 标题
+ * 基线——锁起屏写 + 复原钩子基线写回两腿）；viewer 经真命令链开 /history
+ * 副屏后硬退（刀 6——viewerExitRestore 副屏复原位）。
  */
-const PTY_CHILD_SCRIPT = `// cfg 经末位 argv 注入（JSON 串）：mode + tui/commands 源路径
+const PTY_CHILD_SCRIPT = `// cfg 经末位 argv 注入（JSON 串）：mode（+ 可选 title）+ tui/commands 源路径
 const cfg = JSON.parse(process.argv[process.argv.length - 1]);
 const { createTuiChannel } = await import(cfg.tuiPath);
 const { createCommandRegistry } = await import(cfg.commandsPath);
+// 注册表持引用：viewer 腿需事后 dispatch('/history')（/history 由通道按
+// history 注入在场注册——dispatch 与 Editor 键入同一条真派发链）
+const registry = createCommandRegistry();
 const channel = createTuiChannel({
   // 宿主三面 no-op：本锁只验终端设备态，输入路由/退出编舞不在射程
   host: { submit() {}, requestQuit() {}, interrupt() {} },
-  commands: createCommandRegistry(),
+  commands: registry,
   // terminal 不注入 = 真 ProcessTerminal（复原钩子只对真终端武装）
+  // title 在场才传（缺席 = 零标题管理档——复原钩子不写基线，fatal 腿判据不掺水）
+  ...(cfg.title !== undefined ? { title: cfg.title } : {}),
+  // history 注入仅 viewer 腿（在场才注册 /history——TUI-8 注册门控同律）
+  ...(cfg.mode === 'viewer'
+    ? { history: () => [{ role: 'user', content: '回看硬退探针', timestamp: 1 }] }
+    : {}),
 });
 channel.start();
 process.stdout.write('PROBE_READY\\n');
-setTimeout(() => {
-  if (cfg.mode === 'graceful') {
-    // 对照腿：正常停屏——tui.stop() 单源复位（?2004l + kitty 弹栈）
-    channel.stop();
-    process.exit(0);
-  }
-  // fatal 腿：硬退镜像——signals.ts onFatalExit 的 surface.exit(1) 同为
-  // process.exit(1)，'exit' 钩子是唯一兜底位；零 tui.stop()
-  process.exit(1);
-}, 1500);
+if (cfg.mode === 'viewer') {
+  // viewer 腿：+500ms 经真命令链开 /history 副屏 → +2500ms 硬退。副屏期
+  // tui.stop() 不经——exit 钩子的 viewerExitRestore 腿是唯一复原位
+  setTimeout(() => { void registry.dispatch('/history'); }, 500);
+  setTimeout(() => { process.exit(1); }, 2500);
+} else {
+  setTimeout(() => {
+    if (cfg.mode === 'graceful') {
+      // 对照腿：正常停屏——tui.stop() 单源复位（?2004l + kitty 弹栈）
+      channel.stop();
+      process.exit(0);
+    }
+    // fatal 腿：硬退镜像——signals.ts onFatalExit 的 surface.exit(1) 同为
+    // process.exit(1)，'exit' 钩子是唯一兜底位；零 tui.stop()
+    process.exit(1);
+  }, 1500);
+}
 `;
 
 describe('TUI 硬退终端态复原真 pty 锁（骨架篇 §1.3 终端态复原条款——TUI-1）', () => {
   /** 起锁子进程：python3 pty 中继 → tsx 起子脚本（真 TTY stdio），输出全收；
    * exit 监听 spawn 即挂（子进程可能在断言前已退——事件不重放） */
-  function spawnLock(mode: 'graceful' | 'fatal'): {
+  function spawnLock(
+    mode: 'graceful' | 'fatal' | 'viewer',
+    title?: string,
+  ): {
     output: () => string;
     exited: Promise<number | null>;
   } {
@@ -179,7 +204,8 @@ describe('TUI 硬退终端态复原真 pty 锁（骨架篇 §1.3 终端态复原
     const relayPath = join(scriptDir, 'pty-relay.py');
     writeFileSync(scriptPath, PTY_CHILD_SCRIPT);
     writeFileSync(relayPath, PTY_RELAY_PY);
-    const cfg = { mode, tuiPath: TUI_TS, commandsPath: COMMANDS_TS };
+    // title 可选传入（JSON.stringify 自动丢 undefined 键——缺席形态子侧零标题管理）
+    const cfg = { mode, title, tuiPath: TUI_TS, commandsPath: COMMANDS_TS };
     const child = spawn('python3', [relayPath, process.execPath, TSX_CLI, scriptPath, JSON.stringify(cfg)], {
       env: { ...process.env, APP_LOG_LEVEL: 'warn' },
       cwd: scriptDir,
@@ -219,7 +245,8 @@ describe('TUI 硬退终端态复原真 pty 锁（骨架篇 §1.3 终端态复原
   it.skipIf(!hasPtyRelay())(
     'fatal 硬退腿：exit(1) 复原钩子补位（修前 ?2004l/kitty 弹栈/modifyOtherKeys 复位零在场 = 红）',
     async () => {
-      const lock = spawnLock('fatal');
+      // 传 title（增强 7）：起屏写 + 复原钩子基线写回两腿都锁（OSC 0 计数 ≥2）
+      const lock = spawnLock('fatal', 'berry-exit-lock');
       await waitFor('TUI 起屏（PROBE_READY）', 45_000, () => lock.output().includes('PROBE_READY'), lock.output);
       const code = await exitWithTimeout(lock.exited, 30_000, lock.output);
       expect(code).toBe(1); // 硬退退出码透传（fatal 语义保持——复原不吞退出码）
@@ -234,6 +261,34 @@ describe('TUI 硬退终端态复原真 pty 锁（骨架篇 §1.3 终端态复原
       // showCursor 不经——修前 0 在场（缺省 PI_HARDWARE_CURSOR 关 = 渲染期无自发
       // ?25h，计数判据不掺水），修后复原钩子写回
       expect(count(out, '\x1b[?25h')).toBeGreaterThanOrEqual(1); // 光标显
+      // OSC 9;4 进度态清零（复原钩子首写——title 无关恒写；修前 0 在场）
+      expect(count(out, '\x1b]9;4;0\x07')).toBeGreaterThanOrEqual(1);
+      // 增强 7 标题腿双写账：起屏 syncTitle 一次 + 复原钩子基线写回一次 = ≥2
+      //（修前复原写缺位时仅 1——本断言锁「崩溃窗标题也回基线」半边）
+      expect(count(out, '\x1b]0;berry-exit-lock\x07')).toBeGreaterThanOrEqual(2);
     },
+  );
+
+  it.skipIf(!hasPtyRelay())(
+    'viewer 硬退腿：/history 副屏在场 exit(1)——viewerExitRestore 复原位（?1049l + 鼠标关 + ?7h ≥1）',
+    async () => {
+      const lock = spawnLock('viewer');
+      await waitFor('TUI 起屏（PROBE_READY）', 45_000, () => lock.output().includes('PROBE_READY'), lock.output);
+      const code = await exitWithTimeout(lock.exited, 45_000, lock.output);
+      expect(code).toBe(1); // 硬退退出码透传
+      const out = lock.output();
+      // 判据前提：副屏真开过（dispatch 走通——?1049h 进屏写在场）
+      expect(count(out, '\x1b[?1049h')).toBeGreaterThanOrEqual(1);
+      // viewerExitRestore 三写全在场（挂 armTerminalRestore restore() 首位——
+      // 修前这些复位全落副屏缓冲 = 没写，宿主 shell 键序/鼠标态错乱）
+      expect(count(out, '\x1b[?1049l')).toBeGreaterThanOrEqual(1); // 退副屏（先落主屏缓冲）
+      expect(count(out, '\x1b[?1006l')).toBeGreaterThanOrEqual(1); // 鼠标五关首字节
+      expect(count(out, '\x1b[?7h')).toBeGreaterThanOrEqual(1); // 自动换行复原
+      // 既有复原族同场（viewerExitRestore 之后主屏缓冲继续写——fatal 腿同族）
+      expect(count(out, '\x1b[?2004l')).toBeGreaterThanOrEqual(1);
+      expect(count(out, '\x1b[?25h')).toBeGreaterThanOrEqual(1);
+    },
+    // per-test 放大：tsx 冷启 + 2.5s 副屏驻留窗 + 退出收尾全程壁钟 ~15-25s
+    90_000,
   );
 });
