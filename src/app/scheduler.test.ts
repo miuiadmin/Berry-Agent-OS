@@ -310,6 +310,38 @@ describe('scheduler 官方件全栈：触发链（gate → 抢占 → runner）'
     expect(row.last_run_at).toBeNull();
   });
 
+  it('【回归锁 OS 三大管理面研究 20260904】goal 挂钟行 /tick rm 拒删——直删造成 wakeSchedule 声明与钟行状态分叉（终态清行是 goal 生命周期专属）', async () => {
+    const runtime = await assemble();
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    // goal 挂钟行（真 JobsStore.putOwned——与 /goal wake register 同路落库）
+    new JobsStore(runtime.persistence!.store.connection).putOwned({
+      name: goalJobName('g1'),
+      prompt: '续跑快照',
+      schedule: 'daily@08:30',
+      sessionId: 's-target',
+      owner: GOAL_JOB_OWNER,
+      ownerKey: 'g1',
+      now: Date.now(),
+    });
+
+    expect(await runtime.channels.commands.dispatch('/tick rm goal-g1')).toBe('ok');
+    // 拒删回执 + 归属与正路指引（修前：「任务已删除」——钟行蒸发，goal 终态
+    // 编舞 removeOwned 扑空、wakeSchedule 对已删行声明悬空）
+    expect(notifies.at(-1)).toContain('系统行');
+    expect(notifies.at(-1)).toContain('/goal');
+    // 行仍在（修前：行被直删）
+    const row = runtime
+      .persistence!.store.connection.prepare(`SELECT owner FROM jobs WHERE name = 'goal-g1'`)
+      .get() as { owner: string | null };
+    expect(row.owner).toBe(GOAL_JOB_OWNER);
+    // 用户行不受新守卫影响：正常删（回归面——守卫只护系统行）
+    await runtime.channels.commands.dispatch('/tick add mine 手动任务');
+    expect(await runtime.channels.commands.dispatch('/tick rm mine')).toBe('ok');
+    expect(notifies.at(-1)).toContain('任务已删除：mine');
+  });
+
   it('抢占推进落库：触发后 last_run_at 从 NULL 前进（jobs 表真库）', async () => {
     const runner = fakeRunner();
     const runtime = await assemble({ tickRunner: runner.runJob });

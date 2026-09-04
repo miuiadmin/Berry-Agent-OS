@@ -359,10 +359,24 @@ async function handleRemove(rest: string, opts: TickCommandOpts): Promise<void> 
     opts.ui.notify('用法：/tick rm <name>');
     return;
   }
-  if (!opts.store.remove(name)) {
+  const job = opts.store.get(name);
+  if (job === undefined) {
     opts.ui.notify(`任务不存在：${name}`);
     return;
   }
+  // 系统行拒删（OS 三大管理面研究 20260904 High——修前可直删 goal 挂钟行，
+  // 造成 wakeSchedule 声明与钟行状态分叉：goal 终态编舞 removeOwned 扑空、
+  // 到点路对已删行的清史/停摆声明悬空）。通用律：owner 非空即系统行（现值域
+  // builtin:goal，未来新 owner 自动受护）——生命周期归属主，与 /tick run 的
+  // 拒执守卫（:425）同律对齐：用户面动词只作用于用户自己的行（owner IS NULL）
+  if (job.owner !== null) {
+    opts.ui.notify(
+      `任务 ${name} 是系统行（归属 ${job.owner}）——不走 /tick rm。` +
+        `goal 挂钟行由 goal 生命周期管理：终态自动清行，停摆/推进走 /goal。`,
+    );
+    return;
+  }
+  opts.store.remove(name);
   // 联动注销（注册器缺席跳过——诊断面；未注册幂等回执非错误）
   if (opts.deps.osRegistrar !== undefined) {
     const result = await opts.deps.osRegistrar.unregister(name);
