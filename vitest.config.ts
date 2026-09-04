@@ -55,6 +55,9 @@ export default defineConfig({
             // 测试计数锚自测（全面复盘 20260902 G-3④）：check-test-count 机器闸的
             // 绿路 + 四红路点名——锚正则/四语宣称写法改形先在此红（闸的闸）
             'tools/check-test-count.test.mjs',
+            // 点火演练机器回归锁（API 治理进化批刀 O——§6.13.4 ④ 演练预演）：纯核心
+            // 判据直锁 + --core 隔离树真跑五连锁腿——预演机器不得比点火动作先坏
+            'tools/rehearse-ignition.test.mjs',
           ],
           // client 子树本轨排除（CR-7 落轨——jsdom 轨收编后排除仍在：域不同不混跑）。
           // coverage 相容性（基建大扫 #18）：排除形态必须走 exclude 显式条目，
