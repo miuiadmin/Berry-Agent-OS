@@ -409,9 +409,20 @@ const DEPRECATIONS =
   for (const rel of manifests) {
     const path = join(SCAN_ROOT, rel);
     const manifest = appMod.validateAppManifest(parseYaml(readFileSync(path, 'utf8')), path);
-    const gate = apiContracts.adjudicateApiGate(manifest.api, pkg.apiVersion, manifest.id);
-    if (gate.status === 'legacy') {
-      v(`[查 7] 官方清单 ${rel} 缺 api 块（legacy 容忍态窗口内——回填 api.minApiVersion 即绿；批 4 翻必填）`);
+    // 拒载形不炸闸（§6.13.4 ④ 细则四——API 治理进化批刀 O 修死）：装载门以
+    // throw 表达拒载（min 超宿主两态共通 / 缺 api 块 ignited 态）——裸调让拒载
+    // 炸掉整个闸进程（九查其余结果被栈迹一并吞掉，点名的 [查 7] 红条目反而不
+    // 产）。包 try/catch 以 AppError 码判：AppError 拒载 → 优雅红条目；非
+    // AppError（形状漂移类编程错）重抛 fail-loud（与 crater 裁决腿 judgeCraterGate
+    // 两态 try/catch 同律——修前此处的裸调是全 tools 面唯一孤儿，演练机器首跑即抓）
+    try {
+      const gate = apiContracts.adjudicateApiGate(manifest.api, pkg.apiVersion, manifest.id);
+      if (gate.status === 'legacy') {
+        v(`[查 7] 官方清单 ${rel} 缺 api 块（legacy 容忍态窗口内——回填 api.minApiVersion 即绿；批 4 翻必填）`);
+      }
+    } catch (err) {
+      if (typeof err?.code !== 'string') throw err;
+      v(`[查 7] 官方清单 ${rel} 装载门拒载（${err.code}）：${err.message}`);
     }
   }
   if (manifests.length === 0) v(`[查 7] apps/ 目录零 .app.yaml（含缺席）——官方清单目录空（仓库布局异常）`);

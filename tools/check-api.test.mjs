@@ -585,6 +585,27 @@ describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE �
     }
   }, 60_000);
 
+  it('【回归锁 进化批刀 O】查 7 拒载形不炸闸：min 超宿主 → [查 7] 优雅红（修前裸调崩闸——AppError 栈迹吞九查其余结果）', () => {
+    // 修前形态（2026-09-04 演练机器首跑抓到）：adjudicateApiGate 以 throw 表达
+    // 拒载，查 7 裸调让 min 超宿主直接炸掉 check-api 进程——点名的 [查 7] 红条目
+    // 反而不产。修后以 AppError 码判转优雅红；缺块 ignited 态同形（两腿同修）
+    const root = makeFixtureRoot();
+    try {
+      // api 块在场但 min 远超夹具宿主 apiVersion 1.0——两态共通拒载形（不依赖点火位）
+      writeFileSync(
+        join(root, 'apps/zz-fixture.app.yaml'),
+        'id: vendor/zz\nlabel: 夹具\ncomponents:\n  - builtin:chat\napi:\n  minApiVersion: "99.0"\n',
+      );
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1); // 干净红（problems 收口出口）而非崩闸
+      expect(r.stderr).toContain('[查 7]');
+      expect(r.stderr).toContain('API_VERSION_MISMATCH'); // 码判可见（细则④）
+      expect(r.stderr).toContain('99.0'); // 拒载 message 点名清单声明的 min
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('【回归锁 进化批 M10】查 7 扫描面 = apps/ 递归 walk：嵌套清单缺 api 块同红且红条目点名嵌套路径', () => {
     // 修前形态：单层 readdirSync 漏嵌套清单——嵌套形不可见即不可红（过查 7 门
     // 却在 release crater 试跑面缺席）；递归 walk 与查 3c 同一 walkFiles 函数
