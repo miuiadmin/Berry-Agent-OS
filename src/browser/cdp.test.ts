@@ -1733,6 +1733,62 @@ describe('browser 行 apply 接线（孤儿清扫——刀一治理面的接线�
     expect(commands.map((c) => c.name)).toContain('browser');
     rmSync(dataDir, { recursive: true, force: true });
   });
+
+  it('#A2 清扫失败腿：sweep reject 被收口降 warn——fire-and-forget 无 catch 即 unhandledRejection 杀宿主（修前必红）', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-apply-a2-'));
+    /** sweep 假面：直接 reject（真到达面 = 登记簿损坏 JSON / remove 写失败——sweep 本体同步抛进 async 即 reject） */
+    const sweep = vi.fn(async () => {
+      throw new Error('registry corrupted (probe)');
+    });
+    const registry = { add: vi.fn(), remove: vi.fn(), sweep };
+    const warns: string[] = [];
+    /** 工具注册面假收容（effect 回调即跑——真 context 语义位） */
+    const registered: string[] = [];
+    const commands: Array<{ name: string; handler: (args: string) => Promise<void> }> = [];
+    // 最小 ctx stub（同上一用例四键形状——本测只消费 sweep 失败腿）
+    const ctx = {
+      get: (key: string) =>
+        key === 'ui'
+          ? { notify: vi.fn() }
+          : key === 'channels'
+            ? {
+                registerCommand: (cmd: { name: string; handler: (args: string) => Promise<void> }) => (
+                  commands.push(cmd),
+                  () => undefined
+                ),
+              }
+            : { register: (def: ToolDefinition) => (registered.push(def.name), () => undefined) },
+      tryGet: (_key: string) => undefined,
+      provide: vi.fn(),
+      effect: (fn: () => () => void) => {
+        fn();
+        return () => undefined;
+      },
+      logger: { debug: vi.fn(), info: vi.fn(), warn: (m: string) => void warns.push(m) },
+    } as unknown as AppContext;
+
+    createBrowserApp({
+      dataDir,
+      spawnEngine: () => {
+        throw new Error('apply 期零 spawn');
+      },
+      killTree: vi.fn(),
+      registry,
+      newConnection: (o) => new JsonRpcConnection(o),
+      gates: NOOP_GATES,
+    }).apply(ctx);
+
+    // 结算等待（fire-and-forget promise 的 .then/.catch 走微任务——宏任务一拍即够）
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // 修前红位：无 catch——reject 无人收口（unhandledRejection 杀宿主，测试进程
+    // 亦被 vitest 报 unhandled error），warn 面恒空。修后：失败降 warn（残局留
+    // 待下次启动再扫），boot 不被清扫失败阻死（fire-and-forget 语义兑现）
+    expect(warns.join('\n')).toContain('孤儿清扫失败');
+    // 失败腿不毒 apply 主线：服务/工具面照常接线（清扫残局 ≠ boot 拒启）
+    expect(ctx.provide).toHaveBeenCalledWith('browser', expect.anything());
+    expect(registered).toHaveLength(10);
+    rmSync(dataDir, { recursive: true, force: true });
+  });
 });
 
 /* ---------------- 刀三余量：命令面 + provider 占位（apply 面行为锁） ---------------- */

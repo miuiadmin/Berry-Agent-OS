@@ -126,6 +126,16 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
           if (report.killed.length > 0) {
             ctx.logger.warn(`browser 孤儿引擎清扫 ${report.killed.length} 株（${report.killed.join(',')}）`);
           }
+        })
+        // 清扫失败收口（A2——第十一轮遗漏大扫 20260904-b，契约篇 §6.10 清扫
+        // 失败腿收口条）：本腿是四消费腿唯一 fire-and-forget（exec/mcp/lsp 三
+        // 腿 apply 期 await fail-loud；本腿不阻 boot——ps 探活慢且引擎惰性首
+        // 用才起链，序天然安全），但 fire-and-forget 必带失败收口：sweep 本体
+        // 可抛（登记簿损坏 JSON / remove 写失败），无 catch 即 unhandledRejection
+        // 杀宿主（Node 缺省 exit 1）。收口 = 降 warn——清扫残局留待下次启动
+        // 再扫，不阻 boot 不谎报
+        .catch((err: unknown) => {
+          ctx.logger.warn(`browser 孤儿清扫失败（登记簿读/写异常——残局留待下次启动再扫）: ${String(err)}`);
         });
 
       // 引擎构造（零 spawn——首用才起链；notify/logger 经 ctx 接线）
