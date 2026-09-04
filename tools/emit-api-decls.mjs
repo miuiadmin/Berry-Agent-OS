@@ -3,7 +3,9 @@
  * API 面声明产物发射器（契约篇 §6.13.9 dist/api/，第八十七批批 2）。
  *
  * 构建链子步（package.json build 尾段，主 tsc 之后）：产随包 `dist/api/`——
- * - `surface.json`：API 面快照随包位（§6.13.1 快照双位——运行时消费面）；
+ * - `surface.json`：API 面快照随包位（§6.13.1 快照双位——应用开发者随包参考物，
+ *   运行时不读〔装载门/ctx.host 直读 contracts 单源——遗漏大扫 20260904 #14 勘正
+ *   回流，API 治理进化批 A4〕）；
  * - 六虚拟键 `.d.ts`：api-decls/ committed 件拷入（berryagent 一行再导出真身 +
  *   llm/sqlite indexed-access 派生〔2026-09-04 进化批刀 D 起由
  *   generate-api-decls.mjs 从 Face 键集生成、check-api 查 8 守护〕+ typebox

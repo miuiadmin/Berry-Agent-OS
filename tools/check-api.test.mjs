@@ -243,6 +243,38 @@ describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE �
     }
   }, 60_000);
 
+  it('查 2 since 坐标不变式可红（面注入缝）：since > apiVersion 未来版本号入册即红，等于/过去均零红（API 治理进化刀 F）', () => {
+    // 不变式（契约篇 §6.13.8 查 2 增设——版本坐标系双向收口）：任一条目
+    // since > 当前 apiVersion 即红——since/removalIn 是 DEP 窗口算术（3 minor）
+    // 的坐标基准，查 9 只执法「面动号不动」单向半边，本探针锁反方向可红性。
+    // 三腿一次验全：zzFuture（2.0 > 1.0）必红；zzCurrent（等于）与
+    // zzPast（过去）为控制腿——边界上「等于」不算超。
+    const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-surface-'));
+    const fake = join(dir, 'fake-surface.json');
+    writeFileSync(
+      fake,
+      JSON.stringify({
+        apiVersion: '1.0',
+        exports: [
+          { symbol: 'zzFuture', module: 'zz/fixture', tier: 'stable', since: '2.0', formFactors: ['standalone'] },
+          { symbol: 'zzCurrent', module: 'zz/fixture', tier: 'stable', since: '1.0', formFactors: ['standalone'] },
+          { symbol: 'zzPast', module: 'zz/fixture', tier: 'stable', since: '0.9', formFactors: ['standalone'] },
+        ],
+        capabilities: [],
+      }),
+    );
+    try {
+      const r = runGate({ CHECK_API_SURFACE: fake });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 2]');
+      expect(r.stderr).toContain('zzFuture');
+      expect(r.stderr).not.toContain('zzCurrent'); // 控制腿：since === apiVersion 合法
+      expect(r.stderr).not.toContain('zzPast'); // 控制腿：历史 since 合法
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('查 2 自由符号半边可红：公开根直导出无 JSDoc 标级 → exit 1 点名符号', () => {
     const root = makeFixtureRoot();
     try {

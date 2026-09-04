@@ -254,7 +254,7 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     expect(v.violations).toHaveLength(0);
     expect(v.ok).toBe(true);
   });
-  it('缺 dist/api/surface.json → 检视不过（API 治理 §6.13.9：运行时消费位裸奔即发布物残缺）', () => {
+  it('缺 dist/api/surface.json → 检视不过（API 治理 §6.13.9：随包参考物裸奔即发布物残缺）', () => {
     const v = inspectPackEntries(CLEAN.filter((p) => p !== 'dist/api/surface.json'));
     expect(v.ok).toBe(false);
     expect(v.missing.join(' ')).toMatch(/dist\/api\/surface\.json/);

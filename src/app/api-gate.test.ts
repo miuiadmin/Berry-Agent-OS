@@ -29,8 +29,9 @@ function fixtureDir(manifests: Record<string, string>): string {
 
 describe('loadOfficialApps 装载门接线（§6.13.4 四出口的装载面）', () => {
   it('官方清单随包恒绿：真包根 apiVersion（1.0）裁决全 admit——boot 断言不炸', () => {
-    // 官方三清单批 2 已回填 min 1.0；此测同时是「回填不回退」的回归锁
-    //（未来某清单 min 抬过包根即红——发版事故前兆）
+    // apps/ 目录官方清单批 2 已回填 min 1.0（目录指称不记份数——API 治理进化
+    // 批 A8 勘正：点名枚举随新清单入盘即漂移）；此测同时是「回填不回退」的
+    // 回归锁（未来某清单 min 抬过包根即红——发版事故前兆）
     const apps = loadOfficialApps();
     expect(apps.size).toBeGreaterThan(0);
     for (const manifest of apps.values()) {

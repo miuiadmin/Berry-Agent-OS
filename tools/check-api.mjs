@@ -5,8 +5,11 @@
  *
  * 进 lint:topology 链（CI 同一套）。九查形态（落码节奏——批表 §6.13.11）：
  * 1. drift——快照 src/contracts/api-surface.json ≠ 抽取真值即红（面漂移当场抓）；
- * 2. tier 全标——快照逐条 tier 词汇合法 + 公开根直导出（自由符号，现役为零）必带
- *    JSDoc 标签；typebox 转发条目（forwarded）记载不承诺、不参与执法（冷读 M4）；
+ * 2. tier 全标——快照逐条 tier 词汇合法 + since 坐标不变式（API 治理进化刀 F
+ *    增设：since > 当前 apiVersion 未来版本号入册即红——版本坐标系双向，查 9
+ *    执法「面动号不动」单向半边、本查补反方向）+ 公开根直导出（自由符号，现役
+ *    为零）必带 JSDoc 标签；typebox 转发条目（forwarded）记载不承诺、不参与
+ *    执法（冷读 M4）；
  * 3. 废弃登记完整性——DEP 注册簿行不变式 + 双向对照（批 3 充实）；
  * 4. 官方全家桶零废弃使用——批 3 充实扫描面；
  * 5. 实验面隔离（刀 E 判据精化——解查 5×查 8 互锁死结）——豁免节之外零实验
@@ -17,7 +20,8 @@
  * 6. compat 件死期——批 4 点火前结构性拒绝（src/compat/ 在场即红——死期机器未落地，
  *    compat 件无登记可查 = fail-closed，非静默放行）；
  * 7. 清单 api 块狗家全覆盖——仓内全部 .app.yaml 的 api 块在场且合法（schema 校验 +
- *    装载门裁决非 legacy）；与官方三清单回填同批落——生效日即绿（冷读 M3）。
+ *    装载门裁决非 legacy）；与官方清单（apps/ 目录在盘全体——目录指称不记份数，
+ *    API 治理进化批 A8 勘正）回填同批落——生效日即绿（冷读 M3）。
  * 8. 生成物 drift（第九十一批）——COMPATIBILITY.md / docs/API参考.md ≠ 生成器
  *    真值（面快照 + 注册簿 + 归档族派生）即红：生成物是提交件，手改或面变更后
  *    漏再生即漂移（再生入口 = npm run build 尾挂或生成器 CLI --write）；
@@ -92,6 +96,12 @@ const v = (msg) => problems.push(msg);
 
 /** tier 合法词汇（§6.13.3 三级——internal 结构性不可达不进面清单） */
 const TIERS = new Set(['stable', 'experimental', 'deprecated']);
+/**
+ * 契约版本算术单源（isValidApiVersion / compareApiVersions——与产码同一实现，
+ * jiti 载入）。查 2 since 坐标不变式、查 3 注册簿行不变式、查 7 装载门裁决
+ * 三查共用（API 治理进化刀 F 起提升为模块级单源——原查 3/查 7 各自局部导入）。
+ */
+const apiContracts = await imp('../src/contracts/api.ts');
 
 /** 递归收集目录下指定后缀文件（相对扫描根路径；符号链接不跟随——随 CHECK_API_ROOT 缝移） */
 function walkFiles(dirRel, suffixes, out = []) {
@@ -148,6 +158,23 @@ for (const entry of surface.exports) {
   if (typeof entry.since !== 'string' || entry.since.length === 0) {
     v(`[查 2] ${entry.module}::${entry.symbol} 缺 since（首快照全 1.0——面清单逐条必带）`);
   }
+  // since 坐标不变式（API 治理进化刀 F——契约篇 §6.13.8 查 2 增设，版本坐标系
+  // 双向收口）：since > 当前 apiVersion（未来版本号入册）即红——since/removalIn
+  // 是 DEP 窗口算术（3 minor）的坐标基准，坐标失锚则死期机器全歪；查 9 只执法
+  // 「面动号不动」单向半边，本查补反方向（号未到、符号不得先领未来版本戳）。
+  // 格式非法任一侧不参与比较（compareApiVersions 会抛——注入夹具的怪 since 不
+  // 炸闸；格式面非本查职责，presence 半边已由上一支执法）
+  if (
+    typeof entry.since === 'string' &&
+    apiContracts.isValidApiVersion(entry.since) &&
+    apiContracts.isValidApiVersion(surface.apiVersion) &&
+    apiContracts.compareApiVersions(entry.since, surface.apiVersion) > 0
+  ) {
+    v(
+      `[查 2] ${entry.module}::${entry.symbol} since ${entry.since} > 当前 apiVersion ${surface.apiVersion}` +
+        `（未来版本号入册——坐标基准失锚；面号 bump 与符号入册须同笔，§6.13.8 查 2 不变式）`,
+    );
+  }
   if (!Array.isArray(entry.formFactors) || entry.formFactors.length === 0) {
     v(`[查 2] ${entry.module}::${entry.symbol} 缺 formFactors（面清单逐条必带）`);
   }
@@ -202,7 +229,6 @@ const DEPRECATIONS =
   const dup = depIds.filter((id, i) => depIds.indexOf(id) !== i);
   if (dup.length > 0) v(`[查 3] DEP 编号重复：${[...new Set(dup)].join('、')}（编号唯一——§6.13.8 查 3）`);
 
-  const apiContracts = await imp('../src/contracts/api.ts');
   const DEP_ID_RE = /^DEP-\d{3}$/;
   const registryIds = [];
   for (const reg of DEPRECATIONS) {
@@ -351,13 +377,12 @@ const DEPRECATIONS =
 
 {
   const appMod = await imp('../src/contracts/app.ts');
-  const apiMod = await imp('../src/contracts/api.ts');
   const pkg = JSON.parse(readFileSync(join(SCAN_ROOT, 'package.json'), 'utf8'));
   const manifests = readdirSync(APPS_DIR).filter((n) => n.endsWith('.app.yaml'));
   for (const name of manifests) {
     const path = join(APPS_DIR, name);
     const manifest = appMod.validateAppManifest(parseYaml(readFileSync(path, 'utf8')), path);
-    const gate = apiMod.adjudicateApiGate(manifest.api, pkg.apiVersion, manifest.id);
+    const gate = apiContracts.adjudicateApiGate(manifest.api, pkg.apiVersion, manifest.id);
     if (gate.status === 'legacy') {
       v(`[查 7] 官方清单 ${name} 缺 api 块（legacy 容忍态窗口内——回填 api.minApiVersion 即绿；批 4 翻必填）`);
     }
