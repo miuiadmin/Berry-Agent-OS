@@ -1,0 +1,18 @@
+{
+  "//": "应用侧类型直取示范（docs/应用开发指南.md §1「类型直取」三步——API 治理进化刀 K）。'berryagent' 是装载期虚拟键，Node 解析不了：paths 把它指到真类型面。本例在宿主仓源码树内 → 直指 src/contracts 源形即可 tsc 全绿（typebox 走仓库 node_modules 自然解析）；第三方应用项目拷 node_modules/berry-agent-os/api-decls/tsconfig.paths.json 模板（六键全映射，指 dist/api/——随包分发的声明产物），相对段按应用 tsconfig 所在目录调整。",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {
+      "berryagent": ["../../src/contracts/index.ts"]
+    }
+  },
+  "include": ["*.ts"]
+}

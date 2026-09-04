@@ -1,0 +1,16 @@
+# 教学例清单——全链示范（API 治理进化刀 K；docs/应用开发指南.md §10 打包契约 + §2「清单 api 块」）。
+#
+# 三必填（id/label/components）+ api 协商块。第三方清单的现役执法消费位 = API
+# 装载门（api 块——readApiGateAtRoot 单层发现本文件后裁决四出口）；api 块缺席
+# 是 pre-release 容忍态（聚合 warn），点火日起缺席即拒载——第三方应用现在就写
+# 上是零成本免疫。
+#
+# id 界分：裸名是官方保留位——本例身在官方仓 examples/ 故合法；第三方应用 id
+# 必含 '/' 域前缀（如 acme/tool-echo）。components = 装载身份串（本例装机 id
+# 自指——单件应用即自身组件）。
+id: tool-echo
+label: 回显工具（教学例）
+components:
+  - tool-echo
+api:
+  minApiVersion: "1.0"

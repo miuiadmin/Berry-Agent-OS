@@ -12,8 +12,14 @@
  *
  * 依赖纪律：typebox 经虚拟键取（宿主同实例注入，防双实例）；本例零外部依赖、
  * 零品牌标识符。装载路径见同目录 README.md（教学例挂官方应用域，两形态命令链）。
+ *
+ * 类型直取示范（API 治理进化刀 K）：ctx/服务面类型从虚拟键 'berryagent' type-only
+ * 导入（同目录 tsconfig.json 把虚拟键映射到真类型面——开发期 tsc/编辑器可解析，
+ * type import 不进运行时产物，装载期虚拟注入保运行时正确）。全链参照：本目录
+ * 另带 tool-echo.app.yaml（带 api 块清单——API 装载门消费位）。
  */
 
+import type { AppContext, ToolsService } from 'berryagent';
 import { Type } from 'typebox';
 
 /** 行 id / 日志归因标识（named export name——非空字符串即形状合法） */
@@ -34,20 +40,24 @@ export const events = [
 
 /**
  * 应用入口（唯一形状：export default async function apply(ctx, config)）。
- * @param ctx 行作用域（fork 自 apps 锚——LIFO 回卷级联本行全部注册）
+ * @param ctx 行作用域（fork 自 apps 锚——LIFO 回卷级联本行全部注册；类型 =
+ *   虚拟键导入的 AppContext——第三方零信任窄面）
  * @param cfg 行配置唯一样本（已过上方 config schema 校验；未给行 config = {}）
  */
-export default async function apply(ctx, cfg) {
-  // 硬依赖在此兑现（inject 声明保证此刻必在——缺了装载器会先 APP_INJECT_UNRESOLVED）
-  const tools = ctx.get('tools');
+export default async function apply(ctx: AppContext, cfg: Readonly<Record<string, unknown>>) {
+  // 硬依赖在此兑现（inject 声明保证此刻必在——缺了装载器会先 APP_INJECT_UNRESOLVED）；
+  // 服务面类型经泛型取型（ToolsService——与 AppContext 同从 'berryagent' 导入）
+  const tools = ctx.get<ToolsService>('tools');
   // config 缺省自理（装载器只注入校验后的样本，不替应用填默认值）
   const prefix = typeof cfg?.prefix === 'string' ? cfg.prefix : 'echo:';
 
-  // ③ durable 词汇注册：category 'log-only' + ignorable——恢复合成可安全跳过
-  // 的轻事件（非 ignorable 词汇缺载会让恢复协议响亮拒，教学例不背这个重担）
+  // ③ durable 词汇注册：category 'log-only' + tier 'stable'（自定义词汇即自己的
+  // API 面——稳定性自声明，必填）+ ignorable——恢复合成可安全跳过的轻事件
+  // （非 ignorable 词汇缺载会让恢复协议响亮拒，教学例不背这个重担）
   ctx.registerSessionEventType({
     type: 'tool-echo/note',
     category: 'log-only',
+    tier: 'stable',
     ignorable: true,
   });
 
