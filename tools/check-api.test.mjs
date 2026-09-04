@@ -1139,3 +1139,136 @@ describe('api.ts 公开根分桶（刀 A——internal 机制桶七符号不进�
     expect(visible.filter((n) => !face.has(n))).toEqual([]);
   });
 });
+
+describe('服务面方法级符号（刀 B——faceInterface 契约接口成员枚举，§6.13.4）', () => {
+  // 动态 import 三件新机件：修前（刀 B 前）无此导出——undefined 解构调用即红，
+  // 不静态 import 以免整测试文件在修前全红殃及他锁（刀 A 同款纪律）
+  it('enumerateInterfaceMembers：方法/属性/get 上下文关键字/重载去重/索引签名豁免', async () => {
+    const { enumerateInterfaceMembers } = await import('./extract-api-surface.mjs');
+    // 复合夹具：一次覆盖六类成员形态（JSDoc 花括号/字符串引号名/readonly 属性/
+    // 上下文关键字名 get·type/重载双签名/索引+调用+构造签名豁免）。入参形态 =
+    // 接口体文本（`export interface X {` 与配对 `}` 之间——无外层花括）
+    const members = enumerateInterfaceMembers(`
+  /** 文档 { 花括号 } 与 \`\${模板} 都不是成员 */
+  send(msg: string): Promise<void>;
+  /** 重载相一 */
+  uninstall(mode: 'inspect'): Promise<{ files: string[] }>;
+  /** 重载相二（同名单签名组 = 同一 API 符号，去重） */
+  uninstall(mode: 'execute'): Promise<number>;
+  get(id: string): Job | undefined;
+  type: 'cron' | 'once';
+  readonly policyMode: string;
+  'quoted-name'(x: number): void;
+  [key: string]: unknown;
+  (input: string): void;
+  new (opts: { a: number }): Face;
+`);
+    expect(members).toEqual(['send', 'uninstall', 'get', 'type', 'policyMode', 'quoted-name']);
+  });
+
+  it('enumerateInterfaceMembers：深度失衡 fail-loud（多闭括即炸——静默截断不可接受）', async () => {
+    const { enumerateInterfaceMembers } = await import('./extract-api-surface.mjs');
+    // 体文本形态（无外层花括）：末尾孤立 `}}` 把深度推负——词法失步即炸
+    expect(() => enumerateInterfaceMembers('a(x: { y: 1 }): void; }}')).toThrow();
+  });
+
+  it('findExportedInterfaces：泛型头 >> 合并 token / 嵌套 namespace 接口不收 / 模板串成员', async () => {
+    const { findExportedInterfaces } = await import('./extract-api-surface.mjs');
+    const map = findExportedInterfaces(`
+export interface Outer<T extends Record<string, K>, U = Map<string, string[]>> {
+  render(x: \`前缀\${T}\`): void;
+}
+namespace Inner {
+  export interface Hidden { a(): void; }
+}
+export interface Plain { ok: true; }
+`);
+    // 只收深度 0 的 export 声明（Hidden 无 export 前导词在深度 0——不进索引）
+    expect([...map.keys()].sort()).toEqual(['Outer', 'Plain']);
+    expect(map.get('Outer')).toContain('render(x:');
+    expect(map.get('Plain')).toContain('ok: true;');
+  });
+
+  it('buildInterfaceIndex 全仓：18 目录 faceInterface 各恰一源（零源/撞源均结构性即红）', async () => {
+    const { buildInterfaceIndex } = await import('./extract-api-surface.mjs');
+    // faceInterface 清单从 api.ts 源文正则取（新目录项自动进锁——不硬编码名单）
+    const apiSrc = readFileSync(join(ROOT, 'src/contracts/api.ts'), 'utf8');
+    const faces = [...apiSrc.matchAll(/faceInterface:\s*'(\w+)'/g)].map((m) => m[1]);
+    expect(faces.length).toBeGreaterThanOrEqual(18); // 修前无 faceInterface 列 → 0 → 红
+    const index = buildInterfaceIndex(join(ROOT, 'src'));
+    for (const face of faces) {
+      const hits = index.get(face) ?? [];
+      expect(
+        hits.length,
+        `faceInterface ${face} 须恰一源（实得 ${hits.length}：${hits.map((h) => h.path).join(' ; ')}）`,
+      ).toBe(1);
+    }
+  });
+
+  it('SessionsServiceFace 真源 13 成员锁（新契约接口——成员增删即红）', async () => {
+    const { findExportedInterfaces, enumerateInterfaceMembers } = await import('./extract-api-surface.mjs');
+    const src = readFileSync(join(ROOT, 'src/session/service-face.ts'), 'utf8');
+    const body = findExportedInterfaces(src).get('SessionsServiceFace');
+    expect(body).toBeDefined();
+    expect(enumerateInterfaceMembers(body)).toEqual([
+      'createSession',
+      'fork',
+      'appendEvent',
+      'currentSessionId',
+      'adopt',
+      'isBusy',
+      'eventsOfType',
+      'lastClosedBoundary',
+      'logLength',
+      'appendWithSurfaceOp',
+      'deriveMessages',
+      'projectedJsonChars',
+      'queryEvents',
+    ]);
+  });
+
+  it('快照行为锁：每服务 ≥1 方法符号 + 方法符号点名在册（修前快照 services 域仅服务名 18 条即红）', () => {
+    const surface = JSON.parse(readFileSync(join(ROOT, 'src/contracts/api-surface.json'), 'utf8'));
+    const services = surface.exports.filter((e) => e.module === 'services');
+    // 18 服务各至少 2 条（服务名 1 + 方法 ≥1）——services 域缩回纯服务名形即红
+    const bySvc = new Map();
+    for (const e of services) {
+      const svc = e.symbol.split('.')[0];
+      bySvc.set(svc, (bySvc.get(svc) ?? 0) + 1);
+    }
+    expect([...bySvc.values()].every((n) => n >= 2)).toBe(true);
+    expect(bySvc.size).toBeGreaterThanOrEqual(18);
+    // 点名锚：跨六模块的方法符号样本（上下文关键字 get / 双相重载 uninstall / 13 面新件）
+    const symbols = new Set(services.map((e) => e.symbol));
+    for (const s of [
+      'tools.register',
+      'sessions.fork',
+      'approval.policyMode',
+      'jobs.get',
+      'apps.uninstall',
+      'ui.setWidget',
+      'compaction.compactForOverflow',
+    ]) {
+      expect(symbols.has(s), `方法符号 ${s} 须在快照 services 域`).toBe(true);
+    }
+    // 方法符号形态律：`服务名.成员名` 两段（三段以上 = 枚举器产出嵌套名即红）
+    expect(services.filter((e) => e.symbol.includes('.') && e.symbol.split('.').length !== 2)).toEqual([]);
+  });
+
+  it('grandfathering 行为锁：存量符号承袭提交快照 since、新符号落当前 apiVersion', async () => {
+    const { extractSurface } = await import('./extract-api-surface.mjs');
+    // extractSurface 读提交位快照作 prevSince 账本（幂等承袭）——对拍两账：
+    // 已在提交快照的 services 符号 → since 逐条相等（恒承袭，CR3）；新符号 → pkg.apiVersion
+    const committed = JSON.parse(readFileSync(join(ROOT, 'src/contracts/api-surface.json'), 'utf8'));
+    const prev = new Map(committed.exports.filter((e) => e.module === 'services').map((e) => [e.symbol, e.since]));
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    const extracted = (await extractSurface()).exports.filter((e) => e.module === 'services');
+    // 快照重生成后幂等（108=108 全承袭）；快照滞后于代码时 extracted ≥ prev
+    // （新方法符号落 pkg.apiVersion——本批首跑形态 18→108）
+    expect(extracted.length).toBeGreaterThanOrEqual(prev.size);
+    for (const e of extracted) {
+      const expected = prev.get(e.symbol) ?? pkg.apiVersion;
+      expect(e.since, `符号 ${e.symbol} since 承袭/新落账`).toBe(expected);
+    }
+  });
+});

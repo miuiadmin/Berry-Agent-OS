@@ -3,7 +3,7 @@
 > 本文件由 `tools/generate-api-reference.mjs` 从 `src/contracts/api-surface.json` 生成（`npm run build` 尾挂再生，check-api 查 8 drift 守护）——勿手编。
 > 稳定性分级与兼容承诺的语义权威 = 设计文档「应用契约与扩展点」API 治理章（§6.13）；本文件只派生符号面。
 
-当前 apiVersion：`1.0`。导出 368 项、能力 14 项。
+当前 apiVersion：`1.0`。导出 458 项、能力 14 项。
 
 ## 目录
 
@@ -357,23 +357,113 @@
 ## `services`
 
 - `agent` — stable（minor 只增不破），since 1.0，全形态
+- `agent.onRunSettled` — stable（minor 只增不破），since 1.0，全形态
+- `agent.reseedTimeline` — stable（minor 只增不破），since 1.0，全形态
+- `agent.sendUserMessage` — stable（minor 只增不破），since 1.0，全形态
 - `approval` — stable（minor 只增不破），since 1.0，全形态
+- `approval.ask` — stable（minor 只增不破），since 1.0，全形态
+- `approval.policyMode` — stable（minor 只增不破），since 1.0，全形态
 - `apps` — stable（minor 只增不破），since 1.0，全形态
+- `apps.applyLoad` — stable（minor 只增不破），since 1.0，全形态
+- `apps.configure` — stable（minor 只增不破），since 1.0，全形态
+- `apps.install` — stable（minor 只增不破），since 1.0，全形态
+- `apps.list` — stable（minor 只增不破），since 1.0，全形态
+- `apps.markFailed` — stable（minor 只增不破），since 1.0，全形态
+- `apps.mount` — stable（minor 只增不破），since 1.0，全形态
+- `apps.requestReload` — stable（minor 只增不破），since 1.0，全形态
+- `apps.toggle` — stable（minor 只增不破），since 1.0，全形态
+- `apps.uninstall` — stable（minor 只增不破），since 1.0，全形态
+- `apps.unmount` — stable（minor 只增不破），since 1.0，全形态
+- `apps.update` — stable（minor 只增不破），since 1.0，全形态
 - `browser` — stable（minor 只增不破），since 1.0，全形态
+- `browser.acquireContext` — stable（minor 只增不破），since 1.0，全形态
+- `browser.dispose` — stable（minor 只增不破），since 1.0，全形态
+- `browser.status` — stable（minor 只增不破），since 1.0，全形态
 - `channels` — stable（minor 只增不破），since 1.0，全形态
+- `channels.listCommands` — stable（minor 只增不破），since 1.0，全形态
+- `channels.registerCommand` — stable（minor 只增不破），since 1.0，全形态
+- `channels.registerRenderer` — stable（minor 只增不破），since 1.0，全形态
+- `channels.rendererFor` — stable（minor 只增不破），since 1.0，全形态
 - `compaction` — stable（minor 只增不破），since 1.0，全形态
+- `compaction.compactForOverflow` — stable（minor 只增不破），since 1.0，全形态
+- `compaction.drain` — stable（minor 只增不破），since 1.0，全形态
 - `exec` — stable（minor 只增不破），since 1.0，全形态
+- `exec.exec` — stable（minor 只增不破），since 1.0，全形态
 - `fetch` — stable（minor 只增不破），since 1.0，全形态
+- `fetch.downloadToFile` — stable（minor 只增不破），since 1.0，全形态
+- `fetch.fetch` — stable（minor 只增不破），since 1.0，全形态
 - `jobs` — stable（minor 只增不破），since 1.0，全形态
+- `jobs.cancel` — stable（minor 只增不破），since 1.0，全形态
+- `jobs.create` — stable（minor 只增不破），since 1.0，全形态
+- `jobs.drain` — stable（minor 只增不破），since 1.0，全形态
+- `jobs.get` — stable（minor 只增不破），since 1.0，全形态
+- `jobs.list` — stable（minor 只增不破），since 1.0，全形态
+- `jobs.registerKind` — stable（minor 只增不破），since 1.0，全形态
+- `jobs.run` — stable（minor 只增不破），since 1.0，全形态
 - `llm` — stable（minor 只增不破），since 1.0，全形态
+- `llm.canAfford` — stable（minor 只增不破），since 1.0，全形态
+- `llm.classifyError` — stable（minor 只增不破），since 1.0，全形态
+- `llm.complete` — stable（minor 只增不破），since 1.0，全形态
+- `llm.getModel` — stable（minor 只增不破），since 1.0，全形态
+- `llm.isContextOverflowFor` — stable（minor 只增不破），since 1.0，全形态
+- `llm.listModels` — stable（minor 只增不破），since 1.0，全形态
+- `llm.registerProvider` — stable（minor 只增不破），since 1.0，全形态
+- `llm.unregisterProvider` — stable（minor 只增不破），since 1.0，全形态
 - `paths` — stable（minor 只增不破），since 1.0，全形态
+- `paths.appDataDir` — stable（minor 只增不破），since 1.0，全形态
+- `paths.dataDir` — stable（minor 只增不破），since 1.0，全形态
+- `paths.workspaceRoot` — stable（minor 只增不破），since 1.0，全形态
 - `prompts` — stable（minor 只增不破），since 1.0，全形态
+- `prompts.listSections` — stable（minor 只增不破），since 1.0，全形态
+- `prompts.materialize` — stable（minor 只增不破），since 1.0，全形态
+- `prompts.registerSection` — stable（minor 只增不破），since 1.0，全形态
 - `sandbox` — stable（minor 只增不破），since 1.0，全形态
+- `sandbox.confine` — stable（minor 只增不破），since 1.0，全形态
+- `sandbox.listBackends` — stable（minor 只增不破），since 1.0，全形态
+- `sandbox.registerBackend` — stable（minor 只增不破），since 1.0，全形态
 - `sessions` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.adopt` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.appendEvent` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.appendWithSurfaceOp` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.createSession` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.currentSessionId` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.deriveMessages` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.eventsOfType` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.fork` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.isBusy` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.lastClosedBoundary` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.logLength` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.projectedJsonChars` — stable（minor 只增不破），since 1.0，全形态
+- `sessions.queryEvents` — stable（minor 只增不破），since 1.0，全形态
 - `skills` — stable（minor 只增不破），since 1.0，全形态
+- `skills.diagnostics` — stable（minor 只增不破），since 1.0，全形态
+- `skills.get` — stable（minor 只增不破），since 1.0，全形态
+- `skills.list` — stable（minor 只增不破），since 1.0，全形态
+- `skills.refresh` — stable（minor 只增不破），since 1.0，全形态
+- `skills.registerProvider` — stable（minor 只增不破），since 1.0，全形态
+- `skills.renderAvailableSkills` — stable（minor 只增不破），since 1.0，全形态
 - `subagents` — stable（minor 只增不破），since 1.0，全形态
+- `subagents.list` — stable（minor 只增不破），since 1.0，全形态
+- `subagents.register` — stable（minor 只增不破），since 1.0，全形态
+- `subagents.start` — stable（minor 只增不破），since 1.0，全形态
 - `tools` — stable（minor 只增不破），since 1.0，全形态
+- `tools.compositionFor` — stable（minor 只增不破），since 1.0，全形态
+- `tools.executor` — stable（minor 只增不破），since 1.0，全形态
+- `tools.get` — stable（minor 只增不破），since 1.0，全形态
+- `tools.list` — stable（minor 只增不破），since 1.0，全形态
+- `tools.listFor` — stable（minor 只增不破），since 1.0，全形态
+- `tools.register` — stable（minor 只增不破），since 1.0，全形态
+- `tools.stats` — stable（minor 只增不破），since 1.0，全形态
+- `tools.toAgentTool` — stable（minor 只增不破），since 1.0，全形态
 - `ui` — stable（minor 只增不破），since 1.0，全形态
+- `ui.attach` — stable（minor 只增不破），since 1.0，全形态
+- `ui.confirm` — stable（minor 只增不破），since 1.0，全形态
+- `ui.hasAudience` — stable（minor 只增不破），since 1.0，全形态
+- `ui.input` — stable（minor 只增不破），since 1.0，全形态
+- `ui.notify` — stable（minor 只增不破），since 1.0，全形态
+- `ui.select` — stable（minor 只增不破），since 1.0，全形态
+- `ui.setStatus` — stable（minor 只增不破），since 1.0，全形态
+- `ui.setWidget` — stable（minor 只增不破），since 1.0，全形态
 
 ## `session-events`
 

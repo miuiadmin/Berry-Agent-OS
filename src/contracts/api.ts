@@ -78,6 +78,14 @@ export interface ServiceCatalogEntry {
   readonly name: string;
   /** 服务归属模块（§1.5 表「归属模块」列） */
   readonly module: string;
+  /**
+   * 服务面契约接口名（API 治理进化刀 B——§6.13.4 方法级符号）：指向宿主模块
+   * 公开面导出的 interface 声明名（provide 对象 satisfies 本型——面漂移编译期
+   * 即红）。抽取器按 module 列寻址接口源文件、枚举其成员，每方法/属性一符号
+   * 进 surface.json exports[]（module='services'，symbol=`服务名.成员名`）。
+   * 接口缺失的宿主模块同笔补契约接口声明（§6.13.4 刀 B 条款）。
+   */
+  readonly faceInterface: string;
   /** 一句话语义（§1.5 表同列——surface.json 文档面消费） */
   readonly note: string;
   /** 稳定性 tier（必填——零隐式载体） */
@@ -91,29 +99,132 @@ export interface ServiceCatalogEntry {
  * 具名服务），不在此列；首条真实 ctx.memory 服务落地时增条。
  */
 export const SERVICE_CATALOG: readonly ServiceCatalogEntry[] = [
-  { name: 'agent', module: 'chat', note: '对话驱动控制（sendUserMessage 等官方件面）', tier: 'stable' },
-  { name: 'tools', module: 'tools', note: '工具注册面（register/listFor——S2 两层模型）', tier: 'stable' },
+  {
+    name: 'agent',
+    module: 'chat',
+    faceInterface: 'AgentServiceFace',
+    note: '对话驱动控制（sendUserMessage 等官方件面）',
+    tier: 'stable',
+  },
+  {
+    name: 'tools',
+    module: 'tools',
+    faceInterface: 'ToolsService',
+    note: '工具注册面（register/listFor——S2 两层模型）',
+    tier: 'stable',
+  },
   {
     name: 'sessions',
     module: 'session',
+    faceInterface: 'SessionsServiceFace',
     note: '会话事件读写与投影导线（appendEvent/deriveMessages 等）',
     tier: 'stable',
   },
-  { name: 'llm', module: 'llm', note: '模型服务面（complete 单发等——pi-ai 适配层）', tier: 'stable' },
-  { name: 'jobs', module: 'subagent', note: 'Job 注册表（终态条目结算序保留帽 256）', tier: 'stable' },
-  { name: 'subagents', module: 'subagent', note: '委派 provider 注册与程序化发起', tier: 'stable' },
-  { name: 'prompts', module: 'app', note: 'systemPrompt 具名追加段注册', tier: 'stable' },
-  { name: 'paths', module: 'app', note: '目录服务（dataDir/appDataDir/workspaceRoot）', tier: 'stable' },
-  { name: 'apps', module: 'app', note: '装载管理 reconciliation 进程内服务', tier: 'stable' },
-  { name: 'skills', module: 'skills', note: '技能来源注册（skills_change 广播）', tier: 'stable' },
-  { name: 'approval', module: 'safety', note: '动作级审批（ask/never/allowed-once）', tier: 'stable' },
-  { name: 'sandbox', module: 'safety', note: '沙箱纯包装（三档文件效果词汇）', tier: 'stable' },
-  { name: 'exec', module: 'exec', note: 'spawn 管道服务（进程组树杀/超时归因）', tier: 'stable' },
-  { name: 'fetch', module: 'web', note: '受控 fetch 原语（SSRF 五卫生件同面）', tier: 'stable' },
-  { name: 'channels', module: 'channels', note: '通道服务面（多会话呈现/提问队列）', tier: 'stable' },
-  { name: 'ui', module: 'channels', note: '观众面（notify 广播/hasAudience 探针）', tier: 'stable' },
-  { name: 'browser', module: 'browser', note: '浏览器自动化服务面（CDP 桥）', tier: 'stable' },
-  { name: 'compaction', module: 'compaction', note: '长会话压缩触发面（闲时重播种等）', tier: 'stable' },
+  {
+    name: 'llm',
+    module: 'llm',
+    faceInterface: 'LlmService',
+    note: '模型服务面（complete 单发等——pi-ai 适配层）',
+    tier: 'stable',
+  },
+  {
+    name: 'jobs',
+    module: 'subagent',
+    faceInterface: 'JobsServiceFace',
+    note: 'Job 注册表（终态条目结算序保留帽 256）',
+    tier: 'stable',
+  },
+  {
+    name: 'subagents',
+    module: 'subagent',
+    faceInterface: 'SubagentsServiceFace',
+    note: '委派 provider 注册与程序化发起',
+    tier: 'stable',
+  },
+  {
+    name: 'prompts',
+    module: 'app',
+    faceInterface: 'PromptsService',
+    note: 'systemPrompt 具名追加段注册',
+    tier: 'stable',
+  },
+  {
+    name: 'paths',
+    module: 'app',
+    faceInterface: 'PathsService',
+    note: '目录服务（dataDir/appDataDir/workspaceRoot）',
+    tier: 'stable',
+  },
+  {
+    name: 'apps',
+    module: 'app',
+    faceInterface: 'AppsService',
+    note: '装载管理 reconciliation 进程内服务',
+    tier: 'stable',
+  },
+  {
+    name: 'skills',
+    module: 'skills',
+    faceInterface: 'SkillsService',
+    note: '技能来源注册（skills_change 广播）',
+    tier: 'stable',
+  },
+  {
+    name: 'approval',
+    module: 'safety',
+    faceInterface: 'ApprovalService',
+    note: '动作级审批（ask/never/allowed-once）',
+    tier: 'stable',
+  },
+  {
+    name: 'sandbox',
+    module: 'safety',
+    faceInterface: 'SandboxService',
+    note: '沙箱纯包装（三档文件效果词汇）',
+    tier: 'stable',
+  },
+  {
+    name: 'exec',
+    module: 'exec',
+    faceInterface: 'ExecService',
+    note: 'spawn 管道服务（进程组树杀/超时归因）',
+    tier: 'stable',
+  },
+  {
+    name: 'fetch',
+    module: 'web',
+    faceInterface: 'WebService',
+    note: '受控 fetch 原语（SSRF 五卫生件同面）',
+    tier: 'stable',
+  },
+  {
+    name: 'channels',
+    module: 'channels',
+    faceInterface: 'ChannelsService',
+    note: '通道服务面（多会话呈现/提问队列）',
+    tier: 'stable',
+  },
+  {
+    name: 'ui',
+    module: 'channels',
+    faceInterface: 'UiService',
+    note: '观众面（notify 广播/hasAudience 探针）',
+    tier: 'stable',
+  },
+  {
+    name: 'browser',
+    module: 'browser',
+    faceInterface: 'BrowserService',
+    note: '浏览器自动化服务面（CDP 桥）',
+    tier: 'stable',
+  },
+  {
+    name: 'compaction',
+    module: 'compaction',
+    faceInterface: 'CompactionServiceFace',
+    note: '长会话压缩触发面（闲时重播种等）',
+    tier: 'stable',
+  },
 ];
 
 /* ---------------- 真相源 #6：data.json 词表三档（§1.5 表尾双键一桥） ---------------- */

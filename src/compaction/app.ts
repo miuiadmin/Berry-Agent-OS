@@ -60,6 +60,29 @@ import {
 /* 不越界；宿主 provide 的 'agent'/'sessions'/'llm' 服务结构性满足以下接口）。       */
 /* ---------------------------------------------------------------------------------- */
 
+/**
+ * ctx.compaction 服务面契约接口（契约篇 §6.13.4 服务面方法级符号——API 治理
+ * 进化批刀 B，2026-09-04）：本件 `provide('compaction')` 对象的全量形（provide
+ * 位 satisfies 本型——面漂移编译期即红）。抽取器经 SERVICE_CATALOG
+ * faceInterface 列寻址本接口，逐成员落 `services` 域方法级符号
+ * （`compaction.compactForOverflow` 形）。chat 消费侧窄面
+ * （OverflowCompactionFace）维持不变——消费窄面与全量契约面并存是既有纪律。
+ */
+export interface CompactionServiceFace {
+  /**
+   * mid-run 溢出压缩（durable 五步，reason='overflow'）：'compacted' = 五步
+   * 全落投影已缩；'nothing' = 无可压；'failed' = 摘要调用抛错（已落
+   * compaction/failed）。须在信封会话调用链语境内调用；与阈值路共享
+   * per-session 在飞互斥。
+   */
+  compactForOverflow(): Promise<'compacted' | 'nothing' | 'failed'>;
+  /**
+   * 在飞压缩汇流快照：per-session 在飞互斥位 values 的 Promise.all（快照
+   * 语义；tail 恒不拒；无在飞 = 已结算 Promise 直返）。
+   */
+  drain(): Promise<void>;
+}
+
 /** run 结算载荷（chat 件 RunSettled 的窄化——归属 sessionId 是分账键） */
 interface RunSettledLike {
   readonly sessionId: string;
@@ -431,8 +454,10 @@ export function createCompactionApp(): BuiltinAppModule {
 
       // 溢出压缩面（第四十五批配套②）：恒提供——agent 缺席同；消费方（chat
       // 驱动）经根作用域调用点惰性 tryGet 解析（chat 首行先于本第九行装载，
-      // 装配期求值恒空——时序由调用点解决）
-      ctx.provide('compaction', { compactForOverflow, drain });
+      // 装配期求值恒空——时序由调用点解决）。satisfies 契约接口（API 治理进化
+      // 刀 B——SERVICE_CATALOG faceInterface 寻址位，成员增删编译期与面清单
+      // 双锁）
+      ctx.provide('compaction', { compactForOverflow, drain } satisfies CompactionServiceFace);
 
       // 阈值触发路：agent 缺席即无此路（面已照提供，下方只接 run 结算订阅）
       if (!agent) return;

@@ -34,6 +34,9 @@ export type {
 } from './event-types.js';
 export { deriveMessages, occludedSeqs } from './derive.js';
 export type { ProjectedMessage, ProjectedToolCall } from './derive.js';
+// ctx.sessions 服务面契约接口（API 治理进化刀 B——SERVICE_CATALOG faceInterface
+// 寻址位；组合根 provide 对象 satisfies 本型）
+export type { SessionsServiceFace } from './service-face.js';
 export { interruptedTurnClosers, lastClosedTurnBoundary } from './recover.js';
 export type { SyntheticCloser } from './recover.js';
 export { snapshotJsonValue, deepFreeze, jsonBytes } from './snapshot.js';

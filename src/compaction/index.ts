@@ -7,6 +7,9 @@
  */
 
 export { createCompactionApp, compactionConfig } from './app.js';
+// ctx.compaction 服务面契约接口（API 治理进化刀 B——SERVICE_CATALOG faceInterface
+// 寻址位；官方件 provide 对象 satisfies 本型）
+export type { CompactionServiceFace } from './app.js';
 export { COMPACTION_EVENT_TYPES } from './events.js';
 export {
   SUMMARY_PREFIX,

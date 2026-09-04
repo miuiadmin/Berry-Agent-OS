@@ -111,6 +111,8 @@ import {
   // 预算刀（第九轮 #7③）：appendWithSurfaceOp 第五执法点——string 形态载体
   // content 过刀再落账，宿主代写面不得绕开 64KiB 护栏
   budgetString,
+  // API 治理进化刀 B：sessions provide 对象 satisfies 本契约接口（面漂移编译期即红）
+  type SessionsServiceFace,
 } from '../session/index.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
@@ -1107,6 +1109,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       );
     }
   };
+  // API 治理进化刀 B：provide 对象 satisfies SessionsServiceFace——面漂移
+  // （成员增删/签名走样）编译期即红，契约接口是 SERVICE_CATALOG faceInterface
+  // 寻址位（抽取器按此枚举方法级符号进 surface.json services 域）
   ctx.provide('sessions', {
     /**
      * 导入会话（会话篇 §5.1，2026-08-27 P1-1）：origin='import' 钉死无参数
@@ -1370,7 +1375,7 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       if (query.flushFirst === true) await persistence.flush(); // 屏障先于查询（全量 flush——查询本身跨会话）
       return persistence.queryEvents(query);
     },
-  });
+  } satisfies SessionsServiceFace);
 
   /* ---- ④e 组合树装载前置 + Ring 1 行树化（契约篇 §5.1 节奏表第一刀：tools 行起算） ----
    * Ring 1 必备行挂**独立装载锚**（ring1Anchor——宿主装配期专用锚，与应用锚

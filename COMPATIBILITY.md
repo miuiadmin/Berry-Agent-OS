@@ -13,12 +13,12 @@
 | `data-keys` | 3 | 0 | 0 | 3 |
 | `live-events` | 28 | 0 | 0 | 28 |
 | `manifest` | 10 | 0 | 0 | 10 |
-| `services` | 18 | 0 | 0 | 18 |
+| `services` | 108 | 0 | 0 | 108 |
 | `session-events` | 28 | 0 | 0 | 28 |
 | `typebox` | 3 | 0 | 0 | 3 |
 | `typebox/compile` | 2 | 0 | 0 | 2 |
 | `typebox/value` | 1 | 0 | 0 | 1 |
-| **合计** | 368 | 0 | 0 | **368** |
+| **合计** | 458 | 0 | 0 | **458** |
 
 能力面（capabilities）共 14 项。
 

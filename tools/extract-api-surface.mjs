@@ -19,7 +19,8 @@
  *    **转发条目**收录（forwarded: true 不展开上游 100+ 导出——M4 豁免面）；
  *    `berryagent/llm` = providerApiFace 键集、`berryagent/sqlite` =
  *    createAppSqliteFace() 产物键集（jiti 运行时面单源提取，loader 注入物同源）。
- * 2. ctx 服务面——SERVICE_CATALOG（jiti）。
+ * 2. ctx 服务面——SERVICE_CATALOG（jiti：目录项承袭）+ faceInterface 契约接口
+ *    成员枚举（§6.13.4 刀 B 方法级符号——`服务名.成员名` 逐符号进 exports[]）。
  * 3+4. 钩子与事件词汇（码面同载体 contracts/events.ts，冷读 n2 单源防双记）：
  *    LIVE_EVENT_CATALOG ∪ 官方件声明层（obs/events.ts OBS_EVENTS）为活体面；
  *    SessionEvent 目录 = jiti 副作用收割（先 import 全部注册方模块再
@@ -39,7 +40,7 @@
  * CLI：`node tools/extract-api-surface.mjs --write` 落快照 src/contracts/api-surface.json；
  * 缺省打印真值（check-api 经模块导入消费 extractSurface()，不走 CLI）。
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJiti } from 'jiti';
@@ -358,6 +359,302 @@ function resolveTsPath(baseDir, spec) {
   }
 }
 
+/* ---------------- 服务面契约接口寻址与成员枚举（§6.13.4 刀 B——方法级符号） ---------------- */
+
+/**
+ * 模板安全步进扫描器工厂（scanTopLevelExports 协议的复用与加固件——刀 B）：
+ * - TemplateHead 的 `${` 开帧（帧值 = 插值内花括深度）；帧顶深度 0 的 `}` 必须
+ *   reScanTemplateToken 收编为 TemplateMiddle/Tail，否则闭合反引号被当新模板头
+ *   吞掉其后代码、花括深度永久失步（errors.ts 模板文案实证——协议全文见
+ *   scanTopLevelExports 头注）。Middle 尾随 `${` 续开插值（帧保留），Tail 收帧。
+ * - **斜杠消歧（刀 B 加固——全仓走查的前置条件）**：独立扫描器无 parser 语境，
+ *   `/` 的正则/除号两义须词法替代——前 token 可终结表达式（标识符/字面量/
+ *   闭括/this 族……）即除号；否则 tryScan 试探 reScanSlashToken，产物是
+ *   RegularExpressionLiteral 且未跨行（正则不含裸换行——isUnterminated 探针）
+ *   即整枚正则单 token 收编（其内 `#`/括号不再碎 token 化——碎化下字符类内
+ *   `#` 被当私有名起点产零宽 PrivateIdentifier 死循环，channels/mention.ts
+ *   MENTION_TOKEN 正则实证）；试探失败回退除号（除位语境接受 SlashToken）。
+ *   歧义残留面（非终结语境的双除号同线等）由零宽哨兵兜底转 fail-loud。
+ * - **零宽哨兵（刀 B 加固）**：step 产出与上一步同起点的非 EOF token 即 throw
+ *   ——零宽 token 永不前进 = 词法失步死循环，挂死形态一律转抽取期红。
+ * @param {string} sourceText 待扫描源文本
+ * @returns {{ step: () => number, text: () => string, inTemplate: () => boolean, start: () => number }}
+ */
+function createTemplateSafeScanner(sourceText) {
+  const scanner = ts.createScanner(99 /* ESNext */, /* skipTrivia */ true);
+  scanner.setText(sourceText);
+  /** 「前 token 可终结表达式」判据集（斜杠消歧的除位语境——除号左操作数形态） */
+  const DIVISION_PRECEDERS = new Set([
+    ts.SyntaxKind.Identifier,
+    ts.SyntaxKind.NumericLiteral,
+    ts.SyntaxKind.StringLiteral,
+    ts.SyntaxKind.BigIntLiteral,
+    ts.SyntaxKind.NoSubstitutionTemplateLiteral,
+    ts.SyntaxKind.TemplateTail,
+    ts.SyntaxKind.CloseParenToken,
+    ts.SyntaxKind.CloseBracketToken,
+    ts.SyntaxKind.PlusPlusToken,
+    ts.SyntaxKind.MinusMinusToken,
+    ts.SyntaxKind.ThisKeyword,
+    ts.SyntaxKind.SuperKeyword,
+    ts.SyntaxKind.TrueKeyword,
+    ts.SyntaxKind.FalseKeyword,
+    ts.SyntaxKind.NullKeyword,
+    ts.SyntaxKind.VoidKeyword,
+  ]);
+  /** 模板字面量协议栈（帧值 = 插值表达式内花括深度） */
+  const templateStack = [];
+  /** 上一个 step 产出的 token kind（斜杠消歧语境锚；-1 = 首步恒非除位） */
+  let prevKind = -1;
+  /** 上一个 step 产出的 token 起点（零宽哨兵对照位；-1 = 首步） */
+  let lastStart = -1;
+  const step = () => {
+    let t = scanner.scan();
+    // 斜杠消歧：非除位语境的 `/` 试探正则整枚收编（见头注——碎化即死循环面）
+    if (t === ts.SyntaxKind.SlashToken && !DIVISION_PRECEDERS.has(prevKind)) {
+      const kept = scanner.tryScan(() => {
+        const r = scanner.reScanSlashToken();
+        return r === ts.SyntaxKind.RegularExpressionLiteral && !scanner.isUnterminated();
+      });
+      if (kept) t = ts.SyntaxKind.RegularExpressionLiteral;
+      // 试探失败已回退——t 维持 SlashToken（除号语境接受）
+    }
+    // 零宽哨兵：同起点非 EOF 重复 = 零宽 token 死循环（词法失步）——fail-loud
+    if (t !== ts.SyntaxKind.EndOfFile && scanner.getTokenStart() === lastStart) {
+      throw new Error(
+        `词法失步：token ${ts.SyntaxKind[t]} 于位 ${scanner.getTokenStart()} 零宽重复` +
+          `（正则/私有名消歧遗漏形态——检查源文本该位）`,
+      );
+    }
+    lastStart = scanner.getTokenStart();
+    prevKind = t;
+    if (t === ts.SyntaxKind.TemplateHead) {
+      templateStack.push(0);
+    } else if (t === ts.SyntaxKind.CloseBraceToken && templateStack.length > 0) {
+      if (templateStack[templateStack.length - 1] === 0) {
+        const r = scanner.reScanTemplateToken();
+        if (r === ts.SyntaxKind.TemplateTail) templateStack.pop();
+        // 哨兵锚随 reScan 产物同步（同位再标记者——TemplateMiddle/Tail 起点
+        // 与原 CloseBrace 同位，属合法一步；锚更新防下一步误报零宽）
+        lastStart = scanner.getTokenStart();
+        prevKind = r;
+        return r;
+      }
+      templateStack[templateStack.length - 1]--;
+    } else if (t === ts.SyntaxKind.OpenBraceToken && templateStack.length > 0) {
+      templateStack[templateStack.length - 1]++;
+    }
+    return t;
+  };
+  // start()：当前 token 源内起点（skipTrivia 下不含前导空白/注释——定位锚）
+  return {
+    step,
+    text: () => scanner.getTokenText(),
+    inTemplate: () => templateStack.length > 0,
+    start: () => scanner.getTokenStart(),
+  };
+}
+
+/**
+ * 单文件顶层 `export interface 名` 声明定位器（刀 B 接口索引的文件级扫描件）：
+ * token 走查产出 名 → 体文本（体开 `{` 与配对闭 `}` 之间，不含外围花括）。
+ * 三态行进：深度 0 扫描态（只在花括深度 0 认 export——嵌套 namespace 体内的
+ * interface 不收，本仓服务面契约接口恒顶层导出，缺席即 SERVICE_CATALOG 寻址
+ * 零源 fail-loud）→ 头部态（`interface 名` 已见、等体开器：extends/泛型段以
+ * `<>` 深度计穿行——类型位无比较运算符，`<` 恒泛型开器；`>>`/`>>>` 是合并
+ * token 按 `>` 字符数折算递减〔嵌套泛型闭包不漏计〕；`<>` 内平衡花括另计，
+ * 不误认体开器；`=>` 与 `>` 是不同 token，箭头返回型不扰角深度）→ 体收集态
+ * （花括配对至归零收体——方括/圆括内花括恒平衡，字符串单 token、模板协议
+ * 在 step 内，皆不破坏配对）。
+ * @param {string} sourceText 源文件全文
+ * @returns {Map<string, string>} 接口名 → 体文本
+ */
+export function findExportedInterfaces(sourceText) {
+  const { step, text, inTemplate, start } = createTemplateSafeScanner(sourceText);
+  /** 名 → 体文本 */
+  const out = new Map();
+  /** 头部态载荷（angle = `<>` 深度；headerBrace = angle>0 段内花括深度） */
+  let header = null;
+  /** 体收集态：体文本起点（体开 `{` 之后）；-1 = 非体收集态 */
+  let bodyStart = -1;
+  /** 体收集态花括深度 */
+  let bodyDepth = 0;
+  /** 体收集态携带的接口名（header 清空后保名至闭 `}` 收体） */
+  let pendingName = null;
+  /** 扫描态花括深度（export 只在深度 0 认） */
+  let depth = 0;
+  let token = step();
+  while (token !== ts.SyntaxKind.EndOfFile) {
+    if (!inTemplate()) {
+      if (bodyStart !== -1) {
+        // 体收集态：配对闭 `}` 归零即收体（体文本止于其起点——不含闭器）
+        if (token === ts.SyntaxKind.OpenBraceToken) bodyDepth++;
+        else if (token === ts.SyntaxKind.CloseBraceToken) {
+          bodyDepth--;
+          if (bodyDepth === 0) {
+            out.set(pendingName, sourceText.slice(bodyStart, start()));
+            pendingName = null;
+            bodyStart = -1;
+            depth = 0;
+          }
+        }
+      } else if (header === null) {
+        if (token === ts.SyntaxKind.OpenBraceToken) depth++;
+        else if (token === ts.SyntaxKind.CloseBraceToken) depth--;
+        if (depth === 0 && token === ts.SyntaxKind.ExportKeyword) {
+          // 预读 export 后是否 interface 名序列（非 interface 形照常前行——
+          // token 已前进无妨，深度 0 才认 export，语句体内无 export）
+          let t = step();
+          if (t === ts.SyntaxKind.InterfaceKeyword) {
+            t = step();
+            if (t === ts.SyntaxKind.Identifier) header = { name: text(), angle: 0, headerBrace: 0 };
+          }
+        }
+      } else if (token === ts.SyntaxKind.LessThanToken) header.angle++;
+      else if (token === ts.SyntaxKind.GreaterThanToken) header.angle = Math.max(0, header.angle - 1);
+      else if (token === ts.SyntaxKind.GreaterThanGreaterThanToken) header.angle = Math.max(0, header.angle - 2);
+      else if (token === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken)
+        header.angle = Math.max(0, header.angle - 3);
+      else if (token === ts.SyntaxKind.OpenBraceToken) {
+        if (header.angle === 0 && header.headerBrace === 0) {
+          // 体开器：体文本自 `{` 之后起
+          pendingName = header.name;
+          bodyStart = start() + 1;
+          bodyDepth = 1;
+          header = null;
+        } else {
+          header.headerBrace++;
+        }
+      } else if (token === ts.SyntaxKind.CloseBraceToken) {
+        header.headerBrace = Math.max(0, header.headerBrace - 1);
+      }
+    }
+    token = step();
+  }
+  return out;
+}
+
+/**
+ * 全仓顶层导出接口索引（刀 B——SERVICE_CATALOG faceInterface 寻址单源）：
+ * 递归收集 src/ 下非测试 .ts 源文件的全部 `export interface` 声明。索引值 =
+ * 声明数组（名 + 体 + 源路径）；同名多源**不在此炸**（非服务面接口跨模块同名
+ * 是 TS 合法形态），仅在 SERVICE_CATALOG 实际寻址撞名时 fail-loud（寻址单义
+ * 性——撞名消歧先于落码）。
+ * @returns {Map<string, { body: string, path: string }[]>} 接口名 → 声明数组
+ */
+export function buildInterfaceIndex(rootDir) {
+  /** 递归收集非测试 .ts 源文件（.test.ts / .d.ts 剔除；排序保遍历序稳定） */
+  const files = [];
+  const walk = (dir) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const p = join(dir, ent.name);
+      if (ent.isDirectory()) walk(p);
+      else if (ent.name.endsWith('.ts') && !ent.name.endsWith('.test.ts') && !ent.name.endsWith('.d.ts')) files.push(p);
+    }
+  };
+  walk(rootDir);
+  const index = new Map();
+  for (const f of files) {
+    for (const [name, body] of findExportedInterfaces(readFileSync(f, 'utf8'))) {
+      const hits = index.get(name) ?? [];
+      hits.push({ body, path: f });
+      index.set(name, hits);
+    }
+  }
+  return index;
+}
+
+/**
+ * 接口体成员枚举器（刀 B——`服务名.成员名` 方法级符号的成员清单源）。
+ * 词法走查接口体文本，产出成员名清表——方法与属性同收（属性成员
+ * 〔ApprovalService.policyMode 形〕也是面承诺，同入清单）。词法规则（接口体
+ * 是纯类型位——无正则字面量，花括失步面天然收窄）：
+ * - 注释/字符串由 scanner（skipTrivia + 字符串单 token）天然跳过——JSDoc 内
+ *   花括与字符串内 `;` 不误判（多行 JSDoc 含 `{@link …}` 实证安全）；
+ * - 模板字面量类型走 step 内 templateStack 协议（插值内花括不渗深度计）；
+ * - 深度计 {}[]() 合计（`<>` 不计——类型位 `<...>` 内不可能裸 `;`：泛型实参
+ *   内的 `;` 必居对象字面量型 `{}` 内部，`Parameters<X['k']>[0]` 形方括自平衡）；
+ * - 深度 0 的 `;` = 成员终结（prettier 分号纪律保证成员恒 `;` 收尾）；
+ * - 成员名 = 成员起点后首个标识符——**上下文关键字同收**（`get`/`set`/`type`
+ *   等作成员名是合法 TS：JobsServiceFace.get 实证——isKeywordKind 判据收编，
+ *   `readonly` 修饰符与 `new` 构造签名头除外〔修饰/签名关键字非名〕）；`'引号
+ *   名'` 字符串头成员收去引号文本；起点是 `[`（索引签名）/`(`（调用签名）/`<`
+ *   （泛型调用签名）/`new`（构造签名）的无名成员——跳过至终结符不计（幻影
+ *   防线：索引签名值部的类型名不得被误收为成员）；
+ * - **重载同名录收**（方法重载签名组是同一 API 符号——AppsService.uninstall
+ *   双相重载实证：inspect 相 + execute 相两签名一符号）——Set 去重保首现序。
+ * 深度负向即 throw（词法失步 fail-loud——接口体花括必然平衡）。
+ * @param {string} bodyText 接口体文本（`export interface X {` 与配对 `}` 之间）
+ * @returns {string[]} 成员名清表（声明序，重载去重后）
+ */
+export function enumerateInterfaceMembers(bodyText) {
+  const { step, text, inTemplate } = createTemplateSafeScanner(bodyText);
+  /** 成员名清表（声明序，重载去重后） */
+  const members = [];
+  /** 重载去重账（名 → 已收标记） */
+  const seen = new Set();
+  /** {}[]() 合计深度（`<>` 不计——见头注） */
+  let depth = 0;
+  /** 当前成员名：null = 尚在找首标识符 */
+  let name = null;
+  /** 无名成员跳过旗（索引签名/调用签名/泛型调用签名/构造签名） */
+  let skipping = false;
+  let token = step();
+  while (token !== ts.SyntaxKind.EndOfFile) {
+    if (!inTemplate()) {
+      // 成员起点判定在深度调整之前（起点 `[`/`(`/`<` 尚未入深度计——正是
+      // 「起点即开括」的判据位）
+      const atMemberStart = depth === 0 && name === null && !skipping;
+      if (atMemberStart) {
+        const isNameToken =
+          token === ts.SyntaxKind.Identifier ||
+          // 上下文关键字作成员名（get/set/type/of/……合法 TS）——修饰符与
+          // 构造签名关键字（readonly/new）除外：它们非名，名在后续 token
+          (ts.isKeywordKind(token) && token !== ts.SyntaxKind.ReadonlyKeyword && token !== ts.SyntaxKind.NewKeyword);
+        if (isNameToken) name = text();
+        else if (token === ts.SyntaxKind.StringLiteral) name = stripQuotes(text());
+        else if (
+          token === ts.SyntaxKind.OpenBracketToken ||
+          token === ts.SyntaxKind.OpenParenToken ||
+          token === ts.SyntaxKind.LessThanToken ||
+          token === ts.SyntaxKind.NewKeyword
+        ) {
+          skipping = true;
+        }
+      }
+      if (
+        token === ts.SyntaxKind.OpenBraceToken ||
+        token === ts.SyntaxKind.OpenBracketToken ||
+        token === ts.SyntaxKind.OpenParenToken
+      ) {
+        depth++;
+      } else if (
+        token === ts.SyntaxKind.CloseBraceToken ||
+        token === ts.SyntaxKind.CloseBracketToken ||
+        token === ts.SyntaxKind.CloseParenToken
+      ) {
+        depth--;
+        if (depth < 0) throw new Error(`接口体词法失步：闭括深度负向（体文本花括不平衡？）`);
+      }
+      if (depth === 0 && token === ts.SyntaxKind.SemicolonToken) {
+        if (name !== null) {
+          // 重载签名组一符号：同名录收（首现序）
+          if (!seen.has(name)) {
+            members.push(name);
+            seen.add(name);
+          }
+          name = null;
+        }
+        skipping = false;
+      }
+    }
+    token = step();
+  }
+  // 尾成员宽容收口：prettier 保证 `;`，缺号（手工格式）不丢成员
+  if (name !== null && !seen.has(name)) members.push(name);
+  return members;
+}
+
 /* ---------------- 公开根分桶不变式（§6.13.4 刀 A——api.ts 顶层导出两桶执法） ---------------- */
 
 /**
@@ -519,15 +816,72 @@ export async function extractSurface() {
     });
   }
 
-  // —— #2：ctx 服务面目录 ——
+  // —— #2：ctx 服务面目录（服务名 + 方法级符号——§6.13.4 刀 B）——
+  // 宿主 apiVersion 前置读（原在快照收尾处——grandfathering 需先于服务域取值）：
+  // 新增成员 since = 入面档时当前 apiVersion（package.json 预置号随 release 联动）；
+  // 不可读/非法 JSON 即 fail-loud（快照自描述依赖 apiVersion 字段）
+  const pkg = (() => {
+    try {
+      return JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
+    } catch (err) {
+      throw new Error(`package.json 不可读或非法 JSON（extract-api-surface 依赖 apiVersion 字段）：${err.message}`);
+    }
+  })();
+  // 已提交快照 services 域 since 账本（grandfathering 单源——刀 B）：存量符号
+  // 承袭快照旧值、新符号落当前 apiVersion；快照缺席（首跑形态）走 ?? 兜底。
+  // 读工作树快照位：快照重生成幂等（承袭值已含新符号时结果不变）
+  const prevSince = new Map();
+  try {
+    for (const e of JSON.parse(readFileSync(SNAPSHOT_PATH, 'utf8')).exports ?? []) {
+      if (e.module === 'services') prevSince.set(e.symbol, e.since);
+    }
+  } catch {
+    // 快照文件缺席（首跑形态）——账本空表，全部落 pkg.apiVersion
+  }
+  // 全仓接口索引（faceInterface 寻址——18 服务契约接口散住 contracts 与宿主
+  // 模块〔冷读 CR2〕，全仓索引是唯一不漏形；撞名/零源在寻址点 fail-loud）
+  const interfaceIndex = buildInterfaceIndex(join(REPO_ROOT, 'src'));
+  /** faceInterface 寻址（三向 fail-loud：零源/撞源/枚举词法失步皆抽取期红） */
+  const lookupFace = (entry) => {
+    const hits = interfaceIndex.get(entry.faceInterface) ?? [];
+    if (hits.length === 0) {
+      throw new Error(
+        `faceInterface 零源：${entry.name} → ${entry.faceInterface}（全仓非测试源无此顶层导出接口——` +
+          `先补契约接口声明或正名目录项，§6.13.4 刀 B）`,
+      );
+    }
+    if (hits.length > 1) {
+      throw new Error(
+        `faceInterface 撞源：${entry.faceInterface} 见于 ${hits.map((h) => h.path).join(' 与 ')}——` +
+          `寻址单义性，先改名消歧（§6.13.4 刀 B）`,
+      );
+    }
+    return hits[0];
+  };
   for (const entry of SERVICE_CATALOG) {
+    // 服务名符号（目录级——DEP 可整体废弃；since 承袭快照）
     exports.push({
       symbol: entry.name,
       module: 'services',
       tier: entry.tier,
-      since: '1.0',
+      since: prevSince.get(entry.name) ?? pkg.apiVersion,
       formFactors: ff(ALL_FF),
     });
+    // 方法级符号（§6.13.4 刀 B）：枚举契约接口成员，`服务名.成员名` 一符号——
+    // tier/formFactors 承袭目录项；since grandfathering（存量承袭快照、新增落
+    // 当前 apiVersion——冷读 CR3：恒承袭使新增成员盖服务诞生版之戳，DEP 窗口
+    // 算术坐标失锚）。成员面 = 契约接口声明面（provide 对象 satisfies 本型，
+    // 面漂移编译期即红）——方法增删自此对 diff/判级/查 9/COMPATIBILITY 全链可见
+    for (const member of enumerateInterfaceMembers(lookupFace(entry).body)) {
+      const symbol = `${entry.name}.${member}`;
+      exports.push({
+        symbol,
+        module: 'services',
+        tier: entry.tier,
+        since: prevSince.get(symbol) ?? pkg.apiVersion,
+        formFactors: ff(ALL_FF),
+      });
+    }
   }
 
   // —— #3+#4a：钩子与活体事件词汇（同载体单源——冷读 n2）：目录 ∪ 官方件声明层 ——
@@ -610,8 +964,8 @@ export async function extractSurface() {
     target.deprecated = { dep: reg.dep, removalIn: reg.removalIn, replacement: reg.replacement };
   }
 
-  // 宿主 apiVersion（package.json 预置号——快照自描述，drift 闸随 release 版本联动）
-  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
+  // 宿主 apiVersion 读已前置至 #2 服务域（grandfathering 取值先序——刀 B）：
+  // pkg 变量在彼处带 fail-loud 包装（package.json 不可读即炸），此处不再重读
 
   // —— 点火位盖章（§6.13.4 点火可见性——全面复盘 20260903-91 刀五）——
   // enforcement 纪元章从 API_ENFORCEMENT_IGNITED 单源派生：点火翻转日即面快照
@@ -620,7 +974,7 @@ export async function extractSurface() {
   const enforcement = apiMod.API_ENFORCEMENT_IGNITED ? 'ignited' : 'pre-ignition';
 
   exports.sort((a, b) =>
-    a.module !== b.module ? (a.module < b.module ? -1 : 1) : a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0,
+    a.module === b.module ? (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0) : a.module < b.module ? -1 : 1,
   );
   return { apiVersion: pkg.apiVersion, enforcement, exports, capabilities };
 }

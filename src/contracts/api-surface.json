@@ -3494,7 +3494,62 @@
       ]
     },
     {
+      "symbol": "agent.onRunSettled",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "agent.reseedTimeline",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "agent.sendUserMessage",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "approval",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "approval.ask",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "approval.policyMode",
       "module": "services",
       "tier": "stable",
       "since": "1.0",
@@ -3516,7 +3571,161 @@
       ]
     },
     {
+      "symbol": "apps.applyLoad",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.configure",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.install",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.list",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.markFailed",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.mount",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.requestReload",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.toggle",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.uninstall",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.unmount",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "apps.update",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "browser",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "browser.acquireContext",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "browser.dispose",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "browser.status",
       "module": "services",
       "tier": "stable",
       "since": "1.0",
@@ -3538,7 +3747,73 @@
       ]
     },
     {
+      "symbol": "channels.listCommands",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "channels.registerCommand",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "channels.registerRenderer",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "channels.rendererFor",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "compaction",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "compaction.compactForOverflow",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "compaction.drain",
       "module": "services",
       "tier": "stable",
       "since": "1.0",
@@ -3560,7 +3835,40 @@
       ]
     },
     {
+      "symbol": "exec.exec",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "fetch",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "fetch.downloadToFile",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "fetch.fetch",
       "module": "services",
       "tier": "stable",
       "since": "1.0",
@@ -3582,7 +3890,172 @@
       ]
     },
     {
+      "symbol": "jobs.cancel",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "jobs.create",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "jobs.drain",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "jobs.get",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "jobs.list",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "jobs.registerKind",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "jobs.run",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "llm",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "llm.canAfford",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "llm.classifyError",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "llm.complete",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "llm.getModel",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "llm.isContextOverflowFor",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "llm.listModels",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "llm.registerProvider",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "llm.unregisterProvider",
       "module": "services",
       "tier": "stable",
       "since": "1.0",
@@ -3604,7 +4077,73 @@
       ]
     },
     {
+      "symbol": "paths.appDataDir",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "paths.dataDir",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "paths.workspaceRoot",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "prompts",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "prompts.listSections",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "prompts.materialize",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "prompts.registerSection",
       "module": "services",
       "tier": "stable",
       "since": "1.0",
@@ -3626,7 +4165,183 @@
       ]
     },
     {
+      "symbol": "sandbox.confine",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sandbox.listBackends",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sandbox.registerBackend",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "sessions",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.adopt",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.appendEvent",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.appendWithSurfaceOp",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.createSession",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.currentSessionId",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.deriveMessages",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.eventsOfType",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.fork",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.isBusy",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.lastClosedBoundary",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.logLength",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.projectedJsonChars",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "sessions.queryEvents",
       "module": "services",
       "tier": "stable",
       "since": "1.0",
@@ -3648,7 +4363,106 @@
       ]
     },
     {
+      "symbol": "skills.diagnostics",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "skills.get",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "skills.list",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "skills.refresh",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "skills.registerProvider",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "skills.renderAvailableSkills",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "subagents",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "subagents.list",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "subagents.register",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "subagents.start",
       "module": "services",
       "tier": "stable",
       "since": "1.0",
@@ -3670,7 +4484,183 @@
       ]
     },
     {
+      "symbol": "tools.compositionFor",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "tools.executor",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "tools.get",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "tools.list",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "tools.listFor",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "tools.register",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "tools.stats",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "tools.toAgentTool",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "ui",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "ui.attach",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "ui.confirm",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "ui.hasAudience",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "ui.input",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "ui.notify",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "ui.select",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "ui.setStatus",
+      "module": "services",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
+      "symbol": "ui.setWidget",
       "module": "services",
       "tier": "stable",
       "since": "1.0",
