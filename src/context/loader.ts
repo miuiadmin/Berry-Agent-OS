@@ -856,7 +856,7 @@ export async function loadApps(
   if (legacyGateIds.length > 0) {
     root.logger.warn(
       `API 声明门 legacy 容忍态：${legacyGateIds.length} 个行清单缺 api 块` +
-        `（兼容执法点火后将拒载——请尽早补 api 块声明 minApiVersion，契约篇 §6.13.4）`,
+        `（兼容执法点火后将拒载——请尽早补 api 块声明 minApiVersion；API 治理语义见 docs/应用开发指南.md「API 稳定性与兼容性」节）`,
       { rows: legacyGateIds },
     );
   }

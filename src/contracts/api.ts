@@ -310,10 +310,25 @@ export function compareApiVersions(a: string, b: string): number {
   return pa[0] !== pb[0] ? pa[0] - pb[0] : pa[1] - pb[1];
 }
 
+/**
+ * API 族错误消息公共指路尾注（公开锚——查 10：运行时字符串不得指路知识域）。
+ *
+ * 指路目标 = 仓库公开文档面（docs/应用开发指南.md「API 稳定性与兼容性」节 +
+ * COMPATIBILITY.md）——第三方应用作者顺错误消息可达；知识域篇名/章节号
+ * （gitignored）禁入运行时字符串（§6.13.8 查 10——机器面由 check-api 查 10
+ * 执法，滤词单源在 tools/api-doc-sections.mjs）。本模块四条拒载消息统一缀此
+ * 尾注：拒载消息自带「下一步去哪读」。模块私有（不入公开根分桶—— INTERNAL_
+ * API_EXPORTS 白名单无需扩）。
+ */
+const API_DOC_ANCHOR_NOTE = 'API 治理语义见 docs/应用开发指南.md「API 稳定性与兼容性」节与仓库 COMPATIBILITY.md。';
+
 /** 解析 apiVersion 为 [MAJOR, MINOR] 数值对；格式非法即抛（单点执法） */
 function parseApiVersion(v: string): [number, number] {
   if (!API_VERSION_FORMAT.test(v)) {
-    throw new AppError(API_VERSION_MALFORMED, `apiVersion 格式非法：${v}（应为 MAJOR.MINOR，如 "1.0"）`);
+    throw new AppError(
+      API_VERSION_MALFORMED,
+      `apiVersion 格式非法：${v}（应为 MAJOR.MINOR，如 "1.0"）${API_DOC_ANCHOR_NOTE}`,
+    );
   }
   const [major, minor] = v.split('.');
   return [Number(major), Number(minor)];
@@ -395,7 +410,7 @@ export function adjudicateApiGate(
         `应用 ${appId} 清单缺 api 块——兼容执法已点火（api 块必填），` +
           `须在 .app.yaml 补 ` +
           `api:\n  minApiVersion: <宿主当前 apiVersion 或更旧>` +
-          `\n（契约篇 §6.13.4 批 4 翻必填——min fail-loud 与兼容模式对全体应用生效）。`,
+          `\n（批 4 翻必填——min fail-loud 与兼容模式对全体应用生效）。${API_DOC_ANCHOR_NOTE}`,
       );
     }
     return { status: 'legacy', effectiveTarget: hostApiVersion, experimentalKeys: new Set() };
@@ -409,7 +424,7 @@ export function adjudicateApiGate(
     throw new AppError(
       API_VERSION_MISMATCH,
       `应用 ${appId} 声明 minApiVersion ${min}，宿主 API 面版本 ${hostApiVersion} 低于地板——拒载。` +
-        `升级指引：升级 berry-agent-os 宿主包（npm i -g berry-agent-os@latest）或联系应用作者放宽 minApiVersion。`,
+        `升级指引：升级 berry-agent-os 宿主包（npm i -g berry-agent-os@latest）或联系应用作者放宽 minApiVersion。${API_DOC_ANCHOR_NOTE}`,
     );
   }
   // 出口 2/3：钳制与兼容统称 admit——生效 target = min(宿主, target)（钳制出口
@@ -434,7 +449,7 @@ export function assertExperimentalDeclared(
   throw new AppError(
     API_EXPERIMENTAL_UNDECLARED,
     `import 实验键 ${specifier} 未在清单声明——应用 ${appId ?? '(未知应用)'} 须在 .app.yaml ` +
-      `api 块 experimental 数组显式点名该键方能启用（契约即知情：实验键任意 minor 可破可删，契约篇 §6.13.4）`,
+      `api 块 experimental 数组显式点名该键方能启用（契约即知情：实验键任意 minor 可破可删）${API_DOC_ANCHOR_NOTE}`,
   );
 }
 
@@ -454,7 +469,7 @@ export function requireCapabilities(
     throw new AppError(
       API_CAPABILITY_MISSING,
       `应用 ${appId} 要求能力 [${missing.join(', ')}]，本构建（形态 ${formFactor}）不提供——` +
-        `server 形 API 面是显式能力集非「少装几个件」（契约篇 §6.13.10）`,
+        `server 形 API 面是显式能力集非「少装几个件」。${API_DOC_ANCHOR_NOTE}`,
     );
   }
 }

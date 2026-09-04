@@ -4,7 +4,7 @@
  * 同款收编（vitest 窄面 spawn 真脚本 + 纯函数单测，tsc 视门外纯 node 语义直跑）。
  *
  * 层锁：
- * 1. 净树 spawn：九查全绿 exit 0（门禁链占位在岗——脚本被删/依赖断链先在此红）；
+ * 1. 净树 spawn：十查全绿 exit 0（门禁链占位在岗——脚本被删/依赖断链先在此红）；
  * 2. 查 1 可红探针：CHECK_API_SNAPSHOT env 缝注入篡改快照（tier 改形）→ exit 1
  *    且 stderr 点名 [查 1]——drift 侦测不静默退化（守护炮负例探针纪律）；
  * 3. 查 3/查 4 可红探针：CHECK_API_DEPRECATIONS env 缝注入假注册簿（批 3）——
@@ -22,6 +22,10 @@
  * 8. 查 9 面动号不动可红探针（就绪度审计 20260903 P2）：CHECK_API_ARCHIVES
  *    归档族缝 + CHECK_API_SNAPSHOT 快照缝——ignited + 面 diff + 号未 bump 红；
  *    号已 bump / 纪元 pre-ignition / 归档族空三休眠形不红（机制常驻休眠语义锁）。
+ * 9. 查 10 公开产物指路卫生可红探针（API 治理进化刀 J）：CHECK_API_ROOT 夹具树
+ *    缝——文件面（COMPATIBILITY / api-decls）与 contracts API_ 消息面各得负例；
+ *    非 API_ 族消息与产码注释指路不红（§6.13.8 查 10 面界锁——机器面只审
+ *    API_ 族运行时字符串，APP_ 族同形清扫靠笔不靠闸）。
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -45,8 +49,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** 被测脚本（cwd=ROOT 相对路径——与本仓门禁同一调用形态） */
 const SCRIPT = join('tools', 'check-api.mjs');
 
-describe('check-api 机器闸：净树全绿（九查集成锁）', () => {
-  it('spawn 真脚本 exit 0——快照与抽取真值同步 + 生成物与渲染真值同步 + 九查零问题', () => {
+describe('check-api 机器闸：净树全绿（十查集成锁）', () => {
+  it('spawn 真脚本 exit 0——快照与抽取真值同步 + 生成物与渲染真值同步 + 十查零问题', () => {
     const r = spawnSync(process.execPath, [SCRIPT], { cwd: ROOT, encoding: 'utf8' });
     expect(r.status).toBe(0);
   }, 60_000);
@@ -176,37 +180,38 @@ describe('check-api 查 1/查 8：快照篡改双红探针（生成物从提交�
   }, 60_000);
 });
 
+/**
+ * 夹具树基线（CHECK_API_ROOT 的消费前提）：查 2 barrel 读 / 查 7 apps 目录与
+ * package.json 读是无条件面——夹具根缺任一即脚本 crash 先于出口（problems
+ * 永不落 stderr，断言必空）。基线三件全绿形：纯星出 barrel（scanTopLevelExports
+ * 只收直导出——星出走 stars 不进 names）/ 带 api 块合法清单 / apiVersion 1.0。
+ * 每探针在基线上只注入一处违规——红归因唯一（守护炮负例探针纪律）。
+ * 脚本侧真值（jiti 载真契约面 / 生成器真值 / 真注册簿）恒走真仓不随缝移——
+ * 注入侧只动扫描树与面清单（check-api.mjs 顶注缝契约）。
+ * 模块级共享（API 治理进化刀 J 起）：查 10 探针（公开产物指路卫生）同缝复用。
+ */
+function makeFixtureRoot() {
+  const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'berry-check-api-root-')));
+  mkdirSync(join(root, 'src/contracts'), { recursive: true });
+  writeFileSync(join(root, 'src/contracts/index.ts'), "export * from './fixture-face.js';\n");
+  mkdirSync(join(root, 'apps'));
+  writeFileSync(
+    join(root, 'apps/zz-fixture.app.yaml'),
+    'id: vendor/zz\nlabel: 夹具\ncomponents:\n  - builtin:chat\napi:\n  minApiVersion: "1.0"\n',
+  );
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ apiVersion: '1.0' }, null, 2) + '\n');
+  return root;
+}
+
+/** spawn 门禁（env 缝注入 + 仓库 cwd——与门禁链同一调用形态）；模块级共享（查 10 探针同缝复用） */
+const runGate = (extraEnv) =>
+  spawnSync(process.execPath, [SCRIPT], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, ...extraEnv },
+  });
+
 describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE 双缝——就绪度审计 20260903 P1）', () => {
-  /**
-   * 夹具树基线（CHECK_API_ROOT 的消费前提）：查 2 barrel 读 / 查 7 apps 目录与
-   * package.json 读是无条件面——夹具根缺任一即脚本 crash 先于出口（problems
-   * 永不落 stderr，断言必空）。基线三件全绿形：纯星出 barrel（scanTopLevelExports
-   * 只收直导出——星出走 stars 不进 names）/ 带 api 块合法清单 / apiVersion 1.0。
-   * 每探针在基线上只注入一处违规——红归因唯一（守护炮负例探针纪律）。
-   * 脚本侧真值（jiti 载真契约面 / 生成器真值 / 真注册簿）恒走真仓不随缝移——
-   * 注入侧只动扫描树与面清单（check-api.mjs 顶注缝契约）。
-   */
-  function makeFixtureRoot() {
-    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'berry-check-api-root-')));
-    mkdirSync(join(root, 'src/contracts'), { recursive: true });
-    writeFileSync(join(root, 'src/contracts/index.ts'), "export * from './fixture-face.js';\n");
-    mkdirSync(join(root, 'apps'));
-    writeFileSync(
-      join(root, 'apps/zz-fixture.app.yaml'),
-      'id: vendor/zz\nlabel: 夹具\ncomponents:\n  - builtin:chat\napi:\n  minApiVersion: "1.0"\n',
-    );
-    writeFileSync(join(root, 'package.json'), JSON.stringify({ apiVersion: '1.0' }, null, 2) + '\n');
-    return root;
-  }
-
-  /** spawn 门禁（env 缝注入 + 仓库 cwd——与门禁链同一调用形态） */
-  const runGate = (extraEnv) =>
-    spawnSync(process.execPath, [SCRIPT], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      env: { ...process.env, ...extraEnv },
-    });
-
   it('夹具基线净树 exit 0——扫描侧六查在夹具根全绿（后续红 = 探针注入归因唯一）', () => {
     const root = makeFixtureRoot();
     try {
@@ -578,6 +583,75 @@ describe('check-api 查 9：面动号不动可红探针（CHECK_API_ARCHIVES 归
     const baseline = runArchives(null, face(2));
     expect(baseline.stderr).not.toContain('[查 9]');
   }, 120_000);
+});
+
+describe('check-api 查 10：公开产物指路卫生可红探针（CHECK_API_ROOT 夹具树缝——API 治理进化刀 J）', () => {
+  /**
+   * 面界（§6.13.8 查 10）：文件面 = COMPATIBILITY.md + docs/API参考.md +
+   * api-decls/*（随包分发件——SCAN_ROOT 相对，夹具树可证红）；message 面 =
+   * contracts 源内 API_ 族 AppError 字面量（词法提取注释免疫）。修前真树 7 红
+   * （4 文件面 + 3 消息面）已由本批落码清扫——本探针锁「可红性」与「面界」：
+   * 生成器将来把知识域指路渲回头注 / 新 API_ 消息带篇名引用，闸当场红。
+   */
+  it('双面可红：COMPATIBILITY 指路 + api-decls 指路 + API_ 消息指路 → 三红点名', () => {
+    const root = makeFixtureRoot();
+    try {
+      // 文件面两腿：生成物头注形（「语义权威 = 设计文档…」）+ 随包分发件头注形
+      writeFileSync(
+        join(root, 'COMPATIBILITY.md'),
+        '# API 兼容性档案\n\n> 语义权威 = 设计文档「应用契约与扩展点」。\n',
+      );
+      mkdirSync(join(root, 'api-decls'));
+      writeFileSync(join(root, 'api-decls/zz-probe.d.ts'), '/** 虚拟模块类型面（API 治理 §6.13.9） */\n');
+      // message 面一腿：API_ 族 AppError 消息字面量带知识域篇名（多行 concat 形
+      // ——与产码同形，词法提取器按实参区收集）
+      writeFileSync(
+        join(root, 'src/contracts/zz-probe.ts'),
+        [
+          'export function probe(appId: string): void {',
+          '  throw new AppError(',
+          '    API_VERSION_MISMATCH,',
+          '    `应用 ${appId} 清单缺 api 块——` +',
+          '      `须补声明（契约篇 §6.13.4）。`,',
+          '  );',
+          '}',
+        ].join('\n'),
+      );
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 10]');
+      expect(r.stderr).toContain('COMPATIBILITY.md 指路知识域');
+      expect(r.stderr).toContain('api-decls/zz-probe.d.ts 指路知识域');
+      expect(r.stderr).toContain('API_VERSION_MISMATCH 错误消息指路知识域');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('面界纪律不放宽：非 API_ 族消息（APP_INVALID）与产码注释指路均不红（机器面只审 API_ 族运行时字符串）', () => {
+    const root = makeFixtureRoot();
+    try {
+      // 同文件三形态并存：注释里的篇名引用（合法）/ APP_ 族消息带篇名（面外——
+      // 同形清扫靠笔不靠闸）/ API_ 族消息干净（公开锚形）——三形态全不红
+      writeFileSync(
+        join(root, 'src/contracts/zz-clean.ts'),
+        [
+          '// 清单校验语义见契约篇 §6.13.4（产码注释引用规范合法——查 10 面界）',
+          'export function probe(where: string): void {',
+          '  throw new AppError(APP_INVALID, `${where}：非法清单（见契约篇 §6.13.4）`);',
+          '}',
+          'export function probe2(v: string): string {',
+          '  return `apiVersion 格式非法：${v}（API 治理语义见 docs/应用开发指南.md「API 稳定性与兼容性」节）`;',
+          '}',
+        ].join('\n'),
+      );
+      const r = runGate({ CHECK_API_ROOT: root });
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
 
 describe('classifyFaceDiff：两版面 diff 四类分桶（§6.13.6——纯函数）', () => {

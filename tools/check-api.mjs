@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * API 治理机器执法层（契约篇 §6.13.8 check-api 九查，第八十七批批 2 起——
- * 查 8 随第九十一批、查 9 随就绪度审计 20260903 P2 增设）。
+ * API 治理机器执法层（契约篇 §6.13.8 check-api 十查，第八十七批批 2 起——
+ * 查 8 随第九十一批、查 9 随就绪度审计 20260903 P2、查 10 随 API 治理进化刀 J
+ * 增设）。
  *
- * 进 lint:topology 链（CI 同一套）。九查形态（落码节奏——批表 §6.13.11）：
+ * 进 lint:topology 链（CI 同一套）。十查形态（落码节奏——批表 §6.13.11）：
  * 1. drift——快照 src/contracts/api-surface.json ≠ 抽取真值即红（面漂移当场抓）；
  * 2. tier 全标——快照逐条 tier 词汇合法 + since 坐标不变式（API 治理进化刀 F
  *    增设：since > 当前 apiVersion 未来版本号入册即红——版本坐标系双向，查 9
@@ -31,6 +32,11 @@
  *    当前快照 vs 最新归档面 diff 非零而 apiVersion 相同即红（面号是 since/
  *    removalIn 版本坐标的基准）；纪元 pre-ignition 或基线前休眠——机制常驻、
  *    点火日即执法日（同查 5 律）。
+ * 10. 公开产物指路卫生（API 治理进化刀 J）——公开产物面（两生成物 + api-decls/*
+ *     随包分发件 + contracts 内 API_ 族错误码 message）不得指路知识域（「设计
+ *     文档」「契约篇 §…」等 gitignored 路径/篇名——第三方作者顺指路必撞不可达
+ *     文档），指路改公开锚（docs/应用开发指南 API 稳定性节 / COMPATIBILITY.md）；
+ *     产码注释引用规范不在此列（非公开产物面）。
  *
  * 出口：零问题静默过（门禁链惯例）；有问题 stderr 逐条 + exit 1。
  */
@@ -49,7 +55,7 @@ import {
 } from './generate-compatibility.mjs';
 import { renderApiReference, API_REFERENCE_PATH } from './generate-api-reference.mjs';
 import { renderFaceDecls, API_DECLS_DIR } from './generate-api-decls.mjs';
-import { stripExperimentalSection } from './api-doc-sections.mjs';
+import { stripExperimentalSection, KNOWLEDGE_DOMAIN_RE } from './api-doc-sections.mjs';
 
 /** 仓库根（脚本位置上一级） */
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -470,6 +476,128 @@ const DEPRECATIONS =
           `而 apiVersion 同为 ${snapFace.apiVersion}——面变更须同笔 bump package.json apiVersion ` +
           `并再生成快照（面号是 since/removalIn 版本坐标的基准，§6.13.8 查 9）`,
       );
+    }
+  }
+}
+
+/* ---------------- 查 10：公开产物指路卫生（API 治理进化刀 J——指路知识域即红） ---------------- */
+
+/**
+ * 提取 `new AppError(` 实参区内全部字符串字面量拼接段（查 10 message 面）。
+ *
+ * 词法小扫描器（注释免疫——注释不在实参区，产码注释引用规范合法）：自开括号
+ * 起配平深度，跳过行注释/块注释，收集反引号模板与双/单引号字符串内容；模板
+ * `${}` 插值按表达式域处理（配平花括——其内的引号与括号不终结外层字面量）。
+ * 只收字面量段：标识符引用（如共享尾注常量）不在文本内——恰合判据，知识域
+ * 指路必然落在手写字面量里。
+ *
+ * @param {string} src 源文件全文
+ * @param {number} openIdx `new AppError(` 开括号下标（实参区自此起）
+ * @returns {string} 实参区内字符串字面量拼接文本（无字面量返回空串）
+ */
+function appErrorLiteralText(src, openIdx) {
+  let out = '';
+  let i = openIdx + 1;
+  let depth = 1;
+  while (i < src.length && depth > 0) {
+    const ch = src[i];
+    // 行注释/块注释：实参区内合法排版物，跳过不收（防注释里的规范引用假阳）
+    if (ch === '/' && src[i + 1] === '/') {
+      while (i < src.length && src[i] !== '\n') i += 1;
+      continue;
+    }
+    if (ch === '/' && src[i + 1] === '*') {
+      i += 2;
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i += 1;
+      i += 2;
+      continue;
+    }
+    if (ch === '`') {
+      // 模板字面量：收集到未转义反引号止；`${` 进表达式域（花括配平，域内引号
+      // 与括号由该域消费——插值里的 join('、') 不误终结外层）
+      i += 1;
+      while (i < src.length) {
+        if (src[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (src[i] === '`') {
+          i += 1;
+          break;
+        }
+        if (src[i] === '$' && src[i + 1] === '{') {
+          i += 2;
+          let braces = 1;
+          while (i < src.length && braces > 0) {
+            if (src[i] === '{') braces += 1;
+            else if (src[i] === '}') braces -= 1;
+            i += 1;
+          }
+          continue;
+        }
+        out += src[i];
+        i += 1;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      // 双/单引号字符串：收集到未转义闭引号止
+      i += 1;
+      while (i < src.length && src[i] !== ch) {
+        if (src[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        out += src[i];
+        i += 1;
+      }
+      i += 1;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    i += 1;
+  }
+  return out;
+}
+
+{
+  // 公开产物面（§6.13.8 查 10 刀 J）：两生成物 + api-decls/*（随包分发件）——
+  // 文件全文扫（SCAN_ROOT 相对，夹具树可证红）；缺席不红（生成物缺席由查 8
+  // 执法缺席面，查 10 不重复）。判据单源 = KNOWLEDGE_DOMAIN_RE（api-doc-sections.mjs
+  // ——与刀 L desc harvest 滤词共享，判据漂移结构性不可能）
+  const fileFaces = [
+    { label: 'COMPATIBILITY.md', rel: 'COMPATIBILITY.md' },
+    { label: 'docs/API参考.md', rel: join('docs', 'API参考.md') },
+    ...walkFiles('api-decls', ['.ts', '.json']).map((f) => ({ label: f, rel: f })),
+  ];
+  for (const face of fileFaces) {
+    const abs = join(SCAN_ROOT, face.rel);
+    if (!existsSync(abs)) continue;
+    const hit = KNOWLEDGE_DOMAIN_RE.exec(readFileSync(abs, 'utf8'));
+    if (hit !== null) {
+      v(
+        `[查 10] 公开产物 ${face.label} 指路知识域（「${hit[0]}」）——知识域文档 gitignored 对第三方应用作者不可达；` +
+          `指路改公开锚（docs/应用开发指南.md「API 稳定性与兼容性」节 / COMPATIBILITY.md），§6.13.8 查 10`,
+      );
+    }
+  }
+  // message 面：contracts 源内 API_ 族 AppError 实参区字面量（运行时字符串——
+  // 词法提取注释免疫）。首 token = 错误码标识符，只审 API_ 族（查 10 面界：
+  // APP_ 族等清单校验消息不在机器面，同形清扫靠笔不靠闸）
+  for (const file of walkFiles(join('src', 'contracts'), ['.ts']).filter((f) => !f.endsWith('.test.ts'))) {
+    const text = readFileSync(join(SCAN_ROOT, file), 'utf8');
+    for (const m of text.matchAll(/new AppError\(/g)) {
+      const openIdx = m.index + m[0].length - 1;
+      const code = /^\s*([A-Za-z_$][\w$]*)/.exec(text.slice(openIdx + 1));
+      if (code === null || !code[1].startsWith('API_')) continue;
+      const hit = KNOWLEDGE_DOMAIN_RE.exec(appErrorLiteralText(text, openIdx));
+      if (hit !== null) {
+        v(
+          `[查 10] ${file} ${code[1]} 错误消息指路知识域（「${hit[0]}」）——运行时字符串对第三方应用作者不可达；` +
+            `指路改公开锚（docs/应用开发指南.md「API 稳定性与兼容性」节 / COMPATIBILITY.md），§6.13.8 查 10`,
+        );
+      }
     }
   }
 }

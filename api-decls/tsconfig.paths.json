@@ -1,5 +1,5 @@
 {
-  "//": "应用侧 tsconfig paths 模板（API 治理 §6.13.9）——拷进应用 tsconfig 的 compilerOptions.paths；相对段按应用 tsconfig 所在目录调整（示例假应用与宿主包同级安装）；typebox 三键经应用自身 peerDependencies 解析（类型面同 npm 包，运行时仍走加载器注入防双实例），三行映射是等价兜底非必需。",
+  "//": "应用侧 tsconfig paths 模板（API 治理公开面——语义见 docs/应用开发指南.md「API 稳定性与兼容性」节）——拷进应用 tsconfig 的 compilerOptions.paths；相对段按应用 tsconfig 所在目录调整（示例假应用与宿主包同级安装）；typebox 三键经应用自身 peerDependencies 解析（类型面同 npm 包，运行时仍走加载器注入防双实例），三行映射是等价兜底非必需。",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {

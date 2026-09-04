@@ -1,7 +1,7 @@
 # API 兼容性档案（COMPATIBILITY）
 
 > 本文件由 `tools/generate-compatibility.mjs` 生成（`npm run build` 尾挂再生，check-api 查 8 drift 守护）——勿手编。
-> 面真值 = `src/contracts/api-surface.json`；语义权威 = 设计文档「应用契约与扩展点」API 治理章（§6.13）。
+> 面真值 = `src/contracts/api-surface.json`；稳定性分级与兼容承诺的语义见 docs/应用开发指南.md「API 稳定性与兼容性」节（本文件 = 逐版兼容档案）。
 
 ## 当前面盘点（apiVersion 1.0）
 
@@ -26,7 +26,7 @@
 
 ## 废弃登记（DEP 注册簿）
 
-现役零废弃登记（首个真实废弃日起本节逐行生成——登记纪律见 §6.13.6）。
+现役零废弃登记（首个真实废弃日起本节逐行生成——登记纪律见 docs/应用开发指南.md「API 稳定性与兼容性」节）。
 
 ## 变更史（快照 diff 自动判级）
 

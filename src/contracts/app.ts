@@ -269,7 +269,7 @@ function validateApiBlockInvariants(api: NonNullable<AppManifest['api']>, where:
     if (!VIRTUAL_API_KEYS.some((entry) => entry.key === key)) {
       throw new AppError(
         APP_INVALID,
-        `${where}：api.experimental 键 ${key} 不在虚拟键表（合法键：${VIRTUAL_API_KEYS.map((k) => `'${k.key}'`).join('、')}——契约篇 §6.13.4）`,
+        `${where}：api.experimental 键 ${key} 不在虚拟键表（合法键：${VIRTUAL_API_KEYS.map((k) => `'${k.key}'`).join('、')}——API 治理语义见 docs/应用开发指南.md「API 稳定性与兼容性」节）`,
       );
     }
   }

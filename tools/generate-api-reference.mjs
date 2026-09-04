@@ -64,7 +64,7 @@ export function renderApiReference({ surface, deprecations }) {
     '> 本文件由 `tools/generate-api-reference.mjs` 从 `src/contracts/api-surface.json` 生成（`npm run build` 尾挂再生，check-api 查 8 drift 守护）——勿手编。',
   );
   lines.push(
-    '> 稳定性分级与兼容承诺的语义权威 = 设计文档「应用契约与扩展点」API 治理章（§6.13）；本文件只派生符号面。',
+    '> 稳定性分级与兼容承诺见 docs/应用开发指南.md「API 稳定性与兼容性」节与仓库 COMPATIBILITY.md；本文件只派生符号面。',
   );
   lines.push('');
   lines.push(
