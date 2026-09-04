@@ -1,6 +1,6 @@
 # API 兼容性档案（COMPATIBILITY）
 
-> 本文件由 `tools/generate-compatibility.mjs` 生成（`npm run build` 尾挂再生，check-api 查 8 drift 守护）——勿手编。
+> 本文件由 `tools/generate-compatibility.mjs` 生成（`npm run build` 尾挂再生；生成物与面快照的漂移由 `npm run lint:topology` 内的 API 治理门禁逐字节守护）——勿手编。
 > 面真值 = `src/contracts/api-surface.json`；稳定性分级与兼容承诺的语义见 docs/应用开发指南.md「API 稳定性与兼容性」节（本文件 = 逐版兼容档案）。
 
 ## 当前面盘点（apiVersion 1.0）

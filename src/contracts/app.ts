@@ -350,7 +350,6 @@ export interface AppLogger {
  * 事件处理器：参数由事件发布方约定；返回值仅 waterfall 采用（与 context
  * 模块 EventHandler 同形——在此独立声明保持零依赖）。
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- 处理器参数形态由各事件定义方收口
 export type AppEventHandler = (...args: any[]) => any;
 
 /**
@@ -597,7 +596,7 @@ export interface CompositionRow {
 }
 
 /**
- * 行挂载目标投影探针（契约篇 §5.1 D1 清单投影批，2026-08-27；第三十六批
+ * 行作用域投影探针（契约篇 §5.1 D1 清单投影批，2026-08-27；第三十六批
  * 数组化改形）：rowId → appId 数组的活查询面。组合根构造并维护（boot 与
  * /reload 各自从组合树重建投影——闭包读活视图，服务构造时点无关），注入
  * 三个注册面服务做 D1 注册面路由：

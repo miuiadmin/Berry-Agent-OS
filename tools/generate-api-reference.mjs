@@ -6,8 +6,12 @@
  * surface.json → docs/API参考.md：符号面全部生成（符号名/层级/since/deprecated
  * 全从面清单派生——面清单无签名数据，.d.ts 模板面才是签名位；手写文档只留
  * 概念叙述，文档漂移类缺陷结构性消失——全面复盘 20260903-91 刀六勘正：原稿
- * 「签名……派生」宣称失实）。守护 = check-api 查 8 生成物 drift；
- * `npm run build` 尾挂再生。
+ * 「签名……派生」宣称失实）。守护 = 生成物与面快照的逐字节 drift 对照（
+ * `npm run lint:topology` 内的 API 治理门禁）；`npm run build` 尾挂再生。
+ *
+ * 刀 L（API 参考进化，§6.13.9）：逐符号行携带 desc（一句话语义——抽取器自
+ * 声明位 JSDoc/note 首句 harvest，滤知识域引用）；携带 kind 的模块节内按声明
+ * 种类分组（常量/类型/函数/转发——声明块关键字真源）。
  *
  * 形态纪律（prettier 稳定）：docs/ 在 format:check 射面内，本文件输出用
  * 标题 + 列表（proseWrap preserve 下 prettier 零动作的形态）——表格列宽对齐
@@ -49,10 +53,12 @@ function formFactorsNote(entry) {
 }
 
 /**
- * 渲染 docs/API参考.md 全文（纯函数——查 8 与 CLI 同源）。逐符号行形态：
- * `- `Symbol` — tier，since X，形态集`（deprecated 追加 DEP/死期/替代；
- * forwarded 追加转发注记——tier 承诺归上游）。experimental 符号不入模块节
- * ——单列文末「实验面」节（查 5 豁免位，刀 E；空集不渲染）。
+ * 渲染 docs/API参考.md 全文（纯函数——drift 对照与 CLI 同源）。逐符号行形态：
+ * `- `Symbol` — desc。tier，since X，形态集`（desc = 一句话语义，刀 L——无
+ * desc 符号退 `Symbol` — tier… 旧形；deprecated 追加 DEP/死期/替代；
+ * forwarded 追加转发注记——tier 承诺归上游）。携带 kind 的模块节内按声明
+ * 种类分组（常量/类型/函数/转发，刀 L ③——无 kind 域平铺）。experimental
+ * 符号不入模块节——单列文末「实验面」节（查 5 豁免位，刀 E；空集不渲染）。
  * @param {{ surface: object, deprecations: Array<{ dep: string, symbol: string, removalIn: string, replacement: string }> }} input
  */
 export function renderApiReference({ surface, deprecations }) {
@@ -61,7 +67,7 @@ export function renderApiReference({ surface, deprecations }) {
   lines.push('# API 参考');
   lines.push('');
   lines.push(
-    '> 本文件由 `tools/generate-api-reference.mjs` 从 `src/contracts/api-surface.json` 生成（`npm run build` 尾挂再生，check-api 查 8 drift 守护）——勿手编。',
+    '> 本文件由 `tools/generate-api-reference.mjs` 从 `src/contracts/api-surface.json` 生成（`npm run build` 尾挂再生；生成物与面快照的漂移由 `npm run lint:topology` 内的 API 治理门禁逐字节守护）——勿手编。',
   );
   lines.push(
     '> 稳定性分级与兼容承诺见 docs/应用开发指南.md「API 稳定性与兼容性」节与仓库 COMPATIBILITY.md；本文件只派生符号面。',
@@ -86,18 +92,52 @@ export function renderApiReference({ surface, deprecations }) {
   // 目录腿同律：零实验符号不加目录行（空节不渲染——不产死链）
   if (experimentalExports.length > 0) lines.push('- [实验面（experimental）](#实验面experimental)');
   lines.push('');
+  // 单符号行渲染（刀 L：desc 一句话语义前置——发现面自包含；无 desc 退旧形。
+  // desc 已带句号（首句收割保界定符）则直接衔接，否则补句号——承诺注记随后）
+  const renderEntry = (entry, m) => {
+    let note = TIER_NOTES[entry.tier] ?? entry.tier;
+    note += `，since ${entry.since}，${formFactorsNote(entry)}`;
+    if (entry.forwarded === true) note += '（forwarded 转发——tier 承诺归上游 typebox）';
+    const reg = bySymbol.get(`${m}::${entry.symbol}`);
+    if (reg !== undefined) note += `（${reg.dep}，死期 ${reg.removalIn}，替代 \`${reg.replacement}\`）`;
+    if (entry.desc !== undefined) {
+      const desc = entry.desc.endsWith('。') ? entry.desc : `${entry.desc}。`;
+      return `- \`${entry.symbol}\` — ${desc}${note}`;
+    }
+    return `- \`${entry.symbol}\` — ${note}`;
+  };
+  // 声明种类分组（刀 L ③——§6.13.9）：快照携带 kind（声明块关键字——抽取器
+  // 真源，刀 C 一块两读）或转发标记的模块按组渲染（常量/类型/函数/转发），
+  // 组内符号字典序；无 kind 域（词表域/服务域/llm·sqlite 键）保持平铺——
+  // 分组真源缺席不造次（大小写启发零新真相源原则）
+  const KIND_GROUPS = [
+    { title: '常量', match: (e) => e.kind === 'const' || e.kind === 'let' || e.kind === 'var' },
+    { title: '类型', match: (e) => e.kind === 'interface' || e.kind === 'type' || e.kind === 'enum' },
+    { title: '函数', match: (e) => e.kind === 'function' || e.kind === 'class' },
+    { title: '转发（forwarded）', match: (e) => e.forwarded === true },
+  ];
   for (const m of modules) {
     lines.push(`## \`${m}\``);
     lines.push('');
     const entries = stableExports.filter((e) => e.module === m).sort((a, b) => a.symbol.localeCompare(b.symbol, 'en'));
-    for (const entry of entries) {
-      let note = TIER_NOTES[entry.tier] ?? entry.tier;
-      note += `，since ${entry.since}，${formFactorsNote(entry)}`;
-      if (entry.forwarded === true) note += '（forwarded 转发——tier 承诺归上游 typebox）';
-      const reg = bySymbol.get(`${m}::${entry.symbol}`);
-      if (reg !== undefined) note += `（${reg.dep}，死期 ${reg.removalIn}，替代 \`${reg.replacement}\`）`;
-      lines.push(`- \`${entry.symbol}\` — ${note}`);
+    if (entries.some((e) => e.kind !== undefined || e.forwarded === true)) {
+      // 分组形：组序固定（常量→类型→函数→转发），组内字典序；分组外漏网
+      // （kind 与转发标记双缺席——防御位）归「其他」尾组，不静默丢符号
+      const grouped = new Set(entries.filter((e) => KIND_GROUPS.some((g) => g.match(e))));
+      const groups = [
+        ...KIND_GROUPS.map((g) => ({ title: g.title, members: entries.filter(g.match) })),
+        { title: '其他', members: entries.filter((e) => !grouped.has(e)) },
+      ].filter((g) => g.members.length > 0);
+      for (const g of groups) {
+        lines.push(`### ${g.title}`);
+        lines.push('');
+        for (const entry of g.members) lines.push(renderEntry(entry, m));
+        lines.push('');
+      }
+      // 组间空行已产——模块节不再补尾空行（分组循环每收一组即留一空行）
+      continue;
     }
+    for (const entry of entries) lines.push(renderEntry(entry, m));
     lines.push('');
   }
   lines.push('## 能力面（capabilities）');
@@ -122,7 +162,9 @@ export function renderApiReference({ surface, deprecations }) {
       let note = `experimental，since ${entry.since}，${formFactorsNote(entry)}`;
       const reg = bySymbol.get(`${entry.module}::${entry.symbol}`);
       if (reg !== undefined) note += `（${reg.dep}，死期 ${reg.removalIn}，替代 \`${reg.replacement}\`）`;
-      lines.push(`- \`${entry.symbol}\`（\`${entry.module}\`） — ${note}`);
+      // desc 同律（刀 L）——实验符号也有一句话语义；无 desc 退旧形
+      const desc = entry.desc === undefined ? '' : entry.desc.endsWith('。') ? entry.desc : `${entry.desc}。`;
+      lines.push(`- \`${entry.symbol}\`（\`${entry.module}\`） — ${desc}${note}`);
     }
   }
   // 尾形纪律：恰一个换行收尾（prettier 形态——多条尾空行会被 format:check 红）
@@ -146,7 +188,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   const text = renderApiReference({ surface, deprecations });
   if (process.argv.includes('--write')) {
     writeFileSync(API_REFERENCE_PATH, text);
-    console.log(`docs/API参考.md 已再生（${text.length} 字符——查 8 守护对象）`);
+    console.log(`docs/API参考.md 已再生（${text.length} 字符——API 治理门禁 drift 守护对象）`);
   } else {
     process.stdout.write(text);
   }

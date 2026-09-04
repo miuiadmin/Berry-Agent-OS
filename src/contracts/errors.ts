@@ -93,8 +93,9 @@ export const CONTEXT_DISPOSED = registerErrorCode('CONTEXT_DISPOSED');
  * 「fn 返回值入栈」契约必须配运行时校验补位（2026-08-25 Hermes 探针 #13）。
  */
 export const CONTEXT_EFFECT_INVALID = registerErrorCode('CONTEXT_EFFECT_INVALID');
-/** contracts：错误码注册表自身的护栏违规（格式/重复） */
+/** contracts：错误码注册表自身的护栏违规（格式非法） */
 export const CONTRACT_BAD_ERROR_CODE = registerErrorCode('CONTRACT_BAD_ERROR_CODE');
+/** contracts：错误码注册表自身的护栏违规（标识符重复注册） */
 export const CONTRACT_DUPLICATE_ERROR_CODE = registerErrorCode('CONTRACT_DUPLICATE_ERROR_CODE');
 
 /** tools：工具调用被取消时工具尚未开始执行（恢复 reducer 合成终态用，会话篇 §4） */

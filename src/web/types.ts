@@ -72,6 +72,10 @@ export interface WebFetchResult {
  * （WEB_* 码族——宿主侧代码异常面比模型面结构化拒绝更有用）。
  */
 export interface WebService {
+  /**
+   * 受控 fetch 原语：与 fetch 工具同一 execute 同一卫生件（SSRF 五卫生件同面
+   * ——守门/落账不旁路；异常面 throw AppError，WEB_* 码族）。
+   */
   fetch(url: string, opts?: WebFetchOptions): Promise<WebFetchResult>;
   /**
    * 装机下载原语（契约篇 §6.10——流式落盘不整读内存，独立预算/白名单；

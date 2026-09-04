@@ -33,8 +33,15 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { scanTopLevelExports } from './extract-api-surface.mjs';
-import { EXPERIMENTAL_SECTION_HEADING, stripExperimentalSection } from './api-doc-sections.mjs';
+import {
+  descFromJsdoc,
+  firstPublicSentence,
+  scanTopLevelExports,
+  sliceInterfaceMembers,
+  sliceInterfaceMembersDetailed,
+} from './extract-api-surface.mjs';
+import { EXPERIMENTAL_SECTION_HEADING, KNOWLEDGE_DOMAIN_RE, stripExperimentalSection } from './api-doc-sections.mjs';
+import { renderApiReference } from './generate-api-reference.mjs';
 import {
   classifyFaceDiff,
   compareSemver,
@@ -1605,5 +1612,194 @@ describe('手稳件升生成物 + 扫描器 fail-loud（刀 D——§6.13.9 手�
     for (const spec of FACE_DECL_SPECS) {
       expect(readFileSync(join(ROOT, 'api-decls', spec.fileName), 'utf8')).toBe(rendered.get(spec.fileName));
     }
+  });
+});
+
+describe('API 参考进化（刀 L——desc harvest + 声明种类分组 + doc-only 载荷分类豁免，§6.13.9）', () => {
+  it('firstPublicSentence：知识域滤词五形 + 句号剥离 + CJK 行接假空格归一', () => {
+    // ① 括注组剥除：命中知识域 RE 的括组整组剥、普通括组保留
+    expect(firstPublicSentence('服务面注册器（契约篇 §1.5 服务行）。')).toBe('服务面注册器');
+    expect(firstPublicSentence('服务面注册器（两層模型）。')).toBe('服务面注册器（两層模型）');
+    // ② 破折号尾注：尾段命中知识域即截断在最早 —— 处；未命中保持原文
+    expect(firstPublicSentence('语义主体——详见契约篇 §2.2。')).toBe('语义主体');
+    expect(firstPublicSentence('语义主体——补充说明。')).toBe('语义主体——补充说明');
+    // ③ 首句即指路句 → 退取次句（机器兜底——不产红也不放行脏句）
+    expect(firstPublicSentence('契约篇 §2.2 载明。实际语义在此。')).toBe('实际语义在此');
+    // ④ 全滤灭 → undefined（调用方省略 desc 字段）
+    expect(firstPublicSentence('详见运行时骨架篇。')).toBeUndefined();
+    expect(firstPublicSentence('')).toBeUndefined();
+    // ⑤ 句号剥离：切句剥界定符——desc 不带句号（快照不带标点，渲染层统一补）
+    expect(firstPublicSentence('首句语义。次句。')).toBe('首句语义');
+    // ⑥ CJK 行接假空格归一：JSDoc 行折 join(' ') 在汉字间产的伪空格剥除
+    expect(firstPublicSentence('语义主体\n 继续保持。')).toBe('语义主体继续保持');
+    // ⑦ 缩写词（刀 L 实证漏网形——32 处「骨架篇」经单源 RE 扩展收编）
+    expect(firstPublicSentence('语义（骨架篇 §1.3）。')).toBe('语义');
+  });
+
+  it('descFromJsdoc：null 直通 undefined / @ 标签行丢弃 / 多行行首星剥除', () => {
+    // 无紧前 JSDoc 块是常态位（声明可裸）——null 直通，不炸
+    expect(descFromJsdoc(null)).toBeUndefined();
+    // @ 标签行是 tier 载体不是语义——整行丢弃后取首句
+    expect(descFromJsdoc(['/**', ' * 首句语义载体。', ' * @experimental', ' */'].join('\n'))).toBe('首句语义载体');
+    // 多行正文行首星剥除后单空格联接——联接空格落 CJK 两侧即行折伪影，归一剥除
+    expect(descFromJsdoc(['/**', ' * 白名单', ' * 单源载体。', ' */'].join('\n'))).toBe('白名单单源载体');
+    // 块无正文（纯标签块）→ undefined
+    expect(descFromJsdoc('/** @experimental */')).toBeUndefined();
+  });
+
+  it('scanTopLevelExports docs/kinds/namedSpecs：声明形直导 JSDoc 全收 / 裸声明 null / 具名转发相对说明符入 namedSpecs', () => {
+    const src = [
+      '/** 服务面注册器：两層模型。 */',
+      'export const alphaSvc = 1;',
+      'export interface Delta {}',
+      'export function beta() {}',
+      'export const bare = 2;', // 裸声明 → docs 记 null（有声明无文档的常态位）
+      "export { named } from './other.js';", // 具名转发·相对说明符 → namedSpecs（刀 L docs-only 递归地基）
+      "export { pkgThing } from 'typebox';", // 具名转发·包说明符 → 不入（forwarded 域）
+      "export * from './star.js';", // 星出 → stars 不入 namedSpecs
+    ].join('\n');
+    const scan = scanTopLevelExports(src);
+    expect(scan.docs.get('alphaSvc')).toBe('/** 服务面注册器：两層模型。 */');
+    expect(scan.docs.get('bare')).toBe(null);
+    expect(scan.kinds.get('alphaSvc')).toBe('const');
+    expect(scan.kinds.get('Delta')).toBe('interface');
+    expect(scan.kinds.get('beta')).toBe('function');
+    expect(scan.kinds.has('named')).toBe(false); // 转发形不产本地 kind（声明块在目标文件）
+    expect(scan.namedSpecs).toEqual(['./other.js']);
+  });
+
+  it('sliceInterfaceMembersDetailed：成员 doc 归属（名 token 起点收割）+ 薄投影 canonical 等值 + 重载 doc 首现保留', () => {
+    const body = [
+      '  /** 成员语义甲：白名单单源。 */',
+      '  readonly a: string;',
+      '  plain: number;',
+      '  /** 成员语义乙（契约篇 §1.5）。 */',
+      '  later(x: number): void;',
+      '  later(): void;', // 重载第二相：无紧前 JSDoc——doc 首现保留（组首是 JSDoc 惯例位）
+    ].join('\n');
+    const detailed = [...sliceInterfaceMembersDetailed(body)];
+    const byName = new Map(detailed);
+    expect(byName.get('a').doc).toBe('/** 成员语义甲：白名单单源。 */');
+    expect(byName.get('plain').doc).toBe(null); // 无紧前块 → null（desc 省略形）
+    expect(byName.get('later').doc).toBe('/** 成员语义乙（契约篇 §1.5）。 */');
+    expect(byName.get('later').canonical).toBe('later ( x : number ) : void later ( ) : void');
+    // 薄投影等值：sliceInterfaceMembers 是详细形态的 canonical 投影（既有消费面稳定签名）
+    expect([...sliceInterfaceMembers(body)]).toEqual(detailed.map(([name, v]) => [name, v.canonical]));
+  });
+
+  it('【回归锁 API 进化刀 L】classifyFaceDiff 剥 desc/kind 载荷：desc 改写与 kind 新增零桶（doc-only 载荷不入判差）', () => {
+    // 修前形态：classifyFaceDiff 只剥 tier/deprecated/sig——desc/kind 新载荷渗入
+    // rest 深比较 → 纯文档进化（本刀 459 符号全量重写 desc）被判 changed 假红
+    const e = (symbol, extra = {}) => ({
+      symbol,
+      module: 'berryagent',
+      tier: 'stable',
+      since: '1.0',
+      formFactors: ['standalone'],
+      ...extra,
+    });
+    const prev = { exports: [e('Keep', { desc: '旧语义', kind: 'const' })], capabilities: [] };
+    const curr = {
+      exports: [e('Keep', { desc: '新写的一句话语义（文档进化）', kind: 'function' })],
+      capabilities: [],
+    };
+    const diff = classifyFaceDiff(prev, curr);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toEqual([]); // 修前红：desc/kind 差异被判 changed
+    expect(diff.reTiered).toEqual([]);
+    // 对照组：since 变仍判 changed——判差面（承诺字段）不被过度剥除
+    const diff2 = classifyFaceDiff(prev, {
+      exports: [e('Keep', { desc: '新写的一句话语义（文档进化）', kind: 'function', since: '1.1' })],
+      capabilities: [],
+    });
+    expect(diff2.changed).toEqual(['berryagent::Keep']);
+  });
+
+  it('renderApiReference：desc 行渲染（句号统一补）+ 声明种类分组子头 + 无 kind 域平铺不分组', () => {
+    const surface = {
+      apiVersion: '1.0.0-alpha.4',
+      capabilities: [],
+      exports: [
+        // 分组域：berryagent 携带 kind——常量/类型/函数三组 + 组内字典序
+        {
+          symbol: 'zFn',
+          module: 'berryagent',
+          tier: 'stable',
+          since: '1.0',
+          formFactors: ['standalone'],
+          kind: 'function',
+          desc: '函数语义',
+        },
+        {
+          symbol: 'aConst',
+          module: 'berryagent',
+          tier: 'stable',
+          since: '1.0',
+          formFactors: ['standalone'],
+          kind: 'const',
+          desc: '常量语义载体句',
+        },
+        {
+          symbol: 'bType',
+          module: 'berryagent',
+          tier: 'stable',
+          since: '1.0',
+          formFactors: ['standalone'],
+          kind: 'interface',
+        },
+        // 平铺域：无 kind（词表域/服务域形态）——不分组不产子头
+        {
+          symbol: 'kvEntry',
+          module: 'data-keys',
+          tier: 'stable',
+          since: '1.0',
+          formFactors: ['standalone'],
+          desc: '词表语义。',
+        },
+      ],
+    };
+    const md = renderApiReference({ surface, deprecations: [] });
+    // desc 不带句号（快照标点纪律）→ 渲染层统一补
+    expect(md).toContain('- `zFn` — 函数语义。stable（minor 只增不破），since 1.0，standalone');
+    // desc 已带句号 → 不双补
+    expect(md).toContain('- `kvEntry` — 词表语义。stable（minor 只增不破）');
+    // 无 desc → 退旧形（承诺注记直衔）
+    expect(md).toContain('- `bType` — stable（minor 只增不破），since 1.0，standalone');
+    // 分组子头在场（组序固定：常量→类型→函数）；平铺域不产子头。
+    // 节界取行首锚定 /^## /m——朴素 indexOf('## ') 会先命中 '### ' 子头自身
+    const sectionOf = (md, header) => {
+      const start = md.indexOf(header);
+      const next = md.slice(start + 1).search(/^## /m);
+      return next === -1 ? md.slice(start) : md.slice(start, start + 1 + next);
+    };
+    const berrySection = sectionOf(md, '## `berryagent`');
+    expect(berrySection.indexOf('### 常量')).toBeLessThan(berrySection.indexOf('### 类型'));
+    expect(berrySection.indexOf('### 类型')).toBeLessThan(berrySection.indexOf('### 函数'));
+    expect(sectionOf(md, '## `data-keys`')).not.toContain('### ');
+  });
+
+  it('提交位快照 desc/kind 卫生：berryagent 非转发全带 desc+kind（kind 闭集）+ 全域 desc 零命中知识域 RE', () => {
+    const surface = JSON.parse(readFileSync(join(ROOT, 'src/contracts/api-surface.json'), 'utf8'));
+    const berryNonFwd = surface.exports.filter((e) => e.module === 'berryagent' && e.forwarded !== true);
+    // 修前红两腿：① 具名再导出目标（api.ts 家族 14 符号）不入闭包 → kind 缺席
+    // （刀 L namedSpecs docs-only 递归修死）；② 花括无 from 形（export type { T }）
+    // null docs 击穿声明位块 → TextContent/ImageContent desc 被斩（null 不覆写修死）
+    for (const e of berryNonFwd) {
+      expect(e.desc, `berryagent::${e.symbol} desc 缺席`).toBeDefined();
+      expect(e.kind, `berryagent::${e.symbol} kind 缺席`).toBeDefined();
+    }
+    // kind 闭集：声明块关键字五形（typebox 转发域不带 kind——上游包产物）
+    expect(
+      [...new Set(berryNonFwd.map((e) => e.kind))].every((k) =>
+        ['const', 'let', 'var', 'function', 'class', 'interface', 'type', 'enum'].includes(k),
+      ),
+    ).toBe(true);
+    // 花括再导出斩击回归锚：llm 声明位 desc 在场（修前被 null 击穿）
+    const textContent = surface.exports.find((e) => e.symbol === 'TextContent');
+    expect(textContent.desc).toContain('文本块');
+    // 全域 desc 公开卫生：任何 desc 不得命中知识域 RE（滤词出口的提交位实锚）
+    const dirty = surface.exports.filter((e) => e.desc !== undefined && KNOWLEDGE_DOMAIN_RE.test(e.desc));
+    expect(dirty.map((e) => `${e.module}::${e.symbol}`)).toEqual([]);
   });
 });

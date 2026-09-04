@@ -186,13 +186,15 @@ Escribir una aplicación para Berry solo requiere un `index.ts`: un `apply(ctx, 
 
 ## Documentación
 
-| Documento                                    | Contenido                                                 |
-| -------------------------------------------- | --------------------------------------------------------- |
-| [docs/架构总览.md](docs/架构总览.md)         | Modelo de anillos, DAG de módulos, eventos, montaje       |
-| [docs/使用指南.md](docs/使用指南.md)         | Comandos CLI/TUI, directorio de datos, variables, skills  |
-| [docs/应用开发指南.md](docs/应用开发指南.md) | Forma de entry.ts, servicios inject, ganchos, composición |
-| [docs/开发指南.md](docs/开发指南.md)         | Cuatro puertas, disciplina de pruebas, límites            |
-| [docs/运维手册.md](docs/运维手册.md)         | Datos, copias, reinicio, protecciones, diagnóstico        |
+| Documento                                    | Contenido                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------- |
+| [docs/架构总览.md](docs/架构总览.md)         | Modelo de anillos, DAG de módulos, eventos, montaje                             |
+| [docs/使用指南.md](docs/使用指南.md)         | Comandos CLI/TUI, directorio de datos, variables, skills                        |
+| [docs/应用开发指南.md](docs/应用开发指南.md) | Forma de entry.ts, servicios inject, ganchos, composición                       |
+| [docs/开发指南.md](docs/开发指南.md)         | Cuatro puertas, disciplina de pruebas, límites                                  |
+| [docs/运维手册.md](docs/运维手册.md)         | Datos, copias, reinicio, protecciones, diagnóstico                              |
+| [docs/API参考.md](docs/API参考.md)           | Superficie API pública completa (semántica por símbolo + niveles, generada)     |
+| [COMPATIBILITY.md](COMPATIBILITY.md)         | Registro de compatibilidad API (historial de cambios y deprecaciones, generado) |
 
 > La documentación es actualmente autoritativa en chino; las versiones en otros idiomas están planificadas junto al lanzamiento 1.0.
 

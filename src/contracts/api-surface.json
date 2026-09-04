@@ -12,6 +12,8 @@
         "server",
         "standalone"
       ],
+      "desc": "accent 白名单色名： schema literals 的单一事实源；名→RGB 映射住通道壳（channels/theme.ts——contracts 无渲染语义，只裁名字合法性）",
+      "kind": "const",
       "sig": "9ef4e93985439769"
     },
     {
@@ -24,6 +26,8 @@
         "server",
         "standalone"
       ],
+      "desc": "agent：continueRun 续入点非法——末消息经 convertToLlm 后必须是 user 或 toolResult",
+      "kind": "const",
       "sig": "15bb55bd1be66a91"
     },
     {
@@ -36,6 +40,8 @@
         "server",
         "standalone"
       ],
+      "desc": "agent：sendUserMessage 显式携带 deliverAs（'steer'/'inject' 定向投递为 M2+ 预留位——缺省三通道自适应即全部现行业务所需，显式指定即拒不做半实现）",
+      "kind": "const",
       "sig": "a755eb2895482022"
     },
     {
@@ -48,6 +54,8 @@
         "server",
         "standalone"
       ],
+      "desc": "agent：自定义消息角色重复注册或与标准角色（user/assistant/toolResult）冲突",
+      "kind": "const",
       "sig": "55d0cac675c81690"
     },
     {
@@ -60,6 +68,8 @@
         "server",
         "standalone"
       ],
+      "desc": "agent：自定义消息角色名格式非法——装载面必含 / 域前缀、宿主面无 / 单段",
+      "kind": "const",
       "sig": "acfd75031dd93d6f"
     },
     {
@@ -72,6 +82,8 @@
         "server",
         "standalone"
       ],
+      "desc": "agent：sendUserMessage 显式 session 键查无活驱动",
+      "kind": "const",
       "sig": "fa4d73b6bcabb8c2"
     },
     {
@@ -84,6 +96,8 @@
         "server",
         "standalone"
       ],
+      "desc": "agent：backgroundWake 投递未带显式 session 键",
+      "kind": "const",
       "sig": "f0127657bd493fff"
     },
     {
@@ -96,6 +110,8 @@
         "server",
         "standalone"
       ],
+      "desc": "API 协商：应用要求本构建缺席的能力——server 形装载器拒绝面",
+      "kind": "const",
       "sig": "714b9baf8b98eb81"
     },
     {
@@ -108,6 +124,8 @@
         "server",
         "standalone"
       ],
+      "desc": "API 协商：import 实验键未在清单 api 块 experimental 数组声明——装载期拒",
+      "kind": "const",
       "sig": "42768823e62921e7"
     },
     {
@@ -120,6 +138,8 @@
         "server",
         "standalone"
       ],
+      "desc": "API 协商：apiVersion 字面格式非法（非 MAJOR.MINOR——清单校验后的执法面防御式复验；前置校验归 APP_INVALID 语境，本码 = 运行期残余逃逸的 fail-loud）",
+      "kind": "const",
       "sig": "e13de70c6c6371c2"
     },
     {
@@ -132,6 +152,8 @@
         "server",
         "standalone"
       ],
+      "desc": "API 协商：宿主 apiVersion 低于应用声明 minApiVersion 硬地板——拒载",
+      "kind": "const",
       "sig": "bc2da409a32f78f3"
     },
     {
@@ -144,6 +166,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：apply 执行抛错（message 载原始错误；作用域 LIFO 回卷半途注册，失败行不留残骸）",
+      "kind": "const",
       "sig": "6cf6e9bbb8f314b7"
     },
     {
@@ -156,6 +180,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：apply 挂起超时",
+      "kind": "const",
       "sig": "06d60850947dba4a"
     },
     {
@@ -168,6 +194,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：组合树行 config 未通过应用声明的 schema",
+      "kind": "const",
       "sig": "1db731528d55bcf7"
     },
     {
@@ -180,6 +208,8 @@
         "server",
         "standalone"
       ],
+      "desc": "apps：应用 id 撞名",
+      "kind": "const",
       "sig": "0004ba058fd37c6c"
     },
     {
@@ -192,6 +222,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：组合树行引用的应用入口解析失败",
+      "kind": "const",
       "sig": "8cdd8a73bf335ab3"
     },
     {
@@ -204,6 +236,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：per-scope 事件派发频率超限",
+      "kind": "const",
       "sig": "94fa39f6e630254f"
     },
     {
@@ -216,6 +250,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：import 来源门禁越界",
+      "kind": "const",
       "sig": "c4080329e386f8f1"
     },
     {
@@ -228,6 +264,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：inject 依赖无法满足（缺提供方或依赖环——轮次激活零进展即判，即刻响亮并列 pending 清单，不做墙上钟超时）",
+      "kind": "const",
       "sig": "cc86c49fd121162e"
     },
     {
@@ -240,6 +278,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：装机子进程失败",
+      "kind": "const",
       "sig": "ab88930df1eb8da5"
     },
     {
@@ -252,6 +292,8 @@
         "server",
         "standalone"
       ],
+      "desc": "apps：应用清单校验失败（schema 拒绝式——未知字段/缺 id/label、components 空集、id 形状不合法等；message 载位置与首错路径）",
+      "kind": "const",
       "sig": "280b81652f48dca1"
     },
     {
@@ -264,6 +306,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：模块 import 失败（jiti 转译/执行入口文件抛错——语法错、依赖缺等）",
+      "kind": "const",
       "sig": "b42a7cd80334848a"
     },
     {
@@ -276,6 +320,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：第六键 berryagent/sqlite 包装拒开主库",
+      "kind": "const",
       "sig": "897914892e5f5ee3"
     },
     {
@@ -288,6 +334,8 @@
         "server",
         "standalone"
       ],
+      "desc": "apps：进入面未知应用 id",
+      "kind": "const",
       "sig": "15cea1d27902a9fb"
     },
     {
@@ -300,6 +348,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用：模块形状非法",
+      "kind": "const",
       "sig": "71296bf085a6869d"
     },
     {
@@ -312,6 +362,8 @@
         "server",
         "standalone"
       ],
+      "desc": "app：关停序 quiesce 断言失败——全 settle 后仍有非退役驱动 isRunning",
+      "kind": "const",
       "sig": "7cb723c34ce621cc"
     },
     {
@@ -324,6 +376,8 @@
         "server",
         "standalone"
       ],
+      "desc": "AgentMessage = 标准三角色 ∪ 自定义角色",
+      "kind": "type",
       "sig": "0b3b57587ae5c3a0"
     },
     {
@@ -336,6 +390,8 @@
         "server",
         "standalone"
       ],
+      "desc": "loop 可执行的工具定义",
+      "kind": "interface",
       "sig": "1f75868e2e96f1fc"
     },
     {
@@ -348,6 +404,8 @@
         "server",
         "standalone"
       ],
+      "desc": "工具执行结果（最终或部分）",
+      "kind": "interface",
       "sig": "3eced520a01fe147"
     },
     {
@@ -360,6 +418,8 @@
         "server",
         "standalone"
       ],
+      "desc": "清单 api 块形状",
+      "kind": "interface",
       "sig": "9908c12f10a2b293"
     },
     {
@@ -372,6 +432,8 @@
         "server",
         "standalone"
       ],
+      "desc": "装载门裁决结果",
+      "kind": "interface",
       "sig": "c8d7dba24d0cfa14"
     },
     {
@@ -384,6 +446,8 @@
         "server",
         "standalone"
       ],
+      "desc": "API 稳定性 tier 词汇",
+      "kind": "type",
       "sig": "eae60cd3d5ce7dce"
     },
     {
@@ -396,6 +460,8 @@
         "server",
         "standalone"
       ],
+      "desc": "app/activated 载荷：{ 组合树行 id, 应用声明名, apply 耗时打点 }",
+      "kind": "interface",
       "sig": "e974d5f7050be3c3"
     },
     {
@@ -408,6 +474,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用唯一合法形状（§1.1）：一种函数，钉死",
+      "kind": "type",
       "sig": "178cd5f715095123"
     },
     {
@@ -420,6 +488,8 @@
         "server",
         "standalone"
       ],
+      "desc": "装载运行时核心 API",
+      "kind": "interface",
       "sig": "3f980520937ea1cf"
     },
     {
@@ -432,6 +502,8 @@
         "server",
         "standalone"
       ],
+      "desc": "进程内唯一错误基类",
+      "kind": "class",
       "sig": "677b7e21dbfa8587"
     },
     {
@@ -444,6 +516,8 @@
         "server",
         "standalone"
       ],
+      "desc": "事件处理器：参数由事件发布方约定；返回值仅 waterfall 采用（与 context 模块 EventHandler 同形——在此独立声明保持零依赖）",
+      "kind": "type",
       "sig": "4443cd9731fe7259"
     },
     {
@@ -456,6 +530,8 @@
         "server",
         "standalone"
       ],
+      "desc": "app/failed 载荷：{ 组合树行 id, 错误码（APP_ 族）, 错误信息, 栈（可选） }",
+      "kind": "interface",
       "sig": "9fbfe0f2ee7f40ed"
     },
     {
@@ -468,6 +544,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用 id 形状正则源（组成行 apps 数组元素校验共用——第三十六批作用域数组化导出；清单 schema 与组合树行校验同源单一定义）",
+      "kind": "const",
       "sig": "1d0bb9f06e65098d"
     },
     {
@@ -480,6 +558,8 @@
         "server",
         "standalone"
       ],
+      "desc": "加载结果（组合根启动断言与 ctx.apps.list 的数据源）",
+      "kind": "interface",
       "sig": "6ccd0df7aea05fdd"
     },
     {
@@ -492,6 +572,8 @@
         "server",
         "standalone"
       ],
+      "desc": "装载面 logger 最小结构（context.Logger 的结构子集——contracts 零依赖层不引 context 模块；宿主 Logger 字段更宽，结构性可赋值到本面）",
+      "kind": "interface",
       "sig": "7b223b9efaace6c2"
     },
     {
@@ -504,6 +586,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用清单（schema 静态推导类型——校验通过的产物形状）",
+      "kind": "type",
       "sig": "e516bf01437e3c63"
     },
     {
@@ -516,6 +600,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用清单 schema",
+      "kind": "const",
       "sig": "4fe17612dda37955"
     },
     {
@@ -528,6 +614,8 @@
         "server",
         "standalone"
       ],
+      "desc": "应用模块的运行时契约（§1.2 named export 四件 + default）",
+      "kind": "interface",
       "sig": "ec54e3e5f8cf3738"
     },
     {
@@ -540,6 +628,8 @@
         "server",
         "standalone"
       ],
+      "desc": "装载计划行（组合树合成产物 → 加载器输入）：三态互斥—— 有 entry（文件应用）或 builtin（官方件）= 激活行；有 skip = 跳过行（不 import，禁用不要求已装）；有 unresolved = 入口解析失败行",
+      "kind": "interface",
       "sig": "cc52dc4e60bd1dce"
     },
     {
@@ -552,6 +642,8 @@
         "server",
         "standalone"
       ],
+      "desc": "跳过原因词汇（§2.2 增补 1：disabled 静态禁用 / platform 平台门控；目录信任略过随信任门补）",
+      "kind": "type",
       "sig": "23d42a133da5c57e"
     },
     {
@@ -564,6 +656,8 @@
         "server",
         "standalone"
       ],
+      "desc": "app/skipped 载荷：{ 组合树行 id, 跳过原因 }",
+      "kind": "interface",
       "sig": "d73c944935708522"
     },
     {
@@ -576,6 +670,8 @@
         "server",
         "standalone"
       ],
+      "desc": "助手消息（流式组装终值；stopReason=error/aborted 时错误即数据，见 AssistantStream）",
+      "kind": "interface",
       "sig": "d13b04c0d40f7c7b"
     },
     {
@@ -588,6 +684,8 @@
         "server",
         "standalone"
       ],
+      "desc": "流式响应：异步迭代事件 + 最终消息取值口",
+      "kind": "interface",
       "sig": "df158ffbf377e6e6"
     },
     {
@@ -600,6 +698,8 @@
         "server",
         "standalone"
       ],
+      "desc": "流式事件（pi-ai AssistantMessageEvent 同构 12 型）",
+      "kind": "type",
       "sig": "d236bd27ebab6657"
     },
     {
@@ -612,6 +712,8 @@
         "server",
         "standalone"
       ],
+      "desc": "bridge：在途 ask 超时（监督面「在途 ask 超时」判据的执行面；超时与取消同路径——本地结算 + 发 cancel 让对端停工）",
+      "kind": "const",
       "sig": "b1ff9b4c931f27db"
     },
     {
@@ -624,6 +726,8 @@
         "server",
         "standalone"
       ],
+      "desc": "bridge：调用方主动取消的本地结算",
+      "kind": "const",
       "sig": "3d41231f9f3fb585"
     },
     {
@@ -636,6 +740,8 @@
         "server",
         "standalone"
       ],
+      "desc": "bridge：消息编码失败（send 时点载荷不可编码",
+      "kind": "const",
       "sig": "d68613fd2822d509"
     },
     {
@@ -648,6 +754,8 @@
         "server",
         "standalone"
       ],
+      "desc": "bridge：处理器抛出非 AppError 异常的信封桶（家族词保码过界、非家族词统一入桶——对端回卷为 AppError 后按码分派不受影响）",
+      "kind": "const",
       "sig": "6bede7ffcfb158ce"
     },
     {
@@ -660,6 +768,8 @@
         "server",
         "standalone"
       ],
+      "desc": "bridge：ask 的 service/method 无处理方（拼写错或声明面收窄——宁响亮不静默，对称 EVENT_UNKNOWN 纪律在 RPC 面的对偶）",
+      "kind": "const",
       "sig": "6ad0a262acde7cc3"
     },
     {
@@ -672,6 +782,8 @@
         "server",
         "standalone"
       ],
+      "desc": "bridge：worker 域 v1 同步收窄面",
+      "kind": "const",
       "sig": "476ad7699de65140"
     },
     {
@@ -684,6 +796,8 @@
         "server",
         "standalone"
       ],
+      "desc": "bridge：对端域死亡（worker exit/terminate 或本端 dispose——在途出站调用一律以此结算；宿主侧即「域死结算」的调用面）",
+      "kind": "const",
       "sig": "0d68ef85d40d410c"
     },
     {
@@ -696,6 +810,8 @@
         "server",
         "standalone"
       ],
+      "desc": "browser：行 config 双配冲突",
+      "kind": "const",
       "sig": "86a31a30ce9f63e9"
     },
     {
@@ -708,6 +824,8 @@
         "server",
         "standalone"
       ],
+      "desc": "browser：引擎连接期一码收口",
+      "kind": "const",
       "sig": "1c6f2b9f1b3abaee"
     },
     {
@@ -720,6 +838,8 @@
         "server",
         "standalone"
       ],
+      "desc": "browser：引擎发现序全缺席（config executablePath / 系统 Chrome 知名位 / 数据目录专用引擎皆不在场）——工具结果附 /browser install 安装指引",
+      "kind": "const",
       "sig": "a019139cba57a02e"
     },
     {
@@ -732,6 +852,8 @@
         "server",
         "standalone"
       ],
+      "desc": "browser：装机面失败",
+      "kind": "const",
       "sig": "16ebb1aa485c114d"
     },
     {
@@ -744,6 +866,8 @@
         "server",
         "standalone"
       ],
+      "desc": "browser：运行时 Node 版本不达标",
+      "kind": "const",
       "sig": "223a94b5e7b1cce8"
     },
     {
@@ -756,6 +880,8 @@
         "server",
         "standalone"
       ],
+      "desc": "官方件模块（§6.1 `builtin:` 前缀命名空间，2026-08-24 M2 记忆应用纵切）：与 AppModule 同形，唯 apply 替位 default（宿主随包函数引用，不经 jiti、不受应用零 import 规则约束）",
+      "kind": "interface",
       "sig": "9af81ac561238242"
     },
     {
@@ -768,6 +894,8 @@
         "server",
         "standalone"
       ],
+      "desc": "能力面目录：官方可卸件能力起算集",
+      "kind": "const",
       "sig": "5528013b708f73d6"
     },
     {
@@ -780,6 +908,8 @@
         "server",
         "standalone"
       ],
+      "desc": "checkpoint：blob 损坏（磁盘内容与文件名承诺 hash 不符——掉电撕裂/外部损坏；读侧 sha256 复核 fail-loud，恢复中止未 fork 快照保留——会话篇 §5.3 读侧 sha256 校验，成熟度扫描 20260901 P1-6）",
+      "kind": "const",
       "sig": "59c5bdbb7d06ff1f"
     },
     {
@@ -792,6 +922,8 @@
         "server",
         "standalone"
       ],
+      "desc": "composition：组合树行 schema 违规",
+      "kind": "const",
       "sig": "e4f9c0ae7083883a"
     },
     {
@@ -804,6 +936,8 @@
         "server",
         "standalone"
       ],
+      "desc": "context：作用域已销毁后仍调用其 API（stale ctx 护栏，/reload 必然配套）",
+      "kind": "const",
       "sig": "d0d475e6451bb907"
     },
     {
@@ -816,6 +950,8 @@
         "server",
         "standalone"
       ],
+      "desc": "context：ctx.effect 回调返回值不是函数（Disposer 契约违规）",
+      "kind": "const",
       "sig": "c5828e1ab4ed40c4"
     },
     {
@@ -828,6 +964,8 @@
         "server",
         "standalone"
       ],
+      "desc": "context：作用域在册 effect 合计达上限（10^4——context 注册族 effect/on/provide 注销器/registerMessageRole/registerSessionEventType/fork 级联全走 pushEffect 单点一条钟罩全族；计数基准 = 活注册，手动注销/回卷即减非历史累计）",
+      "kind": "const",
       "sig": "da72e0b61a4526dc"
     },
     {
@@ -840,6 +978,8 @@
         "server",
         "standalone"
       ],
+      "desc": "context：fork 直系子作用域计数达上限",
+      "kind": "const",
       "sig": "ff27e447b6cdacb0"
     },
     {
@@ -852,6 +992,8 @@
         "server",
         "standalone"
       ],
+      "desc": "context：ctx.provide 同名服务重复注册（组合树装配错误，响亮失败不静默覆盖）",
+      "kind": "const",
       "sig": "84bef8b7bd8c93ac"
     },
     {
@@ -864,6 +1006,8 @@
         "server",
         "standalone"
       ],
+      "desc": "context：ctx.provide 服务名形状不合",
+      "kind": "const",
       "sig": "d51ac0defeb9cf69"
     },
     {
@@ -876,6 +1020,8 @@
         "server",
         "standalone"
       ],
+      "desc": "context：通过 ctx.get 取用未注册的服务",
+      "kind": "const",
       "sig": "b33a591c7c4ca19e"
     },
     {
@@ -888,6 +1034,8 @@
         "server",
         "standalone"
       ],
+      "desc": "contracts：错误码注册表自身的护栏违规（格式非法）",
+      "kind": "const",
       "sig": "1fe67a2081c34cdf"
     },
     {
@@ -900,6 +1048,8 @@
         "server",
         "standalone"
       ],
+      "desc": "contracts：错误码注册表自身的护栏违规（标识符重复注册）",
+      "kind": "const",
       "sig": "01e34aaacccf63ce"
     },
     {
@@ -912,6 +1062,8 @@
         "server",
         "standalone"
       ],
+      "desc": "核心事件类型词汇",
+      "kind": "const",
       "sig": "3abcb82298391e82"
     },
     {
@@ -924,6 +1076,8 @@
         "server",
         "standalone"
       ],
+      "desc": "能力目录项（surface.json 顶层 capabilities[] 的声明位形态）",
+      "kind": "interface",
       "sig": "59896f9dacce25cc"
     },
     {
@@ -936,6 +1090,8 @@
         "server",
         "standalone"
       ],
+      "desc": "命令参数补全候选项（getArgumentCompletions 的返回元素；镜像 pi-tui AutocompleteItem——value 是补入文本、label 是展示行、description 单行说明）",
+      "kind": "interface",
       "sig": "cdb50f6d10aa6c75"
     },
     {
@@ -948,6 +1104,8 @@
         "server",
         "standalone"
       ],
+      "desc": "斜杠命令定义",
+      "kind": "interface",
       "sig": "b36af05a8c344a7e"
     },
     {
@@ -960,6 +1118,8 @@
         "server",
         "standalone"
       ],
+      "desc": "composition/reloaded 载荷：三态行 id 清单（/reload 后订阅方可对账「实际跑的是什么」）",
+      "kind": "interface",
       "sig": "eeb4f54fdf922f38"
     },
     {
@@ -972,6 +1132,8 @@
         "server",
         "standalone"
       ],
+      "desc": "组合树行（§5.1，第三十六批作用域数组化）：每行 = 一个应用实例，字段级后写胜出合成",
+      "kind": "interface",
       "sig": "7804bed5f41f11eb"
     },
     {
@@ -984,6 +1146,8 @@
         "server",
         "standalone"
       ],
+      "desc": "自定义角色消息（role 必须已经注册——装载面或宿主面之一）",
+      "kind": "interface",
       "sig": "06dea5b0a8b35e29"
     },
     {
@@ -996,6 +1160,8 @@
         "server",
         "standalone"
       ],
+      "desc": "daemon：单实例仲裁失败（daemon.json O_EXCL 撞既有文件且判活为真——M6 三钉后陈旧态已先行清扫，仍撞 = 真有活 daemon；「不猜 pid、活判据 = processStartId 匹配」）",
+      "kind": "const",
       "sig": "eba052581cdb7105"
     },
     {
@@ -1008,6 +1174,8 @@
         "server",
         "standalone"
       ],
+      "desc": "daemon：start ready-gate 超时（spawn 后须 token 端点真握手〔GET /api/sessions 返 200〕未在预算内达成——health 公开探活不构成活证，M4 两语义分立；超时即杀子进程响亮非零）",
+      "kind": "const",
       "sig": "e6ec10977013e975"
     },
     {
@@ -1020,6 +1188,8 @@
         "server",
         "standalone"
       ],
+      "desc": "daemon：stop 信号序预算尽（SIGTERM 后 30s 内进程未消失且 SIGKILL 后 5s 仍在——罕见形态〔D 状态进程/僵尸被收养〕，人工介入出口）",
+      "kind": "const",
       "sig": "3e56318b5619356d"
     },
     {
@@ -1032,6 +1202,8 @@
         "server",
         "standalone"
       ],
+      "desc": "data.json 词表三档（§1.5 表尾「双键一桥」面）：app（认领键）/ declaredEvents （词表账本）/ cacheSubdir（缓存免删信任子目录——布局预留）",
+      "kind": "const",
       "sig": "263e95ae504e943a"
     },
     {
@@ -1044,6 +1216,8 @@
         "server",
         "standalone"
       ],
+      "desc": "三通道：steer（run 中入队）/ followUp（闲时唤醒开轮）/ inject（只落日志不唤醒）",
+      "kind": "type",
       "sig": "7c3e59e7b20a120a"
     },
     {
@@ -1056,6 +1230,8 @@
         "server",
         "standalone"
       ],
+      "desc": "data.json 描述符键目录项（形状真相 = src/app/apps.ts AppDataDescriptor——本目录记 API 面 tier）",
+      "kind": "interface",
       "sig": "82cc281338b41c64"
     },
     {
@@ -1068,6 +1244,8 @@
         "server",
         "standalone"
       ],
+      "desc": "events：自定义事件登记撞名",
+      "kind": "const",
       "sig": "44a22ebcf60b58f4"
     },
     {
@@ -1080,6 +1258,8 @@
         "server",
         "standalone"
       ],
+      "desc": "events：waterfall 钩子消费点挂起超时",
+      "kind": "const",
       "sig": "08374634faf6b36a"
     },
     {
@@ -1092,6 +1272,8 @@
         "server",
         "standalone"
       ],
+      "desc": "events：非官方名位作用域 on/emit/waterfall/parallel/serial 宿主保留词",
+      "kind": "const",
       "sig": "0362fc424b61cd5e"
     },
     {
@@ -1104,6 +1286,8 @@
         "server",
         "standalone"
       ],
+      "desc": "events：派发方法与事件声明的 mode 不一致（mode 是事件公开契约的一部分——应用侧静态 CI 罩不住，运行时执法）",
+      "kind": "const",
       "sig": "46c2edea84b2fd03"
     },
     {
@@ -1116,6 +1300,8 @@
         "server",
         "standalone"
       ],
+      "desc": "events：on/emit/waterfall/parallel/serial 五面遇到未注册事件名（目录 ∪ 装载期 customs 之外——拼错名 = 监听器永不触发的静默死亡，改为响亮失败）",
+      "kind": "const",
       "sig": "6a6ec5b9cd5e820b"
     },
     {
@@ -1128,6 +1314,8 @@
         "server",
         "standalone"
       ],
+      "desc": "exec：env.inherit 名单命中凭证族（后缀 _API_KEY 等）或宿主保留前缀（ANTHROPIC_/OPENAI_/APP_）——机器堵名单走私，显式 set 值不在此列",
+      "kind": "const",
       "sig": "73612192ed4078d2"
     },
     {
@@ -1140,6 +1328,8 @@
         "server",
         "standalone"
       ],
+      "desc": "exec：子进程未启动",
+      "kind": "const",
       "sig": "36764fc1103417ff"
     },
     {
@@ -1152,6 +1342,8 @@
         "server",
         "standalone"
       ],
+      "desc": "活体事件名",
+      "kind": "type",
       "sig": "8a06b3237d381949"
     },
     {
@@ -1164,6 +1356,8 @@
         "server",
         "standalone"
       ],
+      "desc": "组合游标 = 上页最旧一行的排序键三元组",
+      "kind": "interface",
       "sig": "babfdb9bcf6ee265"
     },
     {
@@ -1176,6 +1370,8 @@
         "server",
         "standalone"
       ],
+      "desc": "queryEvents 过滤与分页参数（挂 ctx.sessions 装载面，单原语）",
+      "kind": "interface",
       "sig": "71d425276ab710a6"
     },
     {
@@ -1188,6 +1384,8 @@
         "server",
         "standalone"
       ],
+      "desc": "queryEvents 返回形",
+      "kind": "interface",
       "sig": "0c22065a64e3df03"
     },
     {
@@ -1200,6 +1398,8 @@
         "server",
         "standalone"
       ],
+      "desc": "查询结果行（物理事实表行的直读形态；data 原样 JSON、服务面不截断——呈现截断归工具层）",
+      "kind": "interface",
       "sig": "74a08577dbed6cd8"
     },
     {
@@ -1212,6 +1412,8 @@
         "server",
         "standalone"
       ],
+      "desc": "子进程环境声明式变更表—— deny-by-default 白名单之上的显式叠加： - 隐式继承 = 白名单命中者自动透传（机器运行必需族 + 证书 + 代理）； - inherit = 显式追加透传名单（命中凭证族/宿主保留前缀 = EXEC_ENV_FORBIDDEN 响亮拒——机器堵的是名单走私；值本身取自宿主进程环境，缺者跳过）； - set = 显式值任意名合法（凭证经 config/凭证库正路取得后显式传递合法）； - unset = 从最终环境移除该名（可撤白名单内的名字）",
+      "kind": "interface",
       "sig": "07276dda5915149d"
     },
     {
@@ -1224,6 +1426,8 @@
         "server",
         "standalone"
       ],
+      "desc": "ctx.exec 原语侧选项（bash 工具侧无 env/stdin——两侧不对称是刻意的）",
+      "kind": "interface",
       "sig": "e51c6bc0c90c0bd5"
     },
     {
@@ -1236,6 +1440,8 @@
         "server",
         "standalone"
       ],
+      "desc": "ctx.exec 原语侧结果（退出非零是正常返回不是错误——失败二分）",
+      "kind": "interface",
       "sig": "d6323334bbd8fff0"
     },
     {
@@ -1248,6 +1454,8 @@
         "server",
         "standalone"
       ],
+      "desc": "ctx.exec 服务面：与模型可调用的 bash 工具走 **同一条三段 waterfall**——服务内部合成内部 ToolDefinition（名 `exec`，不进模型词汇表）+ 内部 toolCallId，守门段照过、gate/decision 照落账",
+      "kind": "interface",
       "sig": "ca3c4cbf1b41894e"
     },
     {
@@ -1260,6 +1468,8 @@
         "server",
         "standalone"
       ],
+      "desc": "执行段入参（可变对象；around-dispatch 接管者读它执行替换逻辑）",
+      "kind": "interface",
       "sig": "dfee77f1562d1259"
     },
     {
@@ -1272,6 +1482,8 @@
         "server",
         "standalone"
       ],
+      "desc": "fs：edit 前置读遇非 UTF-8 终局拒改",
+      "kind": "const",
       "sig": "e1501421a367d3c2"
     },
     {
@@ -1284,6 +1496,8 @@
         "server",
         "standalone"
       ],
+      "desc": "fs：read 终段不可判定",
+      "kind": "const",
       "sig": "915da817a7643da0"
     },
     {
@@ -1296,6 +1510,8 @@
         "server",
         "standalone"
       ],
+      "desc": "fs：目标文件/目录不存在（read/ls/delete 的 fail 形态；read 仍登记 absent 观察）",
+      "kind": "const",
       "sig": "d79881ec83cb17f5"
     },
     {
@@ -1308,6 +1524,8 @@
         "server",
         "standalone"
       ],
+      "desc": "fs：观察态 CAS——文件未读过（无观察版本）即拒绝修改（第七批安全四件之一）",
+      "kind": "const",
       "sig": "fa04d560f4cec7aa"
     },
     {
@@ -1320,6 +1538,8 @@
         "server",
         "standalone"
       ],
+      "desc": "fs：目标路径不在可写根内（fence containment 检查失败，防误操作护栏）",
+      "kind": "const",
       "sig": "5ba5756c3723906b"
     },
     {
@@ -1332,6 +1552,8 @@
         "server",
         "standalone"
       ],
+      "desc": "fs：apply_patch 补丁解析或应用失败（格式非法/hunk 不匹配/Add 目标已存在等，message 细说）",
+      "kind": "const",
       "sig": "8eb880c80798a504"
     },
     {
@@ -1344,6 +1566,8 @@
         "server",
         "standalone"
       ],
+      "desc": "fs：写入时文件版本与观察版本不符（并发修改守卫）",
+      "kind": "const",
       "sig": "e3cf426d74efcf9f"
     },
     {
@@ -1356,6 +1580,8 @@
         "server",
         "standalone"
       ],
+      "desc": "fs：写串行段内写目标漂移",
+      "kind": "const",
       "sig": "73a99e5a6642ab50"
     },
     {
@@ -1368,6 +1594,8 @@
         "server",
         "standalone"
       ],
+      "desc": "运行形态三态",
+      "kind": "type",
       "sig": "c8aa6efa8504c55c"
     },
     {
@@ -1380,6 +1608,8 @@
         "server",
         "standalone"
       ],
+      "desc": "goal：goal_set 时本会话已有 active 行（一径：先申报终态或 /goal stop 再重设）",
+      "kind": "const",
       "sig": "978c3d513d75fe95"
     },
     {
@@ -1392,6 +1622,8 @@
         "server",
         "standalone"
       ],
+      "desc": "goal：机器可验完成判据（gates）fail-closed 回执——验证不过 / 超时 / 畸形 / 审批拒时置 completed 被拒（第三十九批 T3-A 预注册，结构化载荷含 kind + 失败原因类型）",
+      "kind": "const",
       "sig": "da686af49972d9b2"
     },
     {
@@ -1404,6 +1636,8 @@
         "server",
         "standalone"
       ],
+      "desc": "goal：操作的目标行不存在（goal_update 无行——goal_set 先设定）",
+      "kind": "const",
       "sig": "4e3e385d4344e1f0"
     },
     {
@@ -1416,6 +1650,8 @@
         "server",
         "standalone"
       ],
+      "desc": "goal：todo 载荷段约束违规——非 goal 段申报 goal 段词汇（role/task_class/resume_when/deferred/follow_up），或 goal 段内 deferred 缺 resume_when、completed 缺二择一（第三十九批 T2-A 预注册，执法位 = todo 工具执行段）",
+      "kind": "const",
       "sig": "b2ddeb21ae85de0f"
     },
     {
@@ -1428,6 +1664,8 @@
         "server",
         "standalone"
       ],
+      "desc": "goal：状态机转移非法（如 needs-resume 态申报终态 / completed 行再 stop——machine.ts 转移表执法）",
+      "kind": "const",
       "sig": "d2aa97d140b8ba16"
     },
     {
@@ -1440,6 +1678,8 @@
         "server",
         "standalone"
       ],
+      "desc": "守门决策（守门监听器的返回值）",
+      "kind": "type",
       "sig": "b82a9f5ffe126bde"
     },
     {
@@ -1452,6 +1692,8 @@
         "server",
         "standalone"
       ],
+      "desc": "gate/decision durable 载荷（结构同形于 session 模块 GateDecisionData—— 会话篇 §1.1；tools 不依赖 session，装配层把本回调接线到 session.append）",
+      "kind": "interface",
       "sig": "f64d89f60045615c"
     },
     {
@@ -1464,6 +1706,8 @@
         "server",
         "standalone"
       ],
+      "desc": "管道侧 gate/decision 回调（app 装配层注入，写 durable 事件；抛错 = 装配错误上抛）",
+      "kind": "type",
       "sig": "e2f5d7207bc5e8d0"
     },
     {
@@ -1476,6 +1720,8 @@
         "server",
         "standalone"
       ],
+      "desc": "守门段入参（可变对象——mutate 语义靠就地改写 args 实现）",
+      "kind": "interface",
       "sig": "999133c34a10997d"
     },
     {
@@ -1488,6 +1734,8 @@
         "server",
         "standalone"
       ],
+      "desc": "API 声明门裁决摘要（API 治理进化刀 I 传导形单源——四处共用同一形： readApiGateAtRoot 出口 / AppPlanRow.apiGate 行字段 / 装配根 quickRow·loadEntry 腿 / app/activated 载荷 gate 键）",
+      "kind": "interface",
       "sig": "533ac9aa4d7d2066"
     },
     {
@@ -1500,6 +1748,8 @@
         "server",
         "standalone"
       ],
+      "desc": "宿主自省面——应用问宿主，而非探测猜",
+      "kind": "interface",
       "sig": "87884d4ed835498d"
     },
     {
@@ -1512,6 +1762,8 @@
         "server",
         "standalone"
       ],
+      "desc": "HostFace 的纯 JSON 数据快照（冷读 m5 桥接档过河物）：worker 域/外部载体桥只传数据、对岸物化同形只读面——方法面（has/list/enabled）由宿主与对岸各自在快照上派生，不随桥走",
+      "kind": "interface",
       "sig": "b676c34d113aa796"
     },
     {
@@ -1524,6 +1776,8 @@
         "server",
         "standalone"
       ],
+      "desc": "图片块（多模态附件；base64 数据）",
+      "kind": "interface",
       "sig": "7a11d114bfc3b8bd"
     },
     {
@@ -1536,6 +1790,8 @@
         "server",
         "standalone"
       ],
+      "desc": "jobs：per-owner running 态并发达上限（16——帽在 createEntry 单点执法罩住一切 kind：subagent 委派/exec 后台/第三方 kind 同受；undefined owner = operator 直控面同规共桶）",
+      "kind": "const",
       "sig": "ba3f829b49f6e019"
     },
     {
@@ -1548,6 +1804,8 @@
         "server",
         "standalone"
       ],
+      "desc": "jobs：JobKind 登记撞名（与内置或已登记 kind 重名——词汇表拒绝静默覆盖）",
+      "kind": "const",
       "sig": "caa2409e669134d3"
     },
     {
@@ -1560,6 +1818,8 @@
         "server",
         "standalone"
       ],
+      "desc": "jobs：创建 Job 用了未注册的 kind（内置 'subagent'/'process'；应用自定义须先 registerKind——反模式 #4「宁拒绝不静默丢」对偶面）",
+      "kind": "const",
       "sig": "13d91efedf9722f2"
     },
     {
@@ -1572,6 +1832,8 @@
         "server",
         "standalone"
       ],
+      "desc": "jobs：按 id 操纵的 Job 不存在",
+      "kind": "const",
       "sig": "2384ee1da1a497b3"
     },
     {
@@ -1584,6 +1846,8 @@
         "server",
         "standalone"
       ],
+      "desc": "jobs：围栏鉴权失败——带主 Job 被非 owner 会话视角请求取消",
+      "kind": "const",
       "sig": "d313395e17e1d015"
     },
     {
@@ -1596,6 +1860,8 @@
         "server",
         "standalone"
       ],
+      "desc": "手动结算面（provider 自持生命周期的形态——subagent/process 两 kind用）",
+      "kind": "interface",
       "sig": "d9451a4aad9f973c"
     },
     {
@@ -1608,6 +1874,8 @@
         "server",
         "standalone"
       ],
+      "desc": "建 Job 选项（ownerSessionId 缺省 = 无主——operator 直控面（TUI 等宿主侧）",
+      "kind": "interface",
       "sig": "886a2c0eaae4109c"
     },
     {
@@ -1620,6 +1888,8 @@
         "server",
         "standalone"
       ],
+      "desc": "Job 活句柄（创建方持有 = 直接处置权；间接访问走服务面围栏）",
+      "kind": "interface",
       "sig": "32f8d0773a993ef7"
     },
     {
@@ -1632,6 +1902,8 @@
         "server",
         "standalone"
       ],
+      "desc": "结算明细（终态附带的人类/模型可读信息；output 与 error 互斥于成功/失败路）",
+      "kind": "interface",
       "sig": "3db910c779999135"
     },
     {
@@ -1644,6 +1916,8 @@
         "server",
         "standalone"
       ],
+      "desc": "Job 全程状态（stopping = 已收到取消请求但 executor 尚未落终态）",
+      "kind": "type",
       "sig": "28718e69a97c1580"
     },
     {
@@ -1656,6 +1930,8 @@
         "server",
         "standalone"
       ],
+      "desc": "Job 唯一终态（状态机终点；first-wins——第一个落定的终态胜出）",
+      "kind": "type",
       "sig": "d1df56012b72b30c"
     },
     {
@@ -1668,6 +1944,8 @@
         "server",
         "standalone"
       ],
+      "desc": "Job 只读快照（list/get 返回；活状态经 handle 读）",
+      "kind": "interface",
       "sig": "fbe9a6f9734ffde5"
     },
     {
@@ -1680,6 +1958,8 @@
         "server",
         "standalone"
       ],
+      "desc": "ctx.jobs 服务面",
+      "kind": "interface",
       "sig": "08ecf216e7c2ade3"
     },
     {
@@ -1692,6 +1972,8 @@
         "server",
         "standalone"
       ],
+      "desc": "总线活体事件目录",
+      "kind": "const",
       "sig": "993f175f6adeab27"
     },
     {
@@ -1704,6 +1986,8 @@
         "server",
         "standalone"
       ],
+      "desc": "llm：后台预算闸门拒发——complete(priority:'background') 且 !canAfford",
+      "kind": "const",
       "sig": "a1de020e0f4bc3b1"
     },
     {
@@ -1716,6 +2000,8 @@
         "server",
         "standalone"
       ],
+      "desc": "llm：ctx.llm.complete 参数面携带 apiKey",
+      "kind": "const",
       "sig": "b84cb8ed1058764e"
     },
     {
@@ -1728,6 +2014,8 @@
         "server",
         "standalone"
       ],
+      "desc": "llm：ctx.llm.complete 单发补全以错误终态收束（载 pi-ai 错误文案；401/429/超时细码族随 §3.4 M2 载荷定稿一并落）",
+      "kind": "const",
       "sig": "e685b4ebd18618be"
     },
     {
@@ -1740,6 +2028,8 @@
         "server",
         "standalone"
       ],
+      "desc": "llm：ctx.llm.complete 请求结构化输出（schema）——M1 pi-ai 面无结构化输出腿，保留签名位响亮拒绝（精确面随 M2 provider 钩子收口）",
+      "kind": "const",
       "sig": "f9e50578a23ba1e7"
     },
     {
@@ -1752,6 +2042,8 @@
         "server",
         "standalone"
       ],
+      "desc": "llm：per-provider 在飞请求达帽",
+      "kind": "const",
       "sig": "5db747c306686fb1"
     },
     {
@@ -1764,6 +2056,8 @@
         "server",
         "standalone"
       ],
+      "desc": "llm：模型查无——provider 未注册或其目录中无该 model id（fail-loud，不静默降级到别的模型）",
+      "kind": "const",
       "sig": "d0a7ba909aa76525"
     },
     {
@@ -1776,6 +2070,8 @@
         "server",
         "standalone"
       ],
+      "desc": "llm：模型标识格式非法——必须是 \"provider/model-id\" 形式（首斜杠分割，model-id 可再含斜杠如 openrouter 路径式 id）",
+      "kind": "const",
       "sig": "e15eef782d2670d2"
     },
     {
@@ -1788,6 +2084,8 @@
         "server",
         "standalone"
       ],
+      "desc": "lsp：connect 期一码收口",
+      "kind": "const",
       "sig": "07af27426b9b3da3"
     },
     {
@@ -1800,6 +2098,8 @@
         "server",
         "standalone"
       ],
+      "desc": "活体事件目录项",
+      "kind": "interface",
       "sig": "8d72eaebba6179ae"
     },
     {
@@ -1812,6 +2112,8 @@
         "server",
         "standalone"
       ],
+      "desc": "单次 LLM 请求上下文",
+      "kind": "interface",
       "sig": "ee023bbf51ec4750"
     },
     {
@@ -1824,6 +2126,8 @@
         "server",
         "standalone"
       ],
+      "desc": "LLM 工具描述",
+      "kind": "interface",
       "sig": "c26c21fc2c90ac69"
     },
     {
@@ -1836,6 +2140,8 @@
         "server",
         "standalone"
       ],
+      "desc": "清单键 tier 目录",
+      "kind": "const",
       "sig": "3540fe65e65ac0c0"
     },
     {
@@ -1848,6 +2154,8 @@
         "server",
         "standalone"
       ],
+      "desc": "mcp：connect 期一码收口",
+      "kind": "const",
       "sig": "da76e69cd34bcd72"
     },
     {
@@ -1860,6 +2168,8 @@
         "server",
         "standalone"
       ],
+      "desc": "LLM 边界标准三角色",
+      "kind": "type",
       "sig": "b8b13927589a2c17"
     },
     {
@@ -1872,6 +2182,8 @@
         "server",
         "standalone"
       ],
+      "desc": "自定义角色定义",
+      "kind": "interface",
       "sig": "95176acc0b70b042"
     },
     {
@@ -1884,6 +2196,8 @@
         "server",
         "standalone"
       ],
+      "desc": "user 消息归因词汇（会话篇 §3.1 dsh-8 定稿，五值 + v2 预留）：谁把这条消息放进历史——真人输入 / 通道转发 / 应用注入 / 定时投递 / 子代理结算回投",
+      "kind": "type",
       "sig": "edae08bede63e991"
     },
     {
@@ -1896,6 +2210,8 @@
         "server",
         "standalone"
       ],
+      "desc": "模型目录只读投影（ctx.llm.listModels()/getModel() 返回形",
+      "kind": "interface",
       "sig": "e1f6c5401361d632"
     },
     {
@@ -1908,6 +2224,8 @@
         "server",
         "standalone"
       ],
+      "desc": "persist：write-behind 批量落盘失败（批次保留、自动重试暂停，显式 flush 重试——会话篇 §6 链第 2 步）",
+      "kind": "const",
       "sig": "d476d5169ff8fbca"
     },
     {
@@ -1920,6 +2238,8 @@
         "server",
         "standalone"
       ],
+      "desc": "prompts：具名提示词段撞名（段 id 已注册——与 TOOL_DUPLICATE 同纪律，拒绝静默覆盖）",
+      "kind": "const",
       "sig": "08a561be64beee6e"
     },
     {
@@ -1932,6 +2252,8 @@
         "server",
         "standalone"
       ],
+      "desc": "prompts：具名提示词段 id 非法（须小写含 `/` 应用域前缀，如 `memory/core`",
+      "kind": "const",
       "sig": "e5f50464a0febe4b"
     },
     {
@@ -1944,6 +2266,8 @@
         "server",
         "standalone"
       ],
+      "desc": "后处理段入参（可变对象——改写 result 靠就地改写字段）",
+      "kind": "interface",
       "sig": "fc624bffa942b3ab"
     },
     {
@@ -1956,6 +2280,8 @@
         "server",
         "standalone"
       ],
+      "desc": "具名提示词段（pi-4(a) 拍板）：id 小写含 `/` 应用域前缀（宿主自留地为无 `/`）",
+      "kind": "interface",
       "sig": "7b5415cf239f8da9"
     },
     {
@@ -1968,6 +2294,8 @@
         "server",
         "standalone"
       ],
+      "desc": "ctx.prompts 服务面（注册 systemPrompt 具名追加段）",
+      "kind": "interface",
       "sig": "1f53d6f2b2e05c1c"
     },
     {
@@ -1980,6 +2308,8 @@
         "server",
         "standalone"
       ],
+      "desc": "行作用域投影探针：rowId → appId 数组的活查询面",
+      "kind": "interface",
       "sig": "f5808c96962ff1cb"
     },
     {
@@ -1992,6 +2322,8 @@
         "server",
         "standalone"
       ],
+      "desc": "行沙箱块：行声明的进程隔离相位—— 载体三值 + 收窄三子键（fs/net/caps）",
+      "kind": "interface",
       "sig": "a8ac3d298339a497"
     },
     {
@@ -2004,6 +2336,8 @@
         "server",
         "standalone"
       ],
+      "desc": "safety：升权请求非法——非严格变宽档位 / sandbox_permissions 与 justification 未成对 / 理由为空句",
+      "kind": "const",
       "sig": "ac2c254a2c4eacc6"
     },
     {
@@ -2016,6 +2350,8 @@
         "server",
         "standalone"
       ],
+      "desc": "safety：sandbox/mode 事件载荷不是三档词汇之一（fold 时 fail-loud——拼错档位静默沿用旧档是 fail-open）",
+      "kind": "const",
       "sig": "de739887e8a76123"
     },
     {
@@ -2028,6 +2364,8 @@
         "server",
         "standalone"
       ],
+      "desc": "safety：请求受限档但本机无可用沙箱后端——fail-closed 拒绝裸跑",
+      "kind": "const",
       "sig": "2cd092a4a6cd6a22"
     },
     {
@@ -2040,6 +2378,8 @@
         "server",
         "standalone"
       ],
+      "desc": "session：应用经 ctx.sessions.appendEvent 伪造核心事件词汇（user/message 等内核词的写入权属宿主——归因/审批/结算语义绑在宿主写点，装载面只许自注册词汇）",
+      "kind": "const",
       "sig": "753e94cd0eaf976e"
     },
     {
@@ -2052,6 +2392,8 @@
         "server",
         "standalone"
       ],
+      "desc": "session：事件 data 含非 JSON 值（undefined/function/symbol/bigint/循环引用），写入前拒绝",
+      "kind": "const",
       "sig": "d90d2411d59b0e8a"
     },
     {
@@ -2064,6 +2406,8 @@
         "server",
         "standalone"
       ],
+      "desc": "session：单事件 data 体积超护栏（默认 64 KiB，会话篇 §1.2 拍板）——fail-loud 拒绝不吞垃圾",
+      "kind": "const",
       "sig": "dd78db446af9947a"
     },
     {
@@ -2076,6 +2420,8 @@
         "server",
         "standalone"
       ],
+      "desc": "session：fork 边界非法（落在 open turn 内——必须落在 turn 闭合之后，会话篇 §5）",
+      "kind": "const",
       "sig": "2b4b4d008cf1746a"
     },
     {
@@ -2088,6 +2434,8 @@
         "server",
         "standalone"
       ],
+      "desc": "session：会话格式/版本不支持（升级后的旧库拒绝打开，不迁移，会话篇拍板；未知事件类型非 ignorable 同用此码）",
+      "kind": "const",
       "sig": "fe510c6c60cbc628"
     },
     {
@@ -2100,6 +2448,8 @@
         "server",
         "standalone"
       ],
+      "desc": "session：surfaceOp 遮蔽校验失败（区间非法/溯源不完整/引用未来 seq/tool-result 改了 content 之外字段）",
+      "kind": "const",
       "sig": "0c95e7f08a59b190"
     },
     {
@@ -2112,6 +2462,8 @@
         "server",
         "standalone"
       ],
+      "desc": "session：同一会话同一时刻只允许单写者——第二写者追加即响亮拒绝（第八批 #13 护栏）",
+      "kind": "const",
       "sig": "903260e8ad1e7e03"
     },
     {
@@ -2124,6 +2476,8 @@
         "server",
         "standalone"
       ],
+      "desc": "skills：registerProvider 注册时点首调形状断言不过",
+      "kind": "const",
       "sig": "9c0c925a8c3de3c6"
     },
     {
@@ -2136,6 +2490,8 @@
         "server",
         "standalone"
       ],
+      "desc": "subagent：能力协商失败——请求携带 outputSchema/maxDepth/toolFilter/persona 任一而 provider 未声明对应能力",
+      "kind": "const",
       "sig": "00c6ebb7d65f918e"
     },
     {
@@ -2148,6 +2504,8 @@
         "server",
         "standalone"
       ],
+      "desc": "subagent：委派深度超帽（子 header.delegationDepth 超 min(请求 maxDepth, 装配默认帽)——§6.5 单调下界执法，fail-loud 子装配即刻销毁）",
+      "kind": "const",
       "sig": "f9dce5444416f127"
     },
     {
@@ -2160,6 +2518,8 @@
         "server",
         "standalone"
       ],
+      "desc": "subagent：provider 注册撞名（词汇表拒绝静默覆盖——与事件/kind 同纪律）",
+      "kind": "const",
       "sig": "ac1876e202067c39"
     },
     {
@@ -2172,6 +2532,8 @@
         "server",
         "standalone"
       ],
+      "desc": "subagent：start 引用的 provider 名未注册（清单面 = ctx.subagents.list()）",
+      "kind": "const",
       "sig": "ac2b3d8508963874"
     },
     {
@@ -2184,6 +2546,8 @@
         "server",
         "standalone"
       ],
+      "desc": "沙箱元数据",
+      "kind": "interface",
       "sig": "29306f99e1cb32b2"
     },
     {
@@ -2196,6 +2560,8 @@
         "server",
         "standalone"
       ],
+      "desc": "ctx 具名服务目录项",
+      "kind": "interface",
       "sig": "a41282cd2f8ad2c1"
     },
     {
@@ -2208,6 +2574,8 @@
         "server",
         "standalone"
       ],
+      "desc": "durable 事件信封（会话篇 §1.1 唯一权威）：会话事件日志的唯一条目形态",
+      "kind": "interface",
       "sig": "0d6a64f9168f71e1"
     },
     {
@@ -2220,6 +2588,8 @@
         "server",
         "standalone"
       ],
+      "desc": "事件类别三分法（会话篇 §1.1）：决定事件在投影/存储分层中的处理方式",
+      "kind": "type",
       "sig": "63ec6f6977e064e1"
     },
     {
@@ -2232,6 +2602,8 @@
         "server",
         "standalone"
       ],
+      "desc": "事件类型注册项",
+      "kind": "interface",
       "sig": "ccbafbcd5293a841"
     },
     {
@@ -2244,6 +2616,8 @@
         "server",
         "standalone"
       ],
+      "desc": "一个已加载技能（SKILL.md 解析产物；正文原文保留供 read 全文与显式激活）",
+      "kind": "interface",
       "sig": "ea998c1f21879477"
     },
     {
@@ -2256,6 +2630,8 @@
         "server",
         "standalone"
       ],
+      "desc": "技能加载诊断（warning = 单点问题不断流；collision = 同名落选记录）",
+      "kind": "interface",
       "sig": "59e19897cac182cb"
     },
     {
@@ -2268,6 +2644,8 @@
         "server",
         "standalone"
       ],
+      "desc": "诊断码（稳定词汇；warning 不断流，collision 记录 first-wins 落选者）",
+      "kind": "type",
       "sig": "8913fe0944991665"
     },
     {
@@ -2280,6 +2658,8 @@
         "server",
         "standalone"
       ],
+      "desc": "晋升溯源：技能由记忆晋升而来时，作者（模型/用户）在 frontmatter 声明源记忆条目 id——审批面与审计面据此把技能清算回记忆（记忆再经 source_refs 清算回事件，宪章「痕迹可清算」三级全链）",
+      "kind": "interface",
       "sig": "72b44eae50754270"
     },
     {
@@ -2292,6 +2672,8 @@
         "server",
         "standalone"
       ],
+      "desc": "技能来源层级（§4.4 优先级 project > user > package；同名 first-wins）",
+      "kind": "type",
       "sig": "a9db9df19ae1d52d"
     },
     {
@@ -2304,6 +2686,8 @@
         "server",
         "standalone"
       ],
+      "desc": "技能提供方",
+      "kind": "interface",
       "sig": "1c4cdef44ffc9e5b"
     },
     {
@@ -2329,6 +2713,8 @@
         "server",
         "standalone"
       ],
+      "desc": "LLM 调用终态（pi-ai 同构七值）",
+      "kind": "type",
       "sig": "e198e323e6a12900"
     },
     {
@@ -2341,6 +2727,8 @@
         "server",
         "standalone"
       ],
+      "desc": "模型层注入签名（llm 模块整体替换位——agent 与 llm 两模块的唯一会合点，故落在 contracts）",
+      "kind": "type",
       "sig": "9324dbd30ac1667d"
     },
     {
@@ -2353,6 +2741,8 @@
         "server",
         "standalone"
       ],
+      "desc": "StreamFn 每次调用的选项（model 为模型 id 字符串——解析归 llm 模块，loop 不持模型对象）",
+      "kind": "interface",
       "sig": "1a4290af791ae0d7"
     },
     {
@@ -2365,6 +2755,8 @@
         "server",
         "standalone"
       ],
+      "desc": "provider 能力声明（五布尔，声明式——§6.1 钉死；context 位 = 第三十一批）",
+      "kind": "interface",
       "sig": "e13a8478f77b5212"
     },
     {
@@ -2377,6 +2769,8 @@
         "server",
         "standalone"
       ],
+      "desc": "provider 执行体（start 产物——dispose 幂等；服务面包装为 SubagentRun）",
+      "kind": "interface",
       "sig": "d02fb67b614594f0"
     },
     {
@@ -2389,6 +2783,8 @@
         "server",
         "standalone"
       ],
+      "desc": "子代理 provider 契约（§6.1 钉死；实现见 subagent/inprocess.ts 与外部收编应用）",
+      "kind": "interface",
       "sig": "d04efcd3fb8d2086"
     },
     {
@@ -2401,6 +2797,8 @@
         "server",
         "standalone"
       ],
+      "desc": "list() 只读清单项（委派工具披露面：名 + 能力声明）",
+      "kind": "interface",
       "sig": "181793a26d53670d"
     },
     {
@@ -2413,6 +2811,8 @@
         "server",
         "standalone"
       ],
+      "desc": "服务面请求（SubagentStart 全字段 + 路由/形态两字段）",
+      "kind": "interface",
       "sig": "9229ba0fbb2a1c8f"
     },
     {
@@ -2425,6 +2825,8 @@
         "server",
         "standalone"
       ],
+      "desc": "子代理结算契约（父收到的全部——中间过程不进父上下文）",
+      "kind": "interface",
       "sig": "697c569c80d49c40"
     },
     {
@@ -2437,6 +2839,8 @@
         "server",
         "standalone"
       ],
+      "desc": "服务面启动产物（SubagentExecution + provider 名 + 后台模式的 Job 句柄）",
+      "kind": "interface",
       "sig": "9be7650fa596fd5f"
     },
     {
@@ -2449,6 +2853,8 @@
         "server",
         "standalone"
       ],
+      "desc": "结算回调载荷（§6.4 落码注记——service opts.onSettle 的入参）： background 链 = Job settle → onSettle → execution.dispose（通知先于子所有权释放）； foreground 链 = onSettle 后 dispose 归调用方",
+      "kind": "interface",
       "sig": "30e349e089e41ddb"
     },
     {
@@ -2461,6 +2867,8 @@
         "server",
         "standalone"
       ],
+      "desc": "provider.start 的请求面（服务面已过能力协商；provider/background 字段已剥离）",
+      "kind": "interface",
       "sig": "c18c4cfd753b0cb0"
     },
     {
@@ -2473,6 +2881,8 @@
         "server",
         "standalone"
       ],
+      "desc": "子运行终态（§6.1 显式注册可扩展——字面量联合 + 字符串逃生口）",
+      "kind": "type",
       "sig": "85b717f545645234"
     },
     {
@@ -2485,6 +2895,8 @@
         "server",
         "standalone"
       ],
+      "desc": "ctx.subagents 服务面",
+      "kind": "interface",
       "sig": "94c2ff786648c530"
     },
     {
@@ -2497,6 +2909,8 @@
         "server",
         "standalone"
       ],
+      "desc": "遮蔽指令：改历史的唯一合法形态（会话篇 §2）——新事件携带，在派生表面遮蔽 [start, end] 区间旧节点",
+      "kind": "interface",
       "sig": "fc681ead08fc910d"
     },
     {
@@ -2509,6 +2923,8 @@
         "server",
         "standalone"
       ],
+      "desc": "todo：整表序列化字节超 60KiB 内容预算（第九轮 #21 修死——schema 静态形状上限被 gate.spec 数组形态击穿后，execute 段动态道响亮拒绝不截断：todo/write 是 fold/回显/gates 的机器消费面，截断毁语义）",
+      "kind": "const",
       "sig": "556c2a1194afea85"
     },
     {
@@ -2521,6 +2937,8 @@
         "server",
         "standalone"
       ],
+      "desc": "工具集变更活体事件名（动态注册/禁用后触发请求重组装）",
+      "kind": "const",
       "sig": "02c841113fa48cc5"
     },
     {
@@ -2533,6 +2951,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：参数 schema 校验失败（三段管道入口前置步，不合法参数不进守门/执行段）",
+      "kind": "const",
       "sig": "3609cac5a8fff79f"
     },
     {
@@ -2545,6 +2965,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：守门段拒绝（block 决策短路——结构化拒绝结果直接返回模型，不进执行段）",
+      "kind": "const",
       "sig": "81e32775ed390dc1"
     },
     {
@@ -2557,6 +2979,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：工具描述命中注入模式拒绝注册",
+      "kind": "const",
       "sig": "dad0040e0af9a486"
     },
     {
@@ -2569,6 +2993,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：同名工具重复注册（注册表装配错误，响亮失败）",
+      "kind": "const",
       "sig": "2ac2a1306ee49e40"
     },
     {
@@ -2581,6 +3007,8 @@
         "server",
         "standalone"
       ],
+      "desc": "执行段活体事件名",
+      "kind": "const",
       "sig": "34a35c3a08e3d246"
     },
     {
@@ -2593,6 +3021,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：守门段监听器自身异常（fail-closed：视为 block，绝不放行）",
+      "kind": "const",
       "sig": "3a8e3a45949da08f"
     },
     {
@@ -2605,6 +3035,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：工具调用被取消时工具尚未开始执行（恢复 reducer 合成终态用，会话篇 §4）",
+      "kind": "const",
       "sig": "eea8920d1668ccea"
     },
     {
@@ -2617,6 +3049,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：工具已启动但结果未知（超时/崩溃后的合成终态）",
+      "kind": "const",
       "sig": "2ab133840d871f44"
     },
     {
@@ -2629,6 +3063,8 @@
         "server",
         "standalone"
       ],
+      "desc": "后处理段活体事件名",
+      "kind": "const",
       "sig": "ab9a73ce37834fa5"
     },
     {
@@ -2641,6 +3077,8 @@
         "server",
         "standalone"
       ],
+      "desc": "守门段活体事件名",
+      "kind": "const",
       "sig": "10a7f9d4dba3297e"
     },
     {
@@ -2653,6 +3091,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：两层注册表（全局层+域层）合计件数达上限（10^3——良性行为距阈值两个数量级，超限 = 失控或泄漏）",
+      "kind": "const",
       "sig": "824b8ebdd2d82dee"
     },
     {
@@ -2665,6 +3105,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：register/unregister 变更频率超限（容量 240 / 回填 600 每分钟全局令牌桶——每次变更触 tools_change ≤64KiB 快照，高频注册武器化 header 快照〔R4〕；容量吃下单次 /reload 全量重注册突发，回填 10 op/s 撑热迭代不触顶）",
+      "kind": "const",
       "sig": "eb72beebd3e386e0"
     },
     {
@@ -2677,6 +3119,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：工具参数 schema 根节点非 object",
+      "kind": "const",
       "sig": "1621c6cb652f8d33"
     },
     {
@@ -2689,6 +3133,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：工具执行超时（三段管道 execute 段的时长上限触发）",
+      "kind": "const",
       "sig": "f9c78094f96c325d"
     },
     {
@@ -2701,6 +3147,8 @@
         "server",
         "standalone"
       ],
+      "desc": "装载面注册 timeoutMs 下限：正数过小钳至此值，<= 0 拒绝（TOOL_TIMEOUT_INVALID）",
+      "kind": "const",
       "sig": "5929c050b925c27f"
     },
     {
@@ -2713,6 +3161,8 @@
         "server",
         "standalone"
       ],
+      "desc": "tools：注册面 timeoutMs 非法（<= 0",
+      "kind": "const",
       "sig": "edaef2125d12de22"
     },
     {
@@ -2738,6 +3188,8 @@
         "server",
         "standalone"
       ],
+      "desc": "文本块（user/assistant/toolResult 通用）",
+      "kind": "interface",
       "sig": "dbf3e677b4573564"
     },
     {
@@ -2750,6 +3202,8 @@
         "server",
         "standalone"
       ],
+      "desc": "思考块（仅 assistant；供应商推理内容回放）",
+      "kind": "interface",
       "sig": "0f2ec9a6666cc2cf"
     },
     {
@@ -2762,6 +3216,8 @@
         "server",
         "standalone"
       ],
+      "desc": "思考档位（pi-ai 同构七值；xhigh/max 仅部分模型家族支持）",
+      "kind": "type",
       "sig": "f38b086347a97505"
     },
     {
@@ -2774,6 +3230,8 @@
         "server",
         "standalone"
       ],
+      "desc": "工具调用块（仅 assistant 内联；arguments 已是解析后的对象）",
+      "kind": "interface",
       "sig": "1889ece095f0a5cf"
     },
     {
@@ -2786,6 +3244,8 @@
         "server",
         "standalone"
       ],
+      "desc": "工具调用面类别（P1-2 增补 7③——§3.1「callOrigin 调用面类别」条的值域）： - 'model'：模型工具调用（loop 经 toAgentTool 包装进管道）； - 'service'：宿主服务面复入（exec 服务/web fetch 服务在同一管道执行—— 守门行按面别分叉〔如服务路不按模型工具面审批〕的显式判别词，取代对合成 def 名的字符串嗅探）",
+      "kind": "type",
       "sig": "17c978fe53e933cb"
     },
     {
@@ -2798,6 +3258,8 @@
         "server",
         "standalone"
       ],
+      "desc": "工具执行上下文（ToolDefinition.execute 的第二参数）",
+      "kind": "interface",
       "sig": "28ec02a9afeaab8c"
     },
     {
@@ -2810,6 +3272,8 @@
         "server",
         "standalone"
       ],
+      "desc": "ctx.tools.register 的注册面",
+      "kind": "interface",
       "sig": "8794f4055ae58111"
     },
     {
@@ -2822,6 +3286,8 @@
         "server",
         "standalone"
       ],
+      "desc": "工具批执行策略",
+      "kind": "type",
       "sig": "2dc54d34fc1407a8"
     },
     {
@@ -2834,6 +3300,8 @@
         "server",
         "standalone"
       ],
+      "desc": "管道执行器（三段管道的包装面——Ring 1 行树化批 2026-08-26 类型安家 contracts：服务面携带它，宿主消费方〔exec 服务等〕与行替换件同源同过守门）",
+      "kind": "type",
       "sig": "52ccac7e1df2d77d"
     },
     {
@@ -2846,6 +3314,8 @@
         "server",
         "standalone"
       ],
+      "desc": "工具结果消息（与 assistant 内 toolCall 按 toolCallId 配对）",
+      "kind": "interface",
       "sig": "3b2525c357f955e9"
     },
     {
@@ -2858,6 +3328,8 @@
         "server",
         "standalone"
       ],
+      "desc": "工具进度回调（partial 结果流式上报；promise 结算后的调用被忽略）",
+      "kind": "type",
       "sig": "1e8a2d2f9135b955"
     },
     {
@@ -2870,6 +3342,8 @@
         "server",
         "standalone"
       ],
+      "desc": "ctx.tools 服务面：工具注册表（register/listFor 两层模型）——第三方经 `ctx.get<ToolsService>('tools')` 取全类型",
+      "kind": "interface",
       "sig": "afcecd1916c12ae4"
     },
     {
@@ -2895,6 +3369,8 @@
         "server",
         "standalone"
       ],
+      "desc": "一次 LLM 调用的 token 用量",
+      "kind": "interface",
       "sig": "67231de2db7ee993"
     },
     {
@@ -2907,6 +3383,8 @@
         "server",
         "standalone"
       ],
+      "desc": "用户消息（content 允许纯文本或图文块数组）",
+      "kind": "interface",
       "sig": "e5e55c758975b862"
     },
     {
@@ -2932,6 +3410,8 @@
         "server",
         "standalone"
       ],
+      "desc": "虚拟模块键登记项",
+      "kind": "interface",
       "sig": "8bbbeb25d3cd7089"
     },
     {
@@ -2944,6 +3424,8 @@
         "server",
         "standalone"
       ],
+      "desc": "webui：显式非回环绑定被拒",
+      "kind": "const",
       "sig": "ae32bb77afab28f2"
     },
     {
@@ -2956,6 +3438,8 @@
         "server",
         "standalone"
       ],
+      "desc": "webui：端口被占用（EADDRINUSE——apply 内 await listen 失败即抛，行 failed → 官方件失败行非空 = 启动断言拒启）",
+      "kind": "const",
       "sig": "6534d9b5dccb8129"
     },
     {
@@ -2968,6 +3452,8 @@
         "server",
         "standalone"
       ],
+      "desc": "web：装机下载失败族",
+      "kind": "const",
       "sig": "be300f04397f51bb"
     },
     {
@@ -2980,6 +3466,8 @@
         "server",
         "standalone"
       ],
+      "desc": "web：网络层失败（DNS 解析失败/连接拒绝/超时/TLS 错误等——message 载底层原因）",
+      "kind": "const",
       "sig": "9fec84a3ff4d38fe"
     },
     {
@@ -2992,6 +3480,8 @@
         "server",
         "standalone"
       ],
+      "desc": "web：目标地址命中私网/保留段清单（IANA 特殊用途注册表全收——DNS 解析全部地址逐一过检；SSRF fence 核心）",
+      "kind": "const",
       "sig": "dafd3956d5b9f6ae"
     },
     {
@@ -3004,6 +3494,8 @@
         "server",
         "standalone"
       ],
+      "desc": "web：重定向超 5 跳上限",
+      "kind": "const",
       "sig": "1d507e6f487d50e9"
     },
     {
@@ -3016,6 +3508,8 @@
         "server",
         "standalone"
       ],
+      "desc": "web：URL 非法",
+      "kind": "const",
       "sig": "979822fbe566427d"
     },
     {
@@ -3028,6 +3522,8 @@
         "server",
         "standalone"
       ],
+      "desc": "apiVersion 比较：MAJOR.MINOR 逐段数值比较——禁字符串比较（\"1.10\" > \"1.9\"）",
+      "kind": "function",
       "sig": "57a9ec6695ced147"
     },
     {
@@ -3040,6 +3536,8 @@
         "server",
         "standalone"
       ],
+      "desc": "错误 → 统一文案口径（loop 工具结果 / app run 级兜底共用，杜绝各处手拼格式分叉）",
+      "kind": "function",
       "sig": "3a04c7ee9efea6aa"
     },
     {
@@ -3052,6 +3550,8 @@
         "server",
         "standalone"
       ],
+      "desc": "「该区行」谓词：行 apps 键**恰一元素** = 该应用区独占行——返回该应用 id；缺席（系统相位）或多元素（跨区共享行） = undefined",
+      "kind": "function",
       "sig": "eeb8cae7d83fc10d"
     },
     {
@@ -3064,6 +3564,8 @@
         "server",
         "standalone"
       ],
+      "desc": "目录查询：按名取定义（含判断某事件是否已知总线活体事件）",
+      "kind": "function",
       "sig": "fe210be40d9b34a1"
     },
     {
@@ -3076,6 +3578,8 @@
         "server",
         "standalone"
       ],
+      "desc": "查角色定义（标准角色与未注册名返回 undefined——消费方自行分派）",
+      "kind": "function",
       "sig": "016de867db6ec22d"
     },
     {
@@ -3088,6 +3592,8 @@
         "server",
         "standalone"
       ],
+      "desc": "查询类型定义；未注册返回 undefined（调用方按 ignorable 语义决定拒绝与否）",
+      "kind": "function",
       "sig": "26b0cae5cd5e8ff1"
     },
     {
@@ -3100,6 +3606,8 @@
         "server",
         "standalone"
       ],
+      "desc": "是否核心事件词（内核词——写入权与注册权均属宿主）：appendEvent 写侧与 registerAppSessionEventType 注册侧同判据单一来源（两道闸一道尺）",
+      "kind": "function",
       "sig": "549fb61abfb4a3c3"
     },
     {
@@ -3112,6 +3620,8 @@
         "server",
         "standalone"
       ],
+      "desc": "是否标准三角色消息（AgentMessage 联合消费方的窄化守卫）",
+      "kind": "function",
       "sig": "cd998bd878463796"
     },
     {
@@ -3124,6 +3634,8 @@
         "server",
         "standalone"
       ],
+      "desc": "是否标准角色（convertToLlm 透传分支的判据）",
+      "kind": "function",
       "sig": "b29493464c96cdd8"
     },
     {
@@ -3136,6 +3648,8 @@
         "server",
         "standalone"
       ],
+      "desc": "断言 apiVersion 格式合法（清单校验面用——错误归 APP_INVALID 语境由调用方包，本函数只做纯格式判定的复用体）",
+      "kind": "function",
       "sig": "1e5d019d447f8711"
     },
     {
@@ -3148,6 +3662,8 @@
         "server",
         "standalone"
       ],
+      "desc": "枚举全部已注册错误码（CI 校验 / 诊断输出用）",
+      "kind": "function",
       "sig": "29ee7b3bb6d7a5a4"
     },
     {
@@ -3160,6 +3676,8 @@
         "server",
         "standalone"
       ],
+      "desc": "枚举全部已注册自定义角色名（目录清单 / 诊断输出用）",
+      "kind": "function",
       "sig": "77fd57ee709ba2d6"
     },
     {
@@ -3172,6 +3690,8 @@
         "server",
         "standalone"
       ],
+      "desc": "枚举全部已注册事件类型（CI 校验 / 诊断输出用）",
+      "kind": "function",
       "sig": "68f6a4a9d530e2c5"
     },
     {
@@ -3184,6 +3704,8 @@
         "server",
         "standalone"
       ],
+      "desc": "装载面注册一个自定义消息角色（`ctx.registerMessageRole` 的落点）：角色名必含 `/` 域前缀（`memory/recall` 式）——应用域归属从名字可判，与 prompt 段同纪律",
+      "kind": "function",
       "sig": "56f800e7de72c069"
     },
     {
@@ -3196,6 +3718,8 @@
         "server",
         "standalone"
       ],
+      "desc": "注册一个事件类型（装载面入口——`ctx.registerSessionEventType` 的落点）",
+      "kind": "function",
       "sig": "0458ed34025bbf39"
     },
     {
@@ -3208,6 +3732,8 @@
         "server",
         "standalone"
       ],
+      "desc": "注册一个错误码并返回它（注册即使用，`const X = registerErrorCode('X')`）",
+      "kind": "function",
       "sig": "eb969843afbcbdaa"
     },
     {
@@ -3220,6 +3746,8 @@
         "server",
         "standalone"
       ],
+      "desc": "宿主面注册一个自定义消息角色：无 `/` 单段名（`bash-execution` 式）—— 装配层注册内置角色（bash 执行记录/系统通知/compaction 摘要/子代理结算标注）",
+      "kind": "function",
       "sig": "01ad9f83e7324859"
     },
     {
@@ -3232,6 +3760,8 @@
         "server",
         "standalone"
       ],
+      "desc": "注册一个事件类型（宿主面入口；核心清单在下方模块加载时已全量注册）",
+      "kind": "function",
       "sig": "77c0a61b551f4b33"
     },
     {
@@ -3244,6 +3774,8 @@
         "server",
         "standalone"
       ],
+      "desc": "行载体解析：sandbox 块缺席时 **缺省 ≠ 裸 main**——`builtin:` 行（官方豁免）缺省 main；第三方行缺省 external（出生即进程墙——缺块不是裸奔通道）",
+      "kind": "function",
       "sig": "77f37fa82d11f363"
     },
     {
@@ -3256,6 +3788,8 @@
         "server",
         "standalone"
       ],
+      "desc": "校验应用清单（拒绝式——坏清单 APP_INVALID 响亮拒绝，message 载位置与首错路径）",
+      "kind": "function",
       "sig": "06dbdf6ef57208b5"
     },
     {
@@ -3316,6 +3850,7 @@
         "server",
         "standalone"
       ],
+      "desc": "打开应用自管库（better-sqlite3 全量 Database 实例——自管库不强制 readonly，读写权限是应用自己的领地；主库路径命中即抛 APP_MAIN_DB_FORBIDDEN）",
       "sig": "af7d219491f6d854"
     },
     {
@@ -3327,7 +3862,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "跨行 id 改名的数据认领凭据（收割 named export name 兜底行 id）"
     },
     {
       "symbol": "cacheSubdir",
@@ -3338,7 +3874,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "免删信任缓存子目录（布局预留字段）"
     },
     {
       "symbol": "declaredEvents",
@@ -3349,7 +3886,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "自定义事件词名清单（null = 收割失败 unknown 档）"
     },
     {
       "symbol": "agent_pre_step",
@@ -3360,7 +3898,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "handler 短路返回 { stop: true } = run 正常收场（非 mid-run 硬断，「正在跑的轮跑完为止」不破）；未短路须 next() 透传"
     },
     {
       "symbol": "app/activated",
@@ -3371,7 +3910,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "应用行激活成功：载荷 { id, name, applyMs?, events?, gate? }——组合树行 id + 应用声明名 + apply 耗时打点 + 自定义事件词清单 + API 声明门裁决摘要（gate.status/gate.effectiveTarget 两键——行无 apiGate 则键缺席）；加载器 boot 逐行必发"
     },
     {
       "symbol": "app/failed",
@@ -3382,7 +3922,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "应用行失败（载荷 { id, code, message }——APP_ 码族；启动断言据此响亮列出，不静默跳过）"
     },
     {
       "symbol": "app/skipped",
@@ -3393,7 +3934,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "应用行跳过（载荷 { id, reason }——reason: disabled 静态禁用 / platform 平台门控；目录信任略过随信任门落地补）"
     },
     {
       "symbol": "app/uninstalled",
@@ -3404,7 +3946,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "应用行卸载完成"
     },
     {
       "symbol": "approval/answer",
@@ -3415,7 +3958,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "审批应答瀑布"
     },
     {
       "symbol": "composition/reloaded",
@@ -3426,7 +3970,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "组合树重载完成"
     },
     {
       "symbol": "context_transform",
@@ -3437,7 +3982,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "S1 双参：第二参 = 归属会话 id（transformContext 桥随批传入），handler 须 next(messages, sessionId) 逐参透传——waterfall 兜底仅保首参，单参调用丢键）"
     },
     {
       "symbol": "echo/par",
@@ -3448,7 +3994,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "Echo 金样收窄面探针词·parallel"
     },
     {
       "symbol": "echo/ser",
@@ -3459,7 +4006,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "Echo 金样收窄面探针词·serial（同 echo/par——测试资产：收窄清单 v1 逐项核的差分判据；零订阅者，载荷无语义）"
     },
     {
       "symbol": "echo/tick",
@@ -3470,7 +4018,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "Echo 金样事件词汇"
     },
     {
       "symbol": "echo/wf",
@@ -3481,7 +4030,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "Echo 金样收窄面探针词·waterfall（同 echo/par——测试资产：收窄清单 v1 逐项核的差分判据；零订阅者，链尾 next 原样透传）"
     },
     {
       "symbol": "job_settled",
@@ -3492,7 +4042,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "后台任务到达终态"
     },
     {
       "symbol": "obs/alert",
@@ -3503,7 +4054,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "观测告警触发面（rollup 写入内联执法：过阈 + 冷却窗外触发；载荷 { ruleId, metric, agg, value, threshold, windowHours }）"
     },
     {
       "symbol": "prompts_change",
@@ -3514,7 +4066,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "systemPrompt 段集合变更通知：载荷 = 现行段 id 清单 id 字典序；与 tools_change 同族"
     },
     {
       "symbol": "session/event",
@@ -3525,7 +4078,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "SessionEvent 写入后的活体通知，载荷 { sessionId, event }"
     },
     {
       "symbol": "session_shutdown",
@@ -3536,7 +4090,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "优雅关闭广播，宿主 bounded 等待全部清理器"
     },
     {
       "symbol": "session_start",
@@ -3547,7 +4102,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "会话建立或恢复完成（含崩溃修复结果）/ delegation fork 建子会话 / 装载收口补播"
     },
     {
       "symbol": "skills_change",
@@ -3558,7 +4114,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "技能提供方链变更通知"
     },
     {
       "symbol": "tools_change",
@@ -3569,7 +4126,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "工具注册表变更通知"
     },
     {
       "symbol": "tools_execute",
@@ -3580,7 +4138,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "工具执行瀑布"
     },
     {
       "symbol": "tools_post_execute",
@@ -3591,7 +4150,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "工具执行后审计瀑布"
     },
     {
       "symbol": "tools_pre_execute",
@@ -3602,7 +4162,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "工具执行前守门瀑布"
     },
     {
       "symbol": "turn_stopping",
@@ -3613,7 +4174,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "模型 run 结算后逐个征询是否续跑：载荷 { sessionId, stopReason }；每次 runWithRetry 结算后、followUp 循环复查前派发，全部 stopReason 都发、dismantled 跳过；续跑 = handler 内经会话面 deliver 投递（running 走 steer 由循环消费——零新返回值）；消费点竞速挂起钟 5s"
     },
     {
       "symbol": "user_input",
@@ -3624,7 +4186,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "派发点 = 全部批消费位（run 入口/followUp drain/重试 drain/turn 边界 steer 注入），凡不进 run 批的 inject 审计路不过；消费点竞速挂起钟 5s）"
     },
     {
       "symbol": "worker/froze",
@@ -3635,7 +4198,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "worker 域心跳冻结判定"
     },
     {
       "symbol": "worker/oom",
@@ -3646,7 +4210,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "worker 域内存超限死亡归因"
     },
     {
       "symbol": "worker/spawned",
@@ -3657,7 +4222,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "worker 域 spawn 即派发"
     },
     {
       "symbol": "agent",
@@ -3668,7 +4234,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "代理装配默认位（model/persona/toolFilter/skills）"
     },
     {
       "symbol": "api",
@@ -3679,7 +4246,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "API 协商声明块（min/target/experimental）"
     },
     {
       "symbol": "budget",
@@ -3690,7 +4258,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "预算声明（dailyTokens/memoryMb）"
     },
     {
       "symbol": "components",
@@ -3701,7 +4270,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "组件清单（装载身份串）"
     },
     {
       "symbol": "default",
@@ -3712,7 +4282,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "默认应用声明（官方清单专属词汇）"
     },
     {
       "symbol": "entry",
@@ -3723,7 +4294,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "启动面声明（command/delegable/background）"
     },
     {
       "symbol": "grants",
@@ -3734,7 +4306,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "授权申请（writableRoots/approval 预设）"
     },
     {
       "symbol": "id",
@@ -3745,7 +4318,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "应用 id（裸名官方保留 / 含 / 第三方域前缀）"
     },
     {
       "symbol": "label",
@@ -3756,7 +4330,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "人读标签（UI 文案位）"
     },
     {
       "symbol": "theme",
@@ -3767,7 +4342,8 @@
         "daemon",
         "server",
         "standalone"
-      ]
+      ],
+      "desc": "前台渲染主题（accent 强调色）"
     },
     {
       "symbol": "agent",
@@ -3779,6 +4355,7 @@
         "server",
         "standalone"
       ],
+      "desc": "对话驱动控制（sendUserMessage 等官方件面）",
       "sig": "1ce59afe301346ac"
     },
     {
@@ -3791,6 +4368,7 @@
         "server",
         "standalone"
       ],
+      "desc": "订阅 run 结算（每个 run 终结派发一次；载荷含归属 sessionId——多驱动下订阅方按其路由；Disposer 注销——挂 ctx.effect 即随应用回卷）",
       "sig": "920f52be8a713bbe"
     },
     {
@@ -3803,6 +4381,7 @@
         "server",
         "standalone"
       ],
+      "desc": "闲时重播种（compaction 纵切装配缺口第 4 件——会话篇 §2 增补 3）：以当前投影重建目标会话驱动时间线（resetTimeline 原位原语）",
       "sig": "292d1f6af9f5a713"
     },
     {
@@ -3815,6 +4394,7 @@
         "server",
         "standalone"
       ],
+      "desc": "三通道注入（构造 UserMessage 经三级解析序路由到目标驱动；返回 void——steer 入队语义下 run 边界模糊，§9.3 ask 是等待结果的另一面 ⏳）",
       "sig": "8f17fbd23cc8e796"
     },
     {
@@ -3827,6 +4407,7 @@
         "server",
         "standalone"
       ],
+      "desc": "动作级审批（ask/never/allowed-once）",
       "sig": "f141b2fe87d05b51"
     },
     {
@@ -3839,6 +4420,7 @@
         "server",
         "standalone"
       ],
+      "desc": "动作级审批：一次请求 → 一个 outcome（闭集，绝不悬空）",
       "sig": "90ecc69308853052"
     },
     {
@@ -3851,6 +4433,7 @@
         "server",
         "standalone"
       ],
+      "desc": "当前策略档（诊断/审计输出用）",
       "sig": "6cc35a324c03d1eb"
     },
     {
@@ -3863,6 +4446,7 @@
         "server",
         "standalone"
       ],
+      "desc": "装载管理 reconciliation 进程内服务",
       "sig": "ee59068f5ef51708"
     },
     {
@@ -3875,6 +4459,7 @@
         "server",
         "standalone"
       ],
+      "desc": "boot 与 /reload 后装配方回灌最新装载结果（同实例就地更新——服务集恒定）",
       "sig": "47c852295697df83"
     },
     {
@@ -3887,6 +4472,7 @@
         "server",
         "standalone"
       ],
+      "desc": "行配置写入：patch 顶层键整值替换（与 overlay 字段级后写胜出同族语义，不引入深合并），合并后完整 config 经应用声明 schema 校验（复用装载期同 schema）才落 overlay",
       "sig": "740d389c196bef5f"
     },
     {
@@ -3899,6 +4485,7 @@
         "server",
         "standalone"
       ],
+      "desc": "装机（三源分发按 ref 形态自动判定）——**D2 仓库态**：只进装机子树 + provenance 落账，**不写组合行 = 零生效**（install→reload 旧链废止——零行无物可热应用）",
       "sig": "0a032f389a2e24b2"
     },
     {
@@ -3911,6 +4498,7 @@
         "server",
         "standalone"
       ],
+      "desc": "装载状态清单（组合树行序；装载前视角的行 = planned 兜底）",
       "sig": "1ffdae35c3c734aa"
     },
     {
@@ -3923,6 +4511,7 @@
         "server",
         "standalone"
       ],
+      "desc": "运行时单行失败状态面：装载后的运行期失败路径；boot/reload 装载失败走 applyLoad 三态清单不经此面（事件广播由调用方/fleet 负责，此处只保 list 状态源不漂移）",
       "sig": "fd01d91863ecba2d"
     },
     {
@@ -3935,6 +4524,7 @@
         "server",
         "standalone"
       ],
+      "desc": "挂载：吃**装机推导 id**——账本反查装机物，写一条 overlay 组合行使其生效",
       "sig": "60b5bf58e8281cdd"
     },
     {
@@ -3947,6 +4537,7 @@
         "server",
         "standalone"
       ],
+      "desc": "重载请求投递（同条导线——reload 真身住组合根，服务面只投递）：排队语义宿主侧承载（run 进行中排队、run 结算后自动排水），件不自带重建权",
       "sig": "f01090a5c6844f42"
     },
     {
@@ -3959,6 +4550,7 @@
         "server",
         "standalone"
       ],
+      "desc": "禁用状态翻转（overlay 行 disabled 置 true / 删键）",
       "sig": "b2b1c55f4c4bef0f"
     },
     {
@@ -3971,6 +4563,7 @@
         "server",
         "standalone"
       ],
+      "desc": "双相卸载——inspect 相：零副作用只读预检（装机物 + 全部挂载行 + 数据域体积 + 词表三档 + 受影响会话计数 + 级联强警示）",
       "sig": "1f9deceb3421d415"
     },
     {
@@ -3983,6 +4576,7 @@
         "server",
         "standalone"
       ],
+      "desc": "卸挂载（D2 删行动词）：吃**行 id**——删 overlay 行保码（装机物与账本不动、行 config 随行删；重挂回装机推导 config 缺省——mount 的 config 位承载显式重配）",
       "sig": "c96815e5cbb9ebde"
     },
     {
@@ -3995,6 +4589,7 @@
         "server",
         "standalone"
       ],
+      "desc": "按源分派更新——**键域 = 装机 id**（D2 迁包键：两态后 overlay 无行的仓库态件也可更新；账本反查装机物与原始 spec）：npm 按装机 spec 重装 / git 删目录按账本原 ref 重克隆 / local no-op（改动即见）；三源通尾重收割词表账本 + provenance 精确版本刷新",
       "sig": "3365ff570e53c1bb"
     },
     {
@@ -4007,6 +4602,7 @@
         "server",
         "standalone"
       ],
+      "desc": "浏览器自动化服务面（CDP 桥）",
       "sig": "1848a06cf546a3b2"
     },
     {
@@ -4019,6 +4615,7 @@
         "server",
         "standalone"
       ],
+      "desc": "per-session 隔离态取用（路由键 = ToolCtx.sessionId；匿名兜底 '_default'）",
       "sig": "9a3281ca6526b21b"
     },
     {
@@ -4031,6 +4628,7 @@
         "server",
         "standalone"
       ],
+      "desc": "行回卷永久关停（诊断/测试面——生产回卷走 ctx.effect）",
       "sig": "a7208073adde5de4"
     },
     {
@@ -4043,6 +4641,7 @@
         "server",
         "standalone"
       ],
+      "desc": "引擎诊断态（idle/starting/running/closed——boot 通知与日志同源）",
       "sig": "c39ef78f7142cd06"
     },
     {
@@ -4055,6 +4654,7 @@
         "server",
         "standalone"
       ],
+      "desc": "通道服务面（多会话呈现/提问队列）",
       "sig": "9573726d829d5a94"
     },
     {
@@ -4067,6 +4667,7 @@
         "server",
         "standalone"
       ],
+      "desc": "已注册命令清单（/help 展示；按名排序）",
       "sig": "5c823aa844627c2c"
     },
     {
@@ -4079,6 +4680,7 @@
         "server",
         "standalone"
       ],
+      "desc": "注册斜杠命令（同名后写胜出；返回注销器，幂等）",
       "sig": "7d7f429549a0e971"
     },
     {
@@ -4091,6 +4693,7 @@
         "server",
         "standalone"
       ],
+      "desc": "注册消息渲染器（同角色后写胜出；返回注销器，幂等）",
       "sig": "d9c20324b7db20bb"
     },
     {
@@ -4103,6 +4706,7 @@
         "server",
         "standalone"
       ],
+      "desc": "查角色渲染器（无则 undefined——调用方回落内置渲染）",
       "sig": "c4a8072f9a38411f"
     },
     {
@@ -4115,6 +4719,7 @@
         "server",
         "standalone"
       ],
+      "desc": "长会话压缩触发面（闲时重播种等）",
       "sig": "0f55d1abcec2d335"
     },
     {
@@ -4127,6 +4732,7 @@
         "server",
         "standalone"
       ],
+      "desc": "mid-run 溢出压缩（durable 五步，reason='overflow'）：'compacted' = 五步全落投影已缩；'nothing' = 无可压；'failed' = 摘要调用抛错（已落 compaction/failed）",
       "sig": "eac919b757721352"
     },
     {
@@ -4139,6 +4745,7 @@
         "server",
         "standalone"
       ],
+      "desc": "在飞压缩汇流快照：per-session 在飞互斥位 values 的 Promise.all（快照语义；tail 恒不拒；无在飞 = 已结算 Promise 直返）",
       "sig": "15810adabed4f4e9"
     },
     {
@@ -4151,6 +4758,7 @@
         "server",
         "standalone"
       ],
+      "desc": "spawn 管道服务（进程组树杀/超时归因）",
       "sig": "5907664fdeafb1ef"
     },
     {
@@ -4163,6 +4771,7 @@
         "server",
         "standalone"
       ],
+      "desc": "受守门段管辖的 shell 执行便捷口（与 bash 工具同一管道，不旁路）",
       "sig": "88dafc7546d449ff"
     },
     {
@@ -4175,6 +4784,7 @@
         "server",
         "standalone"
       ],
+      "desc": "受控 fetch 原语（SSRF 五卫生件同面）",
       "sig": "c704b9905ce798ac"
     },
     {
@@ -4187,6 +4797,7 @@
         "server",
         "standalone"
       ],
+      "desc": "装机下载原语",
       "sig": "33a6ff6eef550182"
     },
     {
@@ -4199,6 +4810,7 @@
         "server",
         "standalone"
       ],
+      "desc": "受控 fetch 原语：与 fetch 工具同一 execute 同一卫生件（SSRF 五卫生件同面 ——守门/落账不旁路；异常面 throw AppError，WEB_* 码族）",
       "sig": "b9a9699c663533fc"
     },
     {
@@ -4211,6 +4823,7 @@
         "server",
         "standalone"
       ],
+      "desc": "Job 注册表（终态条目结算序保留帽 256）",
       "sig": "a8c79af9ddc89a4e"
     },
     {
@@ -4223,6 +4836,7 @@
         "server",
         "standalone"
       ],
+      "desc": "按 id 请求取消（围栏：带主 Job 须以同 session id 请求，否则 JOB_OWNER_MISMATCH；无 as 视角 = operator 直控）",
       "sig": "a103889bd6ee5d26"
     },
     {
@@ -4235,6 +4849,7 @@
         "server",
         "standalone"
       ],
+      "desc": "手动入口（provider 自持生命周期）：subagent 映射 aborted→killed / error→failed、 process 映射进程退出码——终态语义归 executor，注册表不代答",
       "sig": "354a8d4d6701e830"
     },
     {
@@ -4247,6 +4862,7 @@
         "server",
         "standalone"
       ],
+      "desc": "取消全部（或指定 owner 的）Job 并 await 全部结算落定——owner dispose / 作用域回卷的排空面",
       "sig": "2fac72a49346eee3"
     },
     {
@@ -4259,6 +4875,7 @@
         "server",
         "standalone"
       ],
+      "desc": "按 id 查快照（不存在 undefined；带主 Job 须同 session id 视角查——围栏与 cancel 同规）",
       "sig": "0c77ccbaa6dacb37"
     },
     {
@@ -4271,6 +4888,7 @@
         "server",
         "standalone"
       ],
+      "desc": "清单（ownerSessionId 过滤 = 会话视角；缺省全量 = operator 视角）",
       "sig": "78496bc79efe89c2"
     },
     {
@@ -4283,6 +4901,7 @@
         "server",
         "standalone"
       ],
+      "desc": "JobKind 显式注册（未注册 kind 创建即 JOB_KIND_UNKNOWN——与事件词汇同纪律）；返回注销 Disposer",
       "sig": "44f8797105c3609c"
     },
     {
@@ -4295,6 +4914,7 @@
         "server",
         "standalone"
       ],
+      "desc": "糖入口：fn resolve→completed（携带 output）/ reject→failed（describeError）； signal 已 abort 时无论 resolve/reject 一律落 killed（取消意图胜出——auto-wire 即 executor 侧适配）",
       "sig": "ad8547d49b38e960"
     },
     {
@@ -4307,6 +4927,7 @@
         "server",
         "standalone"
       ],
+      "desc": "模型服务面（complete 单发等——pi-ai 适配层）",
       "sig": "c36b7bd05b0911d4"
     },
     {
@@ -4319,6 +4940,7 @@
         "server",
         "standalone"
       ],
+      "desc": "预算闸门查询（记忆篇铁律 4 宿主化数据源）：'foreground' 恒 true；'background' = 当日后台累计 tokens（in+out）< 限额",
       "sig": "f81a83dd7aa08887"
     },
     {
@@ -4331,6 +4953,7 @@
         "server",
         "standalone"
       ],
+      "desc": "错误桶判定（S4 前置债批——全仓唯一一份桶表 recovery.ts classifyAssistantError 的服务面公开位）：chat 件等宿主内消费方经 ctx 取用（chat 拓扑边不含 llm，判定器经服务面注入驱动——「应用侧禁写第二份分桶」的执法前提是宿主面可得）",
       "sig": "0ed8de56d7d795b0"
     },
     {
@@ -4343,6 +4966,7 @@
         "server",
         "standalone"
       ],
+      "desc": "单发受托管补全（本文件主角）",
       "sig": "253a71774a55695d"
     },
     {
@@ -4355,6 +4979,7 @@
         "server",
         "standalone"
       ],
+      "desc": "单模型查询（listModels 的点查形态，同表同账；id = \"provider/model-id\" 全形）",
       "sig": "cc42bff7ddfe7f93"
     },
     {
@@ -4367,6 +4992,7 @@
         "server",
         "standalone"
       ],
+      "desc": "溢出判定（第四十五批溢出兜底——窗口携带）：recovery.isContextOverflow 的服务面公开位",
       "sig": "e91c79b53e95cad7"
     },
     {
@@ -4379,6 +5005,7 @@
         "server",
         "standalone"
       ],
+      "desc": "模型目录只读投影：pi-ai Models 接口包装（与主对话同一 Models 实例——registerProvider 增补即刻可见），不新开特权口（pi-11：宿主数据不开放读面 = 生态直读私有格式的起点）",
       "sig": "62d682c02cb3a3d8"
     },
     {
@@ -4391,6 +5018,7 @@
         "server",
         "standalone"
       ],
+      "desc": "注册/替换 provider（按 id upsert）；返回注销函数（应用卸载路径）",
       "sig": "9ed4814cecaacab7"
     },
     {
@@ -4403,6 +5031,7 @@
         "server",
         "standalone"
       ],
+      "desc": "按 id 移除 provider",
       "sig": "c4ffc271403a327e"
     },
     {
@@ -4415,6 +5044,7 @@
         "server",
         "standalone"
       ],
+      "desc": "目录服务（dataDir/appDataDir/workspaceRoot）",
       "sig": "932fe5f259699bf0"
     },
     {
@@ -4427,6 +5057,7 @@
         "server",
         "standalone"
       ],
+      "desc": "应用数据根：`<数据目录>/apps/<id>/`（首取即建目录，幂等缓存）",
       "sig": "ec8189007a8dd95d"
     },
     {
@@ -4439,6 +5070,7 @@
         "server",
         "standalone"
       ],
+      "desc": "数据目录根（组合树/overlay/装机子树所在）",
       "sig": "32edf5a79a31690c"
     },
     {
@@ -4451,6 +5083,7 @@
         "server",
         "standalone"
       ],
+      "desc": "canonical 工作区根（2026-08-26 挖矿批 P0-1）：context 模块 commondir 归并既有能力再导出——多个检索/文件类应用需要锚定工作区而不许读 env 猜 cwd",
       "sig": "b13209f89c4204bf"
     },
     {
@@ -4463,6 +5096,7 @@
         "server",
         "standalone"
       ],
+      "desc": "systemPrompt 具名追加段注册",
       "sig": "d2fffe45fcb9d5d2"
     },
     {
@@ -4475,6 +5109,7 @@
         "server",
         "standalone"
       ],
+      "desc": "现行段 id 清单（字典序——载荷与诊断面同源）",
       "sig": "c645cc6c1cab8797"
     },
     {
@@ -4487,6 +5122,7 @@
         "server",
         "standalone"
       ],
+      "desc": "具名段物化（id 字典序拼接，段间空行分隔）：render() 抛错 = 应用 bug，宿主捕获后渲染诊断占位 + log error，不杀重建（与失败行不杀进程同根）",
       "sig": "b3e95a9f56e2bc4f"
     },
     {
@@ -4499,6 +5135,7 @@
         "server",
         "standalone"
       ],
+      "desc": "注册具名段；返回注销函数（挂调用方作用域 effect 由应用侧负责）",
       "sig": "edfad0c727bfab3b"
     },
     {
@@ -4511,6 +5148,7 @@
         "server",
         "standalone"
       ],
+      "desc": "沙箱纯包装（三档文件效果词汇）",
       "sig": "def4a5a10b4dd8ea"
     },
     {
@@ -4523,6 +5161,7 @@
         "server",
         "standalone"
       ],
+      "desc": "纯包装：受限档策略下把消费方 argv 变为受限 argv（消费方自行 spawn）",
       "sig": "afee3f31d5f8bf18"
     },
     {
@@ -4535,6 +5174,7 @@
         "server",
         "standalone"
       ],
+      "desc": "当前后端链快照（诊断/审计输出用）",
       "sig": "fd661859a4a8ed57"
     },
     {
@@ -4547,6 +5187,7 @@
         "server",
         "standalone"
       ],
+      "desc": "注册沙箱后端（后端应用行；返回注销器，幂等）",
       "sig": "5b28fe11db2546fc"
     },
     {
@@ -4559,6 +5200,7 @@
         "server",
         "standalone"
       ],
+      "desc": "会话事件读写与投影导线（appendEvent/deriveMessages 等）",
       "sig": "65dbae08933fe7aa"
     },
     {
@@ -4571,6 +5213,7 @@
         "server",
         "standalone"
       ],
+      "desc": "会话收养（会话篇 §5.3）：S3 open 收养路的件可达导线——fork 产物或任意持久会话经此切前台",
       "sig": "30f432171284cb6b"
     },
     {
@@ -4583,6 +5226,7 @@
         "server",
         "standalone"
       ],
+      "desc": "事件追加（应用词专属——核心词写入权属宿主，核心词在此响亮拒绝）；无路由落点返回 undefined 降级",
       "sig": "49b564421014bfa5"
     },
     {
@@ -4595,6 +5239,7 @@
         "server",
         "standalone"
       ],
+      "desc": "遮蔽载体宿主代写（会话篇 §2 增补 6）：应用携 surfaceOp 的 user/message 载体经宿主写权落账（五执法点在装配侧收口）；无路由落点返回 undefined",
       "sig": "4a86c03fa09830c0"
     },
     {
@@ -4607,6 +5252,7 @@
         "server",
         "standalone"
       ],
+      "desc": "导入会话（会话篇 §5.1）：origin='import' 钉死；四道卫生闸洗外部种子 → durable 承诺（ensureSeeded + flush 屏障）→ 返回 sessionId 不返回活引用",
       "sig": "eba4e04c217f5d71"
     },
     {
@@ -4619,6 +5265,7 @@
         "server",
         "standalone"
       ],
+      "desc": "当前路由会话 id（无路由落点 undefined）",
       "sig": "e302ede99a21537a"
     },
     {
@@ -4631,6 +5278,7 @@
         "server",
         "standalone"
       ],
+      "desc": "模型历史投影只读（应用读当前会话投影走此面，禁自扫原始流绕投影）",
       "sig": "7b4120c9d7ddd459"
     },
     {
@@ -4643,6 +5291,7 @@
         "server",
         "standalone"
       ],
+      "desc": "事件枚举（读侧同抛未知词——拼错事件名的无声死不设）；无落点 = 空数组",
       "sig": "2b41abcb61cb53c4"
     },
     {
@@ -4655,6 +5304,7 @@
         "server",
         "standalone"
       ],
+      "desc": "fork 露头（会话篇 §5.2）：以调用链当前会话的前缀为种子分叉——回退正路（checkpoint-rewind）= fork + adopt 切换后写",
       "sig": "be9775388f2eb0fb"
     },
     {
@@ -4667,6 +5317,7 @@
         "server",
         "standalone"
       ],
+      "desc": "run 在跑探针：缺省 = 当前路由会话；不在册会话恒 false",
       "sig": "a6ab9edb302c67ab"
     },
     {
@@ -4679,6 +5330,7 @@
         "server",
         "standalone"
       ],
+      "desc": "路由会话的「最后闭合 turn 边界」（回退正路读面针——checkpoint 件 forkSeq 唯一取值口）：物理全日志的闭合前缀长度",
       "sig": "1872d872cead36d5"
     },
     {
@@ -4691,6 +5343,7 @@
         "server",
         "standalone"
       ],
+      "desc": "当前路由会话日志长度（goal 激活锚唯一取值口；无落点 undefined）",
       "sig": "d11a640596747aaa"
     },
     {
@@ -4703,6 +5356,7 @@
         "server",
         "standalone"
       ],
+      "desc": "投影 JSON 字符总长（compaction 判据底账；无落点降级 2 = 空数组「[]」）",
       "sig": "0af46511b4bf9d66"
     },
     {
@@ -4715,6 +5369,7 @@
         "server",
         "standalone"
       ],
+      "desc": "跨会话有界时间窗查询（会话篇 §3.4 单原语）——sanctioned 直读事实表（读物理库；需精确可传 flushFirst: true）",
       "sig": "189ef747ebd618ab"
     },
     {
@@ -4727,6 +5382,7 @@
         "server",
         "standalone"
       ],
+      "desc": "技能来源注册（skills_change 广播）",
       "sig": "1a2ea942bddc23e5"
     },
     {
@@ -4739,6 +5395,7 @@
         "server",
         "standalone"
       ],
+      "desc": "上次 refresh 的诊断快照",
       "sig": "d045329331e58477"
     },
     {
@@ -4751,6 +5408,7 @@
         "server",
         "standalone"
       ],
+      "desc": "按名取技能（未知名 → undefined）",
       "sig": "30440e8b7430022b"
     },
     {
@@ -4763,6 +5421,7 @@
         "server",
         "standalone"
       ],
+      "desc": "当前合并产物（上次 refresh 的快照；服务构造后为空，须 refresh 才有内容）",
       "sig": "378b9373760c2f18"
     },
     {
@@ -4775,6 +5434,7 @@
         "server",
         "standalone"
       ],
+      "desc": "重扫全部提供方并合并（first-wins + 冲突诊断 + symlink 去重）；返回合并产物",
       "sig": "43b6e2a844cdeb62"
     },
     {
@@ -4787,6 +5447,7 @@
         "server",
         "standalone"
       ],
+      "desc": "注册技能提供方（追加序即优先序；返回注销器，幂等）",
       "sig": "e74cdc63a337a9b9"
     },
     {
@@ -4799,6 +5460,7 @@
         "server",
         "standalone"
       ],
+      "desc": "渐进披露清单（§4.3：<available_skills> XML；隐藏技能排除；无可见技能 → ''）",
       "sig": "269c594f03b82fbd"
     },
     {
@@ -4811,6 +5473,7 @@
         "server",
         "standalone"
       ],
+      "desc": "委派 provider 注册与程序化发起",
       "sig": "109b37d524dff64b"
     },
     {
@@ -4823,6 +5486,7 @@
         "server",
         "standalone"
       ],
+      "desc": "已注册 provider 清单（注册序）",
       "sig": "06466ddb34ba4c8e"
     },
     {
@@ -4835,6 +5499,7 @@
         "server",
         "standalone"
       ],
+      "desc": "注册 provider（撞名 SUBAGENT_PROVIDER_DUPLICATE）；返回注销 Disposer",
       "sig": "080060d331c234de"
     },
     {
@@ -4847,6 +5512,7 @@
         "server",
         "standalone"
       ],
+      "desc": "启动一次性委派：查 provider → 能力协商布尔检查 → provider.start； background:true 经 ctx.jobs 注册（stopReason→Job 终态映射见落码注记）",
       "sig": "32e242d31b949c89"
     },
     {
@@ -4859,6 +5525,7 @@
         "server",
         "standalone"
       ],
+      "desc": "工具注册面（register/listFor——S2 两层模型）",
       "sig": "825860d4219d5e01"
     },
     {
@@ -4871,6 +5538,7 @@
         "server",
         "standalone"
       ],
+      "desc": "驱动组成面 = 全局层 ∪ 本驱动应用域层 ∪ 本驱动层（域键升级批新增——组成面不能只活在 chat 件 open 的局部算式里，goal 续跑 wakeToolFilter 等运行期消费方需要同一投影）",
       "sig": "0067e387faa01613"
     },
     {
@@ -4883,6 +5551,7 @@
         "server",
         "standalone"
       ],
+      "desc": "管道执行器（三段管道包装面——Ring 1 行树化批：件 apply 构造并随服务携带）",
       "sig": "200b612d1517b772"
     },
     {
@@ -4895,6 +5564,7 @@
         "server",
         "standalone"
       ],
+      "desc": "按名查找（**全局层同口径**——只查全局层；未注册返回 undefined，调用方决定 fail 形态）",
       "sig": "e9e57474d0305d57"
     },
     {
@@ -4907,6 +5577,7 @@
         "server",
         "standalone"
       ],
+      "desc": "全局层全量快照（次序 = 注册序；诊断面/无会话语境的消费方用）",
       "sig": "8811e94e1d2e3ad2"
     },
     {
@@ -4919,6 +5590,7 @@
         "server",
         "standalone"
       ],
+      "desc": "应用域视角全量快照 = 全局层 ∪ 该应用域层（次序 = 全局注册序在前、应用域注册序在后；键 = appId——域键升级批键义升级，参数从 sessionId 改 appId）",
       "sig": "0b4da8257bb2bc10"
     },
     {
@@ -4931,6 +5603,7 @@
         "server",
         "standalone"
       ],
+      "desc": "注册工具（即时生效；返回注销器，幂等）",
       "sig": "d0b5d958bd512d39"
     },
     {
@@ -4943,6 +5616,7 @@
         "server",
         "standalone"
       ],
+      "desc": "注册面打点（B2 P5 打点先行，2026-08-27 刀〇a）：registered = 现存件数（全局层 + 全部域层）；totalAdds/totalRemoves = 开机以来累计注册/注销次数（高频注册武器化监控的数据源——阈值执法随护栏族另批，本面只出数）",
       "sig": "80cc0951da2d6f90"
     },
     {
@@ -4955,6 +5629,7 @@
         "server",
         "standalone"
       ],
+      "desc": "loop 面适配：包一层三段管道的 AgentTool（薄适配器，无状态）",
       "sig": "5a75f8a3722e14ff"
     },
     {
@@ -4967,6 +5642,7 @@
         "server",
         "standalone"
       ],
+      "desc": "观众面（notify 广播/hasAudience 探针）",
       "sig": "956e3a2a27046409"
     },
     {
@@ -4979,6 +5655,7 @@
         "server",
         "standalone"
       ],
+      "desc": "通道后端接入/摘除（通道 start/stop 时调用；返回摘除器）",
       "sig": "991a603a69f18735"
     },
     {
@@ -4991,6 +5668,7 @@
         "server",
         "standalone"
       ],
+      "desc": "是/否确认（无交互通道时 fail-closed 返回 false；abort 同 false）",
       "sig": "c5d7768e3da950ac"
     },
     {
@@ -5003,6 +5681,7 @@
         "server",
         "standalone"
       ],
+      "desc": "观众探针（任一在线后端自报有观众——基建大扫 #44 修订 R-2 保守口径）：探针语义 =「有人可收」非「通道在场」——后端可选自报 hasAudience()（TUI 缺省恒真、webui 报在线连接数 > 0、无后端即假）",
       "sig": "7f85b49c5f025f58"
     },
     {
@@ -5015,6 +5694,7 @@
         "server",
         "standalone"
       ],
+      "desc": "自由文本输入（无交互通道返回 ''）",
       "sig": "b4a4fdb03afebf07"
     },
     {
@@ -5027,6 +5707,7 @@
         "server",
         "standalone"
       ],
+      "desc": "一次性通知：广播到全部在线通道",
       "sig": "5068ee8e470f5e25"
     },
     {
@@ -5039,6 +5720,7 @@
         "server",
         "standalone"
       ],
+      "desc": "单选（通道不支持 select 时降级为 input；无交互通道返回 ''；abort 同 ''）",
       "sig": "fca6b8718e21e64b"
     },
     {
@@ -5051,6 +5733,7 @@
         "server",
         "standalone"
       ],
+      "desc": "状态行更新：广播到全部在线通道",
       "sig": "2a6e375486636244"
     },
     {
@@ -5063,6 +5746,7 @@
         "server",
         "standalone"
       ],
+      "desc": "自定义渲染槽：恒降级 notify（刀 2 后端键删面——v1 全通道零 setWidget 实现，应用面保留统一降级语义；WidgetSpec 定稿时随 Disposer 形态重建后端键）",
       "sig": "00fc50cf52b4ee4f"
     },
     {

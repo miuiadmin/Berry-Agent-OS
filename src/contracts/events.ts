@@ -154,7 +154,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'app/activated',
     tier: 'stable',
     mode: 'emit',
-    note: '应用行激活成功（契约篇 §2.2 增补 1 生命周期组；载荷 { id, name, applyMs?, events?, gate? }——组合树行 id + 应用声明名 + apply 耗时打点 + 自定义事件词清单 + API 声明门裁决摘要（gate.status/gate.effectiveTarget 两键，API 治理 §6.13.4 刀 I——行无 apiGate 则键缺席）；加载器 boot 逐行必发）',
+    note: '应用行激活成功：载荷 { id, name, applyMs?, events?, gate? }——组合树行 id + 应用声明名 + apply 耗时打点 + 自定义事件词清单 + API 声明门裁决摘要（gate.status/gate.effectiveTarget 两键——行无 apiGate 则键缺席）；加载器 boot 逐行必发。（契约篇 §2.2 增补 1 生命周期组；API 治理 §6.13.4 刀 I）',
   },
   {
     name: 'app/failed',
@@ -227,7 +227,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'prompts_change',
     tier: 'stable',
     mode: 'emit',
-    note: 'systemPrompt 段集合变更通知（契约篇 §2.2 增补 5 pi-4(a)；载荷 = 现行段 id 清单 id 字典序；与 tools_change 同族——装配层订阅重建提示词 + header reason=change，观测/UI 应用订阅刷新）',
+    note: 'systemPrompt 段集合变更通知：载荷 = 现行段 id 清单 id 字典序；与 tools_change 同族——装配层订阅重建提示词 + header reason=change，观测/UI 应用订阅刷新。（契约篇 §2.2 增补 5 pi-4(a)）',
   },
   {
     name: 'skills_change',
@@ -251,7 +251,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'turn_stopping',
     tier: 'stable',
     mode: 'serial',
-    note: '模型 run 结算后逐个征询是否续跑（契约篇 §2.2 turn 层增补 7①，2026-08-27 P1-2 兑现：载荷 { sessionId, stopReason }；每次 runWithRetry 结算后、followUp 循环复查前派发，全部 stopReason 都发、dismantled 跳过；续跑 = handler 内经会话面 deliver 投递（running 走 steer 由循环消费——零新返回值）；消费点竞速挂起钟 5s）',
+    note: '模型 run 结算后逐个征询是否续跑：载荷 { sessionId, stopReason }；每次 runWithRetry 结算后、followUp 循环复查前派发，全部 stopReason 都发、dismantled 跳过；续跑 = handler 内经会话面 deliver 投递（running 走 steer 由循环消费——零新返回值）；消费点竞速挂起钟 5s。（契约篇 §2.2 turn 层增补 7①，2026-08-27 P1-2 兑现）',
   },
   {
     name: 'agent_pre_step',

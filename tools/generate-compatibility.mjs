@@ -14,13 +14,13 @@
  *   纪元行 + 归档族相邻两版纪元翻转行（eraOf 归一读取——键缺席 = pre-ignition）
  *   + 未发布纪元预告（面快照纪元 ≠ 最新归档纪元）。
  *
- * 守护：check-api 查 8 对本文件做生成物 drift 执法（≠ 生成器真值即红）；
- * `npm run build` 尾挂再生。CLI 形态：`--write` 落盘（缺省打印 stdout）；
- * env 缝与 check-api 同名同语义（CHECK_API_SNAPSHOT / CHECK_API_DEPRECATIONS——
- * 回归锁换片位，不动共享树真身）。
+ * 守护：API 治理门禁对本文件做生成物 drift 执法（再生物 ≠ 生成器真值即红，
+ * `npm run lint:topology` 内跑）；`npm run build` 尾挂再生。CLI 形态：`--write`
+ * 落盘（缺省打印 stdout）；env 缝与 check-api 同名同语义（CHECK_API_SNAPSHOT /
+ * CHECK_API_DEPRECATIONS——回归锁换片位，不动共享树真身）。
  *
- * 纯核心 renderCompatibility 导出供查 8 进程内复用（CLI 只是薄壳——两消费面
- * 同一渲染函数，drift 判定与人工再生天然同源）。
+ * 纯核心 renderCompatibility 导出供 drift 对照进程内复用（CLI 只是薄壳——两
+ * 消费面同一渲染函数，drift 判定与人工再生天然同源）。
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -35,7 +35,7 @@ export const SNAPSHOT_PATH =
   process.env.CHECK_API_SNAPSHOT !== undefined
     ? resolve(REPO_ROOT, process.env.CHECK_API_SNAPSHOT)
     : join(REPO_ROOT, 'src/contracts/api-surface.json');
-/** COMPATIBILITY.md 落盘位（仓库根——check-api 查 8 守护对象） */
+/** COMPATIBILITY.md 落盘位（仓库根——API 治理门禁的生成物 drift 守护对象） */
 export const COMPATIBILITY_PATH = join(REPO_ROOT, 'COMPATIBILITY.md');
 /** 归档快照族目录（release 子步 3.5 落档——无此目录 = 基线形成前） */
 const SNAPSHOTS_DIR = join(REPO_ROOT, 'api/snapshots');
@@ -158,8 +158,10 @@ export function classifyFaceDiff(prev, curr) {
     // sig 也剥出 rest 比（§6.13.4 刀 C 判据迁移律：**双侧在场才判差**——单向补挂
     // = 元数据迁移非签名变更；点火前归档快照无 sig 字段，逐符号重算哈希位宽或
     // 算法变不误报 changed，迁移窗随点火自然闭合）
-    const { tier: oldTier, deprecated: _oldDep, sig: _oldSig, ...oldRest } = old;
-    const { tier, deprecated: _dep, sig: _sig, ...rest } = entry;
+    // desc + kind 同剥（刀 L——文档增强载荷非面承诺：一句话语义改写/分组标签
+    // 补挂/清扫重写都不入判级，changed/MAJOR 零误报）
+    const { tier: oldTier, deprecated: _oldDep, sig: _oldSig, desc: _oldDesc, kind: _oldKind, ...oldRest } = old;
+    const { tier, deprecated: _dep, sig: _sig, desc: _desc, kind: _kind, ...rest } = entry;
     if (JSON.stringify(oldRest) !== JSON.stringify(rest)) changed.push(key);
     else if (oldTier !== tier) reTiered.push({ key, from: oldTier, to: tier });
     // 签名指纹判差（双侧在场）：rest 全等而 sig 变 = 同名改形——changed 桶的
@@ -212,7 +214,7 @@ export function renderCompatibility({ surface, deprecations, snapshots }) {
   lines.push('# API 兼容性档案（COMPATIBILITY）');
   lines.push('');
   lines.push(
-    '> 本文件由 `tools/generate-compatibility.mjs` 生成（`npm run build` 尾挂再生，check-api 查 8 drift 守护）——勿手编。',
+    '> 本文件由 `tools/generate-compatibility.mjs` 生成（`npm run build` 尾挂再生；生成物与面快照的漂移由 `npm run lint:topology` 内的 API 治理门禁逐字节守护）——勿手编。',
   );
   lines.push(
     '> 面真值 = `src/contracts/api-surface.json`；稳定性分级与兼容承诺的语义见 docs/应用开发指南.md「API 稳定性与兼容性」节（本文件 = 逐版兼容档案）。',
@@ -425,7 +427,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   const text = renderCompatibility({ surface, deprecations, snapshots: loadArchivedSnapshots() });
   if (process.argv.includes('--write')) {
     writeFileSync(COMPATIBILITY_PATH, text);
-    console.log(`COMPATIBILITY.md 已再生（${text.length} 字符——查 8 守护对象）`);
+    console.log(`COMPATIBILITY.md 已再生（${text.length} 字符——API 治理门禁 drift 守护对象）`);
   } else {
     process.stdout.write(text);
   }

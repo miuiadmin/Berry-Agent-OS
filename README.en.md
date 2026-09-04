@@ -187,13 +187,15 @@ Writing a Berry app takes a single `index.ts`: a default-exported `apply(ctx, co
 
 ## Documentation
 
-| Doc                                          | Contents                                             |
-| -------------------------------------------- | ---------------------------------------------------- |
-| [docs/架构总览.md](docs/架构总览.md)         | Ring model, module DAG, event system, assembly order |
-| [docs/使用指南.md](docs/使用指南.md)         | CLI / TUI commands, data directory, env vars, skills |
-| [docs/应用开发指南.md](docs/应用开发指南.md) | entry.ts shape, inject services, hooks, composition  |
-| [docs/开发指南.md](docs/开发指南.md)         | Four gates, test discipline, module boundaries       |
-| [docs/运维手册.md](docs/运维手册.md)         | Data layout, backup, reset, dual-open guards, triage |
+| Doc                                          | Contents                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------- |
+| [docs/架构总览.md](docs/架构总览.md)         | Ring model, module DAG, event system, assembly order                       |
+| [docs/使用指南.md](docs/使用指南.md)         | CLI / TUI commands, data directory, env vars, skills                       |
+| [docs/应用开发指南.md](docs/应用开发指南.md) | entry.ts shape, inject services, hooks, composition                        |
+| [docs/开发指南.md](docs/开发指南.md)         | Four gates, test discipline, module boundaries                             |
+| [docs/运维手册.md](docs/运维手册.md)         | Data layout, backup, reset, dual-open guards, triage                       |
+| [docs/API参考.md](docs/API参考.md)           | Full public API surface (per-symbol summary + stability tiers, generated)  |
+| [COMPATIBILITY.md](COMPATIBILITY.md)         | API compatibility record (face-change history and deprecations, generated) |
 
 > Documentation is currently authoritative in Chinese; English versions are planned alongside the 1.0 release.
 

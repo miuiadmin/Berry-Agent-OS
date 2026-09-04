@@ -186,13 +186,15 @@ Le chargement suit le **modèle de centre d'applications** : une application est
 
 ## Documentation
 
-| Document                                     | Contenu                                                          |
-| -------------------------------------------- | ---------------------------------------------------------------- |
-| [docs/架构总览.md](docs/架构总览.md)         | Modèle en anneaux, DAG de modules, événements, montage           |
-| [docs/使用指南.md](docs/使用指南.md)         | Commandes CLI/TUI, répertoire de données, variables, compétences |
-| [docs/应用开发指南.md](docs/应用开发指南.md) | Forme d'entry.ts, services inject, crochets, composition         |
-| [docs/开发指南.md](docs/开发指南.md)         | Quatre portes, discipline de test, frontières de modules         |
-| [docs/运维手册.md](docs/运维手册.md)         | Données, sauvegardes, remise à zéro, protections, diagnostic     |
+| Document                                     | Contenu                                                                             |
+| -------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [docs/架构总览.md](docs/架构总览.md)         | Modèle en anneaux, DAG de modules, événements, montage                              |
+| [docs/使用指南.md](docs/使用指南.md)         | Commandes CLI/TUI, répertoire de données, variables, compétences                    |
+| [docs/应用开发指南.md](docs/应用开发指南.md) | Forme d'entry.ts, services inject, crochets, composition                            |
+| [docs/开发指南.md](docs/开发指南.md)         | Quatre portes, discipline de test, frontières de modules                            |
+| [docs/运维手册.md](docs/运维手册.md)         | Données, sauvegardes, remise à zéro, protections, diagnostic                        |
+| [docs/API参考.md](docs/API参考.md)           | Surface API publique complète (sémantique par symbole + niveaux, générée)           |
+| [COMPATIBILITY.md](COMPATIBILITY.md)         | Registre de compatibilité API (historique des changements et dépréciations, généré) |
 
 > La documentation fait actuellement autorité en chinois ; les versions dans d'autres langues sont prévues avec la version 1.0.
 

@@ -114,9 +114,9 @@ export type ToolPipelineExecutor = (
 export type ToolCallOrigin = 'model' | 'service';
 
 /**
- * ctx.tools 服务面（契约篇 §1.5 服务行 + §1.2 注记④——类型单一来源住 contracts，
- * 2026-08-25 Hermes 探针 #11 落码；tools 模块实现之，第三方经
- * `ctx.get<ToolsService>('tools')` 取全类型）。
+ * ctx.tools 服务面：工具注册表（register/listFor 两层模型）——第三方经
+ * `ctx.get<ToolsService>('tools')` 取全类型（契约篇 §1.5 服务行 + §1.2 注记④：
+ * 类型单一来源住 contracts，tools 模块实现之；2026-08-25 Hermes 探针 #11 落码）。
  */
 export interface ToolsService {
   /**

@@ -14,7 +14,6 @@ import type { Logger } from './logger.js';
 export type Disposer = () => void;
 
 /** 事件处理器：参数由事件发布方约定；返回值仅 waterfall 采用 */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- 处理器参数形态由各事件定义方收口，M1 先宽收
 export type EventHandler = (...args: any[]) => any;
 
 /** ctx.on 选项 */

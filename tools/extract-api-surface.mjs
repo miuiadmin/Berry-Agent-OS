@@ -41,6 +41,22 @@
  * `@stable/@experimental/@deprecated` 标签（发现直导出而无标签 = 抽取期 fail-loud，
  * check-api 查 2 同律执法）。
  *
+ * desc/kind harvest（API 治理进化刀 L——§6.13.9「发现面信息密度」）：
+ * - desc = 逐符号一句话语义（可选字段）：berryagent 域 = 声明点 JSDoc 首句
+ *   （token 扫描器在扫 export 语句时顺路收割紧前 JSDoc 块——与 tier 标签同一
+ *   块双产物）；services 方法级/第六键成员 = 契约接口体成员紧前 JSDoc 首句
+ *   （成员切片机的 trivia 附产）；目录驱动域（services 目录项/清单键/data 键/
+ *   活体事件）= 注册表 note 字段首句——全部经 firstPublicSentence 滤词（知识域
+ *   指路剥除，判据与查 10 单源 KNOWLEDGE_DOMAIN_RE）后入快照：快照随包分发
+ *   （dist/api/），desc 必须公开锚卫生。
+ * - kind = 声明种类（'const'|'let'|'var'|'function'|'class'|'interface'|
+ *   'enum'|'type'——可选字段，仅 berryagent 非转发符号携带）：token 扫描器解析
+ *   export 语句时的声明关键字真源（规范 §6.13.9「或刀 C 声明块 kind 落地后按
+ *   真源分组」的兑现）；API 参考生成器按此分组（常量/类型/函数），不引入大小写
+ *   启发第二真相源。
+ * - desc/kind 是文档面载荷：classifyFaceDiff 剥除后再判面变（同 deprecated/sig
+ *   律——文档润色不是破坏性变更）。
+ *
  * 自检（fail-loud）：token 扫描集必须是 jiti 运行时 barrel 值导出集的超集——
  * 扫描器漏任何值导出立即炸（类型导出无运行时对照，靠扫描器纪律 + drift 闸双保险）。
  *
@@ -54,6 +70,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJiti } from 'jiti';
 import * as ts from 'typescript/unstable/ast';
+import { KNOWLEDGE_DOMAIN_RE } from './api-doc-sections.mjs';
 
 /** 仓库根（脚本位置上一级——check-topology/copy-app-assets 同款锚定） */
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -81,6 +98,8 @@ const imp = (rel) => jiti.import(fileURLToPath(new URL(rel, import.meta.url)));
  * - stars = 星出模块说明符清单（一文件可多条；internal 由调用方递归——公开根
  *   条目数随公开面演进，不锚定具体数字〔遗漏大扫 20260904 #18——硬编码计数
  *   必再漂〕）
+ * - namedSpecs = 具名转发**相对**说明符清单（刀 L）：声明位 docs/kinds 在目标
+ *   文件——调用方经此递归收割（docs-only，不并名防幻影面）；包说明符不入
  * - tags = 自由符号标级载体（§6.13.3 批 2 tier 载体分职）：本地声明形直导出
  *   名（export const/function/... 声明形、export { A } 无 from 花括清单形——含
  *   export type { A } 前置 type 形，第十一轮遗漏大扫 20260904-b A5/A7 补全）
@@ -88,6 +107,13 @@ const imp = (rel) => jiti.import(fileURLToPath(new URL(rel, import.meta.url)));
  *   或块内无标签词 → null；转译形（具名转发/命名空间转发）不入 Map——键集即
  *   「根本地直导出全集」，freeSymbolTier 的 undefined 分支因此 = 真转译形。
  *   check-api 查 2 自由符号半边与 freeSymbolTier 裁决消费
+ * - docs = 同一紧前 JSDoc 块的块文本载体（刀 L——desc harvest 输入；与 tags
+ *   同块双产物：tier 标签与首句语义一块两读）：本地声明形直导出名 → 块文本
+ *   或 null（无块）；不入快照本身，extractSurface 经 descFromJsdoc 投影为 desc
+ * - kinds = 声明关键字载体（刀 L——API 参考分组真源）：export const/function/
+ *   class/interface/enum/type/let/var X 声明形直导出名 → 关键字文本
+ *   （'const'|'function'|…）；花括清单形与 `export type { A }` 转发形不入
+ *   （名在别处声明，本文件不见声明形）
  */
 export function scanTopLevelExports(sourceText) {
   const scanner = ts.createScanner(99 /* ESNext */, /* skipTrivia */ true);
@@ -122,8 +148,14 @@ export function scanTopLevelExports(sourceText) {
   const names = new Map();
   /** 星出说明符清单（一文件可多条；internal 由调用方递归） */
   const stars = [];
+  /** 具名转发相对说明符清单（刀 L——调用方 docs-only 递归；去重不设：同文件多条具名转发重复访问幂等） */
+  const namedSpecs = [];
   /** 自由符号标级载体（仅声明形直导出——见函数头注 tags 语义） */
   const tags = new Map();
+  /** 紧前 JSDoc 块文本载体（刀 L——desc harvest 输入；键集与 tags 同） */
+  const docs = new Map();
+  /** 声明关键字载体（刀 L——API 参考分组真源；仅声明形直导出） */
+  const kinds = new Map();
   /** 模块级花括深度（模板栈空时才计——export 关键字只在深度 0 生效） */
   let depth = 0;
   let token = step();
@@ -156,6 +188,8 @@ export function scanTopLevelExports(sourceText) {
       const exported = [];
       let moduleSpec = null; // 非空 = reexport 形
       let star = false;
+      /** 本语句声明关键字（刀 L——kinds 载体；null = 非声明形/转发形） */
+      let pendingKind = null;
       let t = step();
       // export default 直接红（刀 D——一名一符号）：公开面命名导出纪律下 default
       // 形是发射面漂移信号；修前穿透修饰循环把它当普通前缀吃掉、默认名被当
@@ -232,11 +266,13 @@ export function scanTopLevelExports(sourceText) {
         // export 后首 token，type 后的 `{` 到不了那里，实况是整条漏收。此处
         // 显式分腿：type 后 `{` 形转花括清单体（同体解析），Identifier 形照旧
         const isTypeKw = t === ts.SyntaxKind.TypeKeyword;
+        const kwText = text(); // 声明关键字文本（刀 L——kinds 载体）
         t = step();
         if (isTypeKw && t === ts.SyntaxKind.OpenBraceToken) {
           parseBraceList();
         } else if (t === ts.SyntaxKind.Identifier) {
           exported.push(text());
+          pendingKind = kwText; // 声明形有名——kind 真源（type { A } 转发形不设）
         }
       }
       const forwarded = moduleSpec !== null && !moduleSpec.startsWith('.');
@@ -245,13 +281,25 @@ export function scanTopLevelExports(sourceText) {
       // 在语句尾收口（声明形恒无 from，行为不变）。修前该形收名不收标签：自由
       // 符号静默落键级 tier、@experimental 意图被丢弃（第十一轮遗漏大扫
       // 20260904-b A5）——rootTags 键集因此补全为「根本地直导出全集」，
-      // freeSymbolTier 的 undefined 分支即真转译形，查 2 与抽取侧双闸同闭
+      // freeSymbolTier 的 undefined 分支即真转译形，查 2 与抽取侧双闸同闭。
+      // 刀 L 同律：块文本入 docs（desc harvest）、声明关键字入 kinds（与 tags
+      // 一块两读三载体——一次块定位三产物）
       if (moduleSpec === null) {
-        const tier = jsdocTierBefore(sourceText, exportStart);
-        for (const n of exported) tags.set(n, tier);
+        const block = lastJsdocBlock(sourceText.slice(0, exportStart));
+        const m = block === null ? null : block.match(/@(stable|experimental|deprecated)\b/);
+        const tier = m === null ? null : m[1];
+        for (const n of exported) {
+          tags.set(n, tier);
+          docs.set(n, block); // null = 无紧前块（desc 省略形）
+          if (pendingKind !== null) kinds.set(n, pendingKind);
+        }
       }
       for (const n of exported) names.set(n, { forwarded });
       if (star && moduleSpec !== null) stars.push(moduleSpec);
+      // 具名转发的相对目标（刀 L）：记入 namedSpecs 供闭包 docs-only 递归——
+      // 声明位 JSDoc/关键字在目标文件，不递归则 desc/kind 断链（根桶对 api.ts
+      // 具名转发形实证）；包说明符目标不递归（上游面，forwarded 条目已足）
+      else if (!star && moduleSpec !== null && moduleSpec.startsWith('.')) namedSpecs.push(moduleSpec);
     }
     token = step();
   }
@@ -260,13 +308,13 @@ export function scanTopLevelExports(sourceText) {
   if (depth !== 0) {
     throw new Error(`scanTopLevelExports：EOF 花括深度 ${depth} ≠ 0——词法失步 fail-loud（正则/模板协议漂移？）`);
   }
-  return { names, stars, tags };
+  return { names, stars, namedSpecs, tags, docs, kinds };
 }
 
 /**
- * 取紧前 JSDoc 块的标级标签（自由符号标级载体提取——§6.13.3 批 2）。
- * 「紧前」判据：export 关键字之前、与其只隔空白的最后一个块注释；块形必须是
- * JSDoc（双星开器）——单星普通注释形不认。
+ * 取前缀文本的最后一个 JSDoc 块（刀 L——desc harvest 的块定位单源）。
+ * 「紧前」判据：前缀文本以注释闭器收口（闭器与锚点之间只允许空白——调用方以
+ * slice(0, 锚点) 保证）；块形必须是 JSDoc（双星开器）——单星普通注释形不认。
  * 开器定位（第十一轮遗漏大扫 20260904-b A6 修死）：块注释词法上不可嵌套——
  * 真开器与 close 之间不可能存在别的 `*/ `，但体内可含任意 `; /*` 文本（glob 示例
  * `src/*.ts` 等）；修前无界 `lastIndexOf('/*')` 会把开器错定位到体内最后一个
@@ -276,31 +324,108 @@ export function scanTopLevelExports(sourceText) {
  * 首闭器是该 JSDoc 自己的 close 而非目标 close）；紧随的单星普通注释截断
  * 前置 JSDoc 的既有行为由两判据同守（普通注释非双星被跳过 + 其前方
  * JSDoc 的首闭器不指向目标 close）。
- * @param {string} sourceText 源文件全文
- * @param {number} exportStart export 关键字的源内起点（scanTopLevelExports 内锚）
- * @returns {'stable'|'experimental'|'deprecated'|null} 标签词；无紧前 JSDoc 块或块内无标签词 → null
+ * @param {string} prefixText 锚点之前的前缀文本（纯 trivia 区或源文切片）
+ * @returns {string|null} 完整 JSDoc 块文本（含 `/**` 与 `*\/`）；无紧前 JSDoc 块 → null
  */
-function jsdocTierBefore(sourceText, exportStart) {
-  const before = sourceText.slice(0, exportStart);
-  const close = before.lastIndexOf('*/');
+export function lastJsdocBlock(prefixText) {
+  const close = prefixText.lastIndexOf('*/');
   if (close === -1) return null; // 前文无注释块
-  // 紧前性：注释闭器与 export 之间只允许空白——夹有实码即非本声明的文档块
-  if (before.slice(close + 2).trim() !== '') return null;
+  // 紧前性：注释闭器与锚点之间只允许空白——夹有实码即非本声明的文档块
+  if (prefixText.slice(close + 2).trim() !== '') return null;
   // 开器候选向前迭代（词法正确形——见函数头注）：全部候选失败 = 无紧前 JSDoc
   let open = -1;
   for (let from = close - 1; from >= 0;) {
-    const cand = before.lastIndexOf('/*', from);
+    const cand = prefixText.lastIndexOf('/*', from);
     if (cand === -1) break;
-    if (before.startsWith('/**', cand) && before.indexOf('*/', cand + 2) === close) {
+    if (prefixText.startsWith('/**', cand) && prefixText.indexOf('*/', cand + 2) === close) {
       open = cand;
       break;
     }
     from = cand - 1;
   }
   if (open === -1) return null;
-  const block = before.slice(open, close + 2);
-  const m = block.match(/@(stable|experimental|deprecated)\b/);
-  return m === null ? null : m[1];
+  return prefixText.slice(open, close + 2);
+}
+
+/**
+ * 段内知识域剥除（刀 L——desc 公开卫生的第一道）：剥除匹配知识域正则的
+ * 括注组（全/半角，不嵌套）与破折号尾注（自某处 `——` 至句末的尾段命中即截断
+ * 在该 `——` 处——取**最早**命中的 `——`，保最长短语）。常见形：`……（契约篇
+ * §2.2；信封规则……）` 与 `……——契约篇 §6.13.3 逐符号载体`——语义主体保留、
+ * 指路尾注剥除。括注组内含句号 `。` 的形态由调用方先切句兜底（本函数在整段上
+ * 先剥后切：含 `。` 的括组会被句切打断——残余半组不匹配完整括形则原样保留，
+ * 终判仍由句级滤除把关）。
+ * @param {string} text 待剥除的正文段
+ * @returns {string} 剥除后的文本（可能为空串）
+ */
+function stripKnowledgeRefs(text) {
+  let out = text;
+  // 括注组剥除：全角 （…） 与半角 (…)——非嵌套（首遇闭括即收组）；组内命中知识域即整组剥除
+  out = out.replace(/[（(][^（()）]*[)）]/g, (grp) => (KNOWLEDGE_DOMAIN_RE.test(grp) ? '' : grp));
+  // 破折号尾注剥除：自最早一个「其后尾段命中知识域」的 `——` 处截断
+  let dash = out.indexOf('——');
+  while (dash !== -1) {
+    if (KNOWLEDGE_DOMAIN_RE.test(out.slice(dash))) {
+      out = out.slice(0, dash);
+      break;
+    }
+    dash = out.indexOf('——', dash + 1);
+  }
+  return out;
+}
+
+/**
+ * 取正文的首个公开安全句（刀 L——§6.13.9 desc harvest 的滤词出口，导出供
+ * 回归锁直锁）。三道滤：
+ * ① 段内剥除：知识域括注组 + 破折号尾注（stripKnowledgeRefs——语义主体保留）；
+ * ② 句级滤除：按 `。` 切句（保留句号），剥后仍命中知识域的整句丢弃（首句
+ *    本身就是指路句的形态——规范拍板「产码 JSDoc 首句自含知识域指路者同笔
+ *    清扫」，清扫前的机器兜底 = 退取次句，不产红也不放行脏句）；
+ * ③ 空句丢弃。首个幸存句即 desc——切句剥界定符（desc 不带句号；渲染层
+ *    renderEntry 统一补 `。`——快照与文档两态不双写标点）；全灭 → undefined
+ *    （调用方省略字段）。
+ * @param {string} text 正文文本（note 字段值或 JSDoc 体——标记由 descFromJsdoc 先剥）
+ * @returns {string|undefined} 首个公开安全句（不带句号）；无 → undefined
+ */
+export function firstPublicSentence(text) {
+  // 塌空白 + CJK 行接空格归一：JSDoc/note 源文行折经 join(' ') 会在汉字间产
+  // 假空格（「色名： schema」形）——中文书写不用空格，两侧皆 CJK 字符/全角
+  // 标点的空格是行折伪影，剥之（拉丁文两侧空格不受影响）
+  const cleaned = stripKnowledgeRefs(
+    text
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/([一-鿿　-〿＀-￯]) (?=[一-鿿　-〿＀-￯])/g, '$1'),
+  );
+  if (cleaned === '') return undefined;
+  // 切句：按 。分段（lookahead 形——界定符随段首走）；段首界定符剥除（退取
+  // 次句形不携前句残 。——「。实际语义」非句；无句号的整体短语 = 单句候选）
+  const parts = cleaned.split(/(?=。)/);
+  for (const part of parts) {
+    const sentence = part.trim().replace(/^。+/, '');
+    if (sentence === '') continue;
+    if (KNOWLEDGE_DOMAIN_RE.test(sentence)) continue; // 指路句整句丢弃
+    return sentence;
+  }
+  return undefined;
+}
+
+/**
+ * JSDoc 块 → desc（刀 L）：剥块标记与行首星、丢 @ 标签行后取首个公开安全句。
+ * @param {string} block 完整 JSDoc 块文本（lastJsdocBlock 产物形）
+ * @returns {string|undefined} 一句话语义；块无正文或全被滤除 → undefined
+ */
+export function descFromJsdoc(block) {
+  // 无紧前 JSDoc 块是常态位（声明可裸）——null 直通 undefined（desc 省略形）
+  if (block === null) return undefined;
+  const body = block
+    .slice(3, -2) // 剥 /** 开器与 */ 闭器（lastJsdocBlock 产物恒此形）
+    .split('\n')
+    /** 行首星与空白剥除后，@ 标签行整行丢弃（标签是 tier 载体不是语义） */
+    .map((line) => line.replace(/^\s*\*!? ?/, ''))
+    .filter((line) => !line.trimStart().startsWith('@'))
+    .join(' ');
+  return firstPublicSentence(body);
 }
 
 /** 字符串字面量去引号（token 文本含成对引号） */
@@ -311,41 +436,75 @@ function stripQuotes(s) {
 /**
  * 公开根传递闭包：从 index.ts 出发递归解星出/具名转发，收集全部导出符号。
  * internal（相对说明符）递归进目标文件再扫；包说明符（typebox 族）标 forwarded。
- * @returns {{ symbols: { name: string, forwarded: boolean }[], rootTags: Map<string, string|null> }}
- *   symbols 含直导出与转发（值与类型同收）；rootTags = 公开根本地声明形直导出的
- *   JSDoc 标级载体（仅根文件采集——递归内部文件的直导出走键级，不适用标签载体）
+ * @returns {{
+ *   symbols: { name: string, forwarded: boolean }[],
+ *   rootTags: Map<string, string|null>,
+ *   docs: Map<string, string|null>,
+ *   kinds: Map<string, string>,
+ * }} symbols 含直导出与转发（值与类型同收）；rootTags = 公开根本地声明形
+ *   直导出的 JSDoc 标级载体（仅根文件采集——递归内部文件的直导出走键级，不适用
+ *   标签载体）；docs/kinds = 闭包全域合并的块文本/声明关键字载体（刀 L——desc
+ *   与 kind 从**声明点**收割：符号的 JSDoc 与声明形住在叶子文件，与根的转译
+ *   形态无关；跨文件同名即 TS 编译保证下的单义键，后访覆盖无实义）
  */
 function collectBarrelSymbols() {
   /** name → forwarded */
   const out = new Map();
   /** 公开根声明形直导出的标级载体（tier 载体分职——§6.13.3 批 2） */
   const rootTags = new Map();
+  /** 闭包全域块文本载体（刀 L——叶子声明点收割，desc harvest 输入） */
+  const docs = new Map();
+  /** 闭包全域声明关键字载体（刀 L——API 参考分组真源） */
+  const kinds = new Map();
   /** 递归防护（环 = 结构错误，fail-loud） */
   const visiting = new Set();
-  const visit = (absPath, isRoot) => {
+  // absorbNames=false = docs-only 访问（刀 L 具名转发目标）：目标文件的导出名
+  // 不并入公开面（具名转发只面出点名的符号——目标其余导出是 internal 桶，
+  // 并名即幻影面物化），但 docs/kinds 全域合并照常（声明位载体不受访问性质
+  // 影响）。docs-only 子树全程 docs-only（目标再星出/再具名转发均不并名——
+  // 真声明位若在更深处会漏 desc，可接受形：desc 是可选增强非承诺面）。
+  const visit = (absPath, isRoot, absorbNames) => {
     if (visiting.has(absPath)) throw new Error(`contracts 再导出成环：${absPath}`);
     visiting.add(absPath);
     const src = readFileSync(absPath, 'utf8');
-    const { names, stars, tags } = scanTopLevelExports(src);
-    for (const [name, info] of names) {
-      out.set(name, { name, forwarded: info.forwarded === true });
+    const { names, stars, namedSpecs, tags, docs: fileDocs, kinds: fileKinds } = scanTopLevelExports(src);
+    if (absorbNames) {
+      for (const [name, info] of names) {
+        out.set(name, { name, forwarded: info.forwarded === true });
+      }
     }
     if (isRoot) {
       for (const [name, tier] of tags) rootTags.set(name, tier);
     }
+    // docs/kinds 全域合并（刀 L）：声明形直导出的载体在声明文件即终值——星出
+    // 链上每文件只对本文件声明形记账，闭包合并后每名恰一条（TS 导出名唯一）。
+    // docs-only 访问也合并（收割不受 absorbNames 语义影响）。null 不覆写既有
+    // 非空块：`export type { A }` 花括转发形（无 from）按 A5 律计本地直导出、
+    // 其紧前块常为 null——后访文件若以 null 覆写声明文件真块即断 desc 链
+    // （TextContent/ImageContent 实证：tools.ts 转发形覆写 llm.ts 声明位）
+    for (const [name, block] of fileDocs) {
+      if (block !== null || !docs.has(name)) docs.set(name, block);
+    }
+    for (const [name, kind] of fileKinds) kinds.set(name, kind);
     for (const spec of stars) {
       if (!spec.startsWith('.')) continue;
       // internal 星出：递归目标文件（'./x.js' → 同目录 x.ts；目录 → index.ts）
-      visit(resolveTsPath(dirname(absPath), spec), false);
+      visit(resolveTsPath(dirname(absPath), spec), false, absorbNames);
+    }
+    // 具名转发相对目标：docs-only 递归（刀 L——声明位收割；不并名见函数头注）
+    for (const spec of namedSpecs) {
+      visit(resolveTsPath(dirname(absPath), spec), false, false);
     }
     // 包说明符星出（export * from 'pkg'）：转发记号由具名转发条目承载，星出整体
     // 展开上游面超出豁免面（M4 不展开）——contracts 现役 typebox 走具名转发
     visiting.delete(absPath);
   };
-  visit(BARREL_PATH, true);
+  visit(BARREL_PATH, true, true);
   return {
     symbols: [...out.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
     rootTags,
+    docs,
+    kinds,
   };
 }
 
@@ -471,12 +630,20 @@ function createTemplateSafeScanner(sourceText) {
     }
     return t;
   };
+  /**
+   * 最近一步 step 所产 token 的**前导 trivia 文本**（刀 L——成员 JSDoc 收割
+   * 位）：fullStart→start 切片 = 纯空白与注释区。skipTrivia 扫描下注释不进
+   * token 流，本访问器是「成员紧前 JSDoc」的唯一可得面（与 lastJsdocBlock
+   * 组合 = 成员 desc 收割）。
+   */
+  const triviaBefore = () => sourceText.slice(scanner.getTokenFullStart(), scanner.getTokenStart());
   // start()：当前 token 源内起点（skipTrivia 下不含前导空白/注释——定位锚）
   return {
     step,
     text: () => scanner.getTokenText(),
     inTemplate: () => templateStack.length > 0,
     start: () => scanner.getTokenStart(),
+    triviaBefore,
   };
 }
 
@@ -616,36 +783,40 @@ export function buildInterfaceIndex(rootDir) {
 }
 
 /**
- * 接口体成员切片机（刀 B 成员枚举 + 刀 C 签名指纹的单机底座）。
- * 词法走查接口体文本，产出 成员名 → 该成员的**规范文本**（名 token 起〔含
- * `readonly` 修饰符〕至深度 0 终结符止的全部 token 文本单空格联接——剥注释/
- * 塌空白，签名指纹哈希前形态）。方法与属性同收（属性成员〔ApprovalService.
- * policyMode 形〕也是面承诺）。词法规则（接口体是纯类型位——无正则字面量，
- * 花括失步面天然收窄）：
- * - 注释/字符串由 scanner（skipTrivia + 字符串单 token）天然跳过——JSDoc 内
- *   花括与字符串内 `;` 不误判（多行 JSDoc 含 `{@link …}` 实证安全）；
- * - 模板字面量类型走 step 内 templateStack 协议（插值内花括不渗深度计）；
- * - 深度计 {}[]() 合计（`<>` 不计——类型位 `<...>` 内不可能裸 `;`：泛型实参
- *   内的 `;` 必居对象字面量型 `{}` 内部，`Parameters<X['k']>[0]` 形方括自平衡）；
- * - 深度 0 的 `;` = 成员终结（prettier 分号纪律保证成员恒 `;` 收尾；终结符
- *   不入规范文本）；
- * - 成员名 = 成员起点后首个标识符——**上下文关键字同收**（`get`/`set`/`type`
- *   等作成员名是合法 TS：JobsServiceFace.get 实证——isKeywordKind 判据收编，
- *   `readonly` 修饰符与 `new` 构造签名头除外〔修饰/签名关键字非名，但 readonly
- *   入规范文本——只读性是面承诺〕）；`'引号名'` 字符串头成员收去引号文本；
- *   起点是 `[`（索引签名）/`(`（调用签名）/`<`（泛型调用签名）/`new`（构造
- *   签名）的无名成员——跳过至终结符不计（幻影防线：索引签名值部的类型名不得
- *   被误收为成员；`readonly` 前导的索引签名同形跳过）；
- * - **重载同名录收**（方法重载签名组是同一 API 符号——AppsService.uninstall
- *   双相重载实证：inspect 相 + execute 相两签名一符号）——规范文本以单空格
- *   拼接（任一签名变即指纹变）。
+ * 接口体成员切片机·详细形态（刀 B 成员枚举 + 刀 C 签名指纹的单机底座；刀 L
+ * 附产成员 doc）。词法走查接口体文本，产出 成员名 → { canonical, doc }：
+ * - canonical = 该成员的**规范文本**（名 token 起〔含 `readonly` 修饰符〕至
+ *   深度 0 终结符止的全部 token 文本单空格联接——剥注释/塌空白，签名指纹哈希
+ *   前形态）。方法与属性同收（属性成员〔ApprovalService.policyMode 形〕也是
+ *   面承诺）。词法规则（接口体是纯类型位——无正则字面量，花括失步面天然收窄）：
+ *   - 注释/字符串由 scanner（skipTrivia + 字符串单 token）天然跳过——JSDoc 内
+ *     花括与字符串内 `;` 不误判（多行 JSDoc 含 `{@link …}` 实证安全）；
+ *   - 模板字面量类型走 step 内 templateStack 协议（插值内花括不渗深度计）；
+ *   - 深度计 {}[]() 合计（`<>` 不计——类型位 `<...>` 内不可能裸 `;`：泛型实参
+ *     内的 `;` 必居对象字面量型 `{}` 内部，`Parameters<X['k']>[0]` 形方括自平衡）；
+ *   - 深度 0 的 `;` = 成员终结（prettier 分号纪律保证成员恒 `;` 收尾；终结符
+ *     不入规范文本）；
+ *   - 成员名 = 成员起点后首个标识符——**上下文关键字同收**（`get`/`set`/`type`
+ *     等作成员名是合法 TS：JobsServiceFace.get 实证——isKeywordKind 判据收编，
+ *     `readonly` 修饰符与 `new` 构造签名头除外〔修饰/签名关键字非名，但 readonly
+ *     入规范文本——只读性是面承诺〕）；`'引号名'` 字符串头成员收去引号文本；
+ *     起点是 `[`（索引签名）/`(`（调用签名）/`<`（泛型调用签名）/`new`（构造
+ *     签名）的无名成员——跳过至终结符不计（幻影防线：索引签名值部的类型名不得
+ *     被误收为成员；`readonly` 前导的索引签名同形跳过）；
+ *   - **重载同名录收**（方法重载签名组是同一 API 符号——AppsService.uninstall
+ *     双相重载实证：inspect 相 + execute 相两签名一符号）——规范文本以单空格
+ *     拼接（任一签名变即指纹变）；doc 取首现签名的紧前 JSDoc（文档写在组首是
+ *     JSDoc 惯例）。
+ * - doc = 成员起 token 的**前导 trivia 内紧前 JSDoc 块**（刀 L——成员 desc
+ *   harvest 输入；triviaBefore + lastJsdocBlock 组合。无名成员跳过态不收割）。
+ *   null = 无紧前块（desc 省略形）。
  * 深度负向即 throw（词法失步 fail-loud——接口体花括必然平衡）。
  * @param {string} bodyText 接口体文本（`export interface X {` 与配对 `}` 之间）
- * @returns {Map<string, string>} 成员名 → 规范文本（声明序，重载拼接后）
+ * @returns {Map<string, { canonical: string, doc: string|null }>} 成员名 → 切片（声明序，重载拼接后）
  */
-export function sliceInterfaceMembers(bodyText) {
-  const { step, text, inTemplate } = createTemplateSafeScanner(bodyText);
-  /** 成员名 → 规范文本（声明序；重载同名单空格拼接） */
+export function sliceInterfaceMembersDetailed(bodyText) {
+  const { step, text, inTemplate, triviaBefore } = createTemplateSafeScanner(bodyText);
+  /** 成员名 → 详细切片（声明序；重载同名单空格拼接、doc 首现保留） */
   const members = new Map();
   /** {}[]() 合计深度（`<>` 不计——见头注） */
   let depth = 0;
@@ -653,6 +824,8 @@ export function sliceInterfaceMembers(bodyText) {
   let name = null;
   /** 当前成员规范文本 token 段（null = 成员未起段——成员起点或 readonly 起段） */
   let parts = null;
+  /** 当前成员紧前 JSDoc 块（刀 L——成员起点 token 的前导 trivia 收割） */
+  let pendingDoc = null;
   /** 无名成员跳过旗（索引签名/调用签名/泛型调用签名/构造签名——含 readonly 前导形） */
   let skipping = false;
   let token = step();
@@ -668,13 +841,17 @@ export function sliceInterfaceMembers(bodyText) {
           // 构造签名关键字（readonly/new）除外：它们非名，名在后续 token
           (ts.isKeywordKind(token) && token !== ts.SyntaxKind.ReadonlyKeyword && token !== ts.SyntaxKind.NewKeyword);
         if (token === ts.SyntaxKind.ReadonlyKeyword) {
-          // 修饰符起段：规范文本含 readonly（只读性入指纹），名仍待收
+          // 修饰符起段：规范文本含 readonly（只读性入指纹），名仍待收；
+          // JSDoc 在 readonly 之前——doc 在此收割（成员第一 token 的前导 trivia）
+          pendingDoc = lastJsdocBlock(triviaBefore());
           parts = [];
         } else if (isNameToken) {
           name = text();
+          pendingDoc = lastJsdocBlock(triviaBefore());
           parts = [];
         } else if (token === ts.SyntaxKind.StringLiteral) {
           name = stripQuotes(text());
+          pendingDoc = lastJsdocBlock(triviaBefore());
           parts = [];
         } else if (
           token === ts.SyntaxKind.OpenBracketToken ||
@@ -720,12 +897,19 @@ export function sliceInterfaceMembers(bodyText) {
       }
       if (depth === 0 && token === ts.SyntaxKind.SemicolonToken) {
         if (name !== null && parts !== null) {
-          // 重载签名组一符号：同名规范文本单空格拼接（首现序）
+          // 重载签名组一符号：同名规范文本单空格拼接（首现序）、doc 首现保留
           const canonical = parts.join(' ');
-          members.set(name, members.has(name) ? `${members.get(name)} ${canonical}` : canonical);
+          const prev = members.get(name);
+          members.set(
+            name,
+            prev === undefined
+              ? { canonical, doc: pendingDoc }
+              : { canonical: `${prev.canonical} ${canonical}`, doc: prev.doc },
+          );
         }
         name = null;
         parts = null;
+        pendingDoc = null;
         skipping = false;
       } else if (parts !== null) {
         // 本 token 入规范文本段（名/readonly token 经此统一收——起段迭代不双收）
@@ -737,9 +921,26 @@ export function sliceInterfaceMembers(bodyText) {
   // 尾成员宽容收口：prettier 保证 `;`，缺号（手工格式）不丢成员
   if (name !== null && parts !== null) {
     const canonical = parts.join(' ');
-    members.set(name, members.has(name) ? `${members.get(name)} ${canonical}` : canonical);
+    const prev = members.get(name);
+    members.set(
+      name,
+      prev === undefined
+        ? { canonical, doc: pendingDoc }
+        : { canonical: `${prev.canonical} ${canonical}`, doc: prev.doc },
+    );
   }
   return members;
+}
+
+/**
+ * 接口体成员切片机（canonical 投影——刀 B/刀 C 既有消费面的稳定签名）。
+ * `sliceInterfaceMembersDetailed` 的薄投影：Map 键序即声明序（首现序），重载
+ * 去重语义同承（单机两产物——名表与规范文本不双写词法）。
+ * @param {string} bodyText 接口体文本（`export interface X {` 与配对 `}` 之间）
+ * @returns {Map<string, string>} 成员名 → 规范文本（声明序，重载去重后）
+ */
+export function sliceInterfaceMembers(bodyText) {
+  return new Map([...sliceInterfaceMembersDetailed(bodyText)].map(([name, v]) => [name, v.canonical]));
 }
 
 /**
@@ -1185,7 +1386,9 @@ export async function extractSurface() {
   const ff = (list) => [...list].sort();
 
   // —— #1a：berryagent 键（token 扫描 + jiti 值面自检）——
-  const { symbols: barrelSymbols, rootTags } = collectBarrelSymbols();
+  // docs/kinds（刀 L）：闭包收割的声明位 JSDoc 块与声明关键字（collectBarrelSymbols
+  // 桶扫闭包内联传递——叶子声明位是 desc 真源，与根转发形无关）
+  const { symbols: barrelSymbols, rootTags, docs, kinds } = collectBarrelSymbols();
   // —— 分桶不变式（§6.13.4 刀 A）：api.ts 顶层导出（扫描器——值与类型同收）×
   // 公开根面闭包 × internal 白名单三向执法——新顶层导出未分类 / internal 漏桶 /
   // 白名单死名皆 fail-loud（经查 1 面 = 分桶漂移永不静默过闸）
@@ -1202,16 +1405,25 @@ export async function extractSurface() {
     throw new Error(`token 扫描器漏值导出（自检红——扫描器与运行时面漂移，修扫描器）：${missed.join(', ')}`);
   }
   const berryKey = keyEntry('berryagent');
-  const exports = barrelSymbols.map((s) => ({
-    symbol: s.name,
-    module: 'berryagent',
-    // 自由符号标级裁决（遗漏大扫 20260904 #4/#5）：声明形直导出走 JSDoc 标签、
-    // 转译形维持键级；标签缺席 fail-loud（查 2 先红、此处兜底）
-    tier: freeSymbolTier(rootTags, s, berryKey),
-    since: berryKey.since,
-    formFactors: ff(berryKey.formFactors),
-    ...(s.forwarded ? { forwarded: true } : {}),
-  }));
+  const exports = barrelSymbols.map((s) => {
+    // 刀 L——desc/kind 仅本仓声明位符号挂：转发条目（typebox 族转发）无本仓
+    // 声明位，不挂（渲染面归转发尾组）；export type { A } 花括转发形同理无
+    // 声明关键字。两字段条件在场（可选载荷——缺席不产键，快照字节形状稳定）
+    const desc = s.forwarded ? undefined : descFromJsdoc(docs.get(s.name) ?? null);
+    const kind = s.forwarded ? undefined : kinds.get(s.name);
+    return {
+      symbol: s.name,
+      module: 'berryagent',
+      // 自由符号标级裁决（遗漏大扫 20260904 #4/#5）：声明形直导出走 JSDoc 标签、
+      // 转译形维持键级；标签缺席 fail-loud（查 2 先红、此处兜底）
+      tier: freeSymbolTier(rootTags, s, berryKey),
+      since: berryKey.since,
+      formFactors: ff(berryKey.formFactors),
+      ...(desc !== undefined ? { desc } : {}),
+      ...(kind !== undefined ? { kind } : {}),
+      ...(s.forwarded ? { forwarded: true } : {}),
+    };
+  });
 
   // —— #1b：typebox 三键（转发条目——M4 豁免面，不展开上游导出）——
   // 四符号 Type/Static/TSchema/Value 由规范点名；typebox/compile 记 Compile/Code 两符号
@@ -1307,17 +1519,20 @@ export async function extractSurface() {
     return hits[0];
   };
   for (const entry of SERVICE_CATALOG) {
-    // 契约接口切片（刀 B 名表 + 刀 C 成员规范文本——单机两产物）
+    // 契约接口切片（刀 B 名表 + 刀 C 成员规范文本 + 刀 L 成员 doc——单机三产物）
     const face = lookupFace(entry);
-    const memberSlices = sliceInterfaceMembers(face.body);
+    const memberSlices = sliceInterfaceMembersDetailed(face.body);
     // 服务名符号（目录级——DEP 可整体废弃；since 承袭快照）。sig = 契约接口体
-    // 整体规范文本哈希（刀 C）——接口形状任何变化〔成员增删/成员改形〕皆指纹变
+    // 整体规范文本哈希（刀 C）——接口形状任何变化〔成员增删/成员改形〕皆指纹变。
+    // desc = 目录项 note 首句（刀 L——目录 note 是服务级语义单源，滤知识域引）
+    const entryDesc = firstPublicSentence(entry.note);
     exports.push({
       symbol: entry.name,
       module: 'services',
       tier: entry.tier,
       since: prevSince.get(entry.name) ?? pkg.apiVersion,
       formFactors: ff(ALL_FF),
+      ...(entryDesc !== undefined ? { desc: entryDesc } : {}),
       sig: sigHash(canonicalize(face.body)),
     });
     // 方法级符号（§6.13.4 刀 B）：枚举契约接口成员，`服务名.成员名` 一符号——
@@ -1325,16 +1540,19 @@ export async function extractSurface() {
     // 当前 apiVersion——冷读 CR3：恒承袭使新增成员盖服务诞生版之戳，DEP 窗口
     // 算术坐标失锚）。成员面 = 契约接口声明面（provide 对象 satisfies 本型，
     // 面漂移编译期即红）——方法增删自此对 diff/判级/查 9/COMPATIBILITY 全链可见。
-    // sig = 成员规范文本哈希（刀 C）——重载组任一签名改形即指纹变
-    for (const [member, memberCanonical] of memberSlices) {
+    // sig = 成员规范文本哈希（刀 C）——重载组任一签名改形即指纹变。
+    // desc = 成员紧前 JSDoc 首句（刀 L——重载组 doc 首现签名保留）
+    for (const [member, slice] of memberSlices) {
       const symbol = `${entry.name}.${member}`;
+      const memberDesc = descFromJsdoc(slice.doc);
       exports.push({
         symbol,
         module: 'services',
         tier: entry.tier,
         since: prevSince.get(symbol) ?? pkg.apiVersion,
         formFactors: ff(ALL_FF),
-        sig: sigHash(memberCanonical),
+        ...(memberDesc !== undefined ? { desc: memberDesc } : {}),
+        sig: sigHash(slice.canonical),
       });
     }
   }
@@ -1359,7 +1577,7 @@ export async function extractSurface() {
     }
     return sliceInterfaceMembers(extractObjectLiteralBody(block));
   })();
-  /** 第六键 sig 素材：AppSqliteFace 接口体逐键成员切片（顶层 interface——直接成员切片） */
+  /** 第六键 sig/desc 素材：AppSqliteFace 接口体逐键成员详细切片（刀 L——dist .d.ts 保 JSDoc，成员 doc 同源可收） */
   const sqliteSigs = (() => {
     const dts = readFileSync(join(REPO_ROOT, 'dist/persist/app-sqlite.d.ts'), 'utf8');
     const body = findExportedInterfaces(dts).get('AppSqliteFace');
@@ -1368,7 +1586,7 @@ export async function extractSurface() {
         'dist/persist/app-sqlite.d.ts 无 AppSqliteFace 顶层导出接口——发射面漂移（tsconfig.api.json include 漂移？）',
       );
     }
-    return sliceInterfaceMembers(body);
+    return sliceInterfaceMembersDetailed(body);
   })();
   for (const e of exports) {
     if (e.module === 'services') continue; // 已在 #2 循环内联挂
@@ -1396,11 +1614,14 @@ export async function extractSurface() {
       }
       e.sig = sigHash(canonical);
     } else if (e.module === 'berryagent/sqlite') {
-      const canonical = sqliteSigs.get(e.symbol);
-      if (canonical === undefined) {
+      const slice = sqliteSigs.get(e.symbol);
+      if (slice === undefined) {
         throw new Error(`berryagent/sqlite 键 ${e.symbol} 在 AppSqliteFace 成员切片缺席——发射面漂移（§6.13.4 刀 C）`);
       }
-      e.sig = sigHash(canonical);
+      // desc 先于 sig 落键（插入序稳定——快照字节形状确定性）
+      const sqliteDesc = descFromJsdoc(slice.doc);
+      if (sqliteDesc !== undefined) e.desc = sqliteDesc;
+      e.sig = sigHash(slice.canonical);
     }
     // data-keys / live-events / manifest / session-events 四词表域不挂 sig（段首注）
   }
@@ -1410,12 +1631,15 @@ export async function extractSurface() {
   const obsEventsMod = await imp('../src/obs/events.ts');
   const liveDefs = [...eventsMod.LIVE_EVENT_CATALOG, ...(obsEventsMod.OBS_EVENTS ?? [])];
   for (const def of liveDefs) {
+    // desc = 目录 note 首句（刀 L——滤知识域引；无公开句存活则省略）
+    const desc = firstPublicSentence(def.note);
     exports.push({
       symbol: def.name,
       module: 'live-events',
       tier: def.tier,
       since: '1.0',
       formFactors: ff(ALL_FF),
+      ...(desc !== undefined ? { desc } : {}),
     });
   }
 
@@ -1442,23 +1666,29 @@ export async function extractSurface() {
   // —— #5：应用清单键目录 ——
   const appMod = await imp('../src/contracts/app.ts');
   for (const entry of appMod.MANIFEST_API_KEYS) {
+    // desc = 目录 note 首句（刀 L）
+    const desc = firstPublicSentence(entry.note);
     exports.push({
       symbol: entry.key,
       module: 'manifest',
       tier: entry.tier,
       since: '1.0',
       formFactors: ff(ALL_FF),
+      ...(desc !== undefined ? { desc } : {}),
     });
   }
 
   // —— #6：data.json 词表 ——
   for (const entry of DATA_DESCRIPTOR_API_KEYS) {
+    // desc = 目录 note 首句（刀 L）
+    const desc = firstPublicSentence(entry.note);
     exports.push({
       symbol: entry.key,
       module: 'data-keys',
       tier: entry.tier,
       since: '1.0',
       formFactors: ff(ALL_FF),
+      ...(desc !== undefined ? { desc } : {}),
     });
   }
 
