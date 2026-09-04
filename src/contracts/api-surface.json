@@ -91,17 +91,6 @@
       ]
     },
     {
-      "symbol": "API_ENFORCEMENT_IGNITED",
-      "module": "berryagent",
-      "tier": "stable",
-      "since": "1.0",
-      "formFactors": [
-        "daemon",
-        "server",
-        "standalone"
-      ]
-    },
-    {
       "symbol": "API_EXPERIMENTAL_UNDECLARED",
       "module": "berryagent",
       "tier": "stable",
@@ -1851,17 +1840,6 @@
       ]
     },
     {
-      "symbol": "SERVICE_CATALOG",
-      "module": "berryagent",
-      "tier": "stable",
-      "since": "1.0",
-      "formFactors": [
-        "daemon",
-        "server",
-        "standalone"
-      ]
-    },
-    {
       "symbol": "SESSION_CORE_TYPE_FORBIDDEN",
       "module": "berryagent",
       "tier": "stable",
@@ -2668,17 +2646,6 @@
       ]
     },
     {
-      "symbol": "VIRTUAL_API_KEYS",
-      "module": "berryagent",
-      "tier": "stable",
-      "since": "1.0",
-      "formFactors": [
-        "daemon",
-        "server",
-        "standalone"
-      ]
-    },
-    {
       "symbol": "Value",
       "module": "berryagent",
       "tier": "stable",
@@ -2769,28 +2736,6 @@
     },
     {
       "symbol": "WEB_URL_INVALID",
-      "module": "berryagent",
-      "tier": "stable",
-      "since": "1.0",
-      "formFactors": [
-        "daemon",
-        "server",
-        "standalone"
-      ]
-    },
-    {
-      "symbol": "adjudicateApiGate",
-      "module": "berryagent",
-      "tier": "stable",
-      "since": "1.0",
-      "formFactors": [
-        "daemon",
-        "server",
-        "standalone"
-      ]
-    },
-    {
-      "symbol": "assertExperimentalDeclared",
       "module": "berryagent",
       "tier": "stable",
       "since": "1.0",
@@ -2944,17 +2889,6 @@
       ]
     },
     {
-      "symbol": "materializeHostFace",
-      "module": "berryagent",
-      "tier": "stable",
-      "since": "1.0",
-      "formFactors": [
-        "daemon",
-        "server",
-        "standalone"
-      ]
-    },
-    {
       "symbol": "registerAppMessageRole",
       "module": "berryagent",
       "tier": "stable",
@@ -3000,17 +2934,6 @@
     },
     {
       "symbol": "registerSessionEventType",
-      "module": "berryagent",
-      "tier": "stable",
-      "since": "1.0",
-      "formFactors": [
-        "daemon",
-        "server",
-        "standalone"
-      ]
-    },
-    {
-      "symbol": "requireCapabilities",
       "module": "berryagent",
       "tier": "stable",
       "since": "1.0",

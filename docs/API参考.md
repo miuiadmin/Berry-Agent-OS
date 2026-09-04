@@ -3,7 +3,7 @@
 > 本文件由 `tools/generate-api-reference.mjs` 从 `src/contracts/api-surface.json` 生成（`npm run build` 尾挂再生，check-api 查 8 drift 守护）——勿手编。
 > 稳定性分级与兼容承诺的语义权威 = 设计文档「应用契约与扩展点」API 治理章（§6.13）；本文件只派生符号面。
 
-当前 apiVersion：`1.0`。导出 374 项、能力 14 项。
+当前 apiVersion：`1.0`。导出 367 项、能力 14 项。
 
 ## 目录
 
@@ -23,7 +23,6 @@
 ## `berryagent`
 
 - `ACCENT_COLOR_NAMES` — stable（minor 只增不破），since 1.0，全形态
-- `adjudicateApiGate` — stable（minor 只增不破），since 1.0，全形态
 - `AGENT_CONTINUE_INVALID` — stable（minor 只增不破），since 1.0，全形态
 - `AGENT_DELIVER_AS_UNSUPPORTED` — stable（minor 只增不破），since 1.0，全形态
 - `AGENT_ROLE_EXISTS` — stable（minor 只增不破），since 1.0，全形态
@@ -34,7 +33,6 @@
 - `AgentTool` — stable（minor 只增不破），since 1.0，全形态
 - `AgentToolResult` — stable（minor 只增不破），since 1.0，全形态
 - `API_CAPABILITY_MISSING` — stable（minor 只增不破），since 1.0，全形态
-- `API_ENFORCEMENT_IGNITED` — stable（minor 只增不破），since 1.0，全形态
 - `API_EXPERIMENTAL_UNDECLARED` — stable（minor 只增不破），since 1.0，全形态
 - `API_VERSION_MALFORMED` — stable（minor 只增不破），since 1.0，全形态
 - `API_VERSION_MISMATCH` — stable（minor 只增不破），since 1.0，全形态
@@ -71,7 +69,6 @@
 - `AppPlanRow` — stable（minor 只增不破），since 1.0，全形态
 - `AppSkippedPayload` — stable（minor 只增不破），since 1.0，全形态
 - `AppSkipReason` — stable（minor 只增不破），since 1.0，全形态
-- `assertExperimentalDeclared` — stable（minor 只增不破），since 1.0，全形态
 - `AssistantMessage` — stable（minor 只增不破），since 1.0，全形态
 - `AssistantStream` — stable（minor 只增不破），since 1.0，全形态
 - `AssistantStreamEvent` — stable（minor 只增不破），since 1.0，全形态
@@ -189,7 +186,6 @@
 - `LlmTool` — stable（minor 只增不破），since 1.0，全形态
 - `LSP_CONNECT_FAILED` — stable（minor 只增不破），since 1.0，全形态
 - `MANIFEST_API_KEYS` — stable（minor 只增不破），since 1.0，全形态
-- `materializeHostFace` — stable（minor 只增不破），since 1.0，全形态
 - `MCP_CONNECT_FAILED` — stable（minor 只增不破），since 1.0，全形态
 - `Message` — stable（minor 只增不破），since 1.0，全形态
 - `MessageRoleDefinition` — stable（minor 只增不破），since 1.0，全形态
@@ -206,7 +202,6 @@
 - `registerErrorCode` — stable（minor 只增不破），since 1.0，全形态
 - `registerHostMessageRole` — stable（minor 只增不破），since 1.0，全形态
 - `registerSessionEventType` — stable（minor 只增不破），since 1.0，全形态
-- `requireCapabilities` — stable（minor 只增不破），since 1.0，全形态
 - `resolveRowCarrier` — stable（minor 只增不破），since 1.0，全形态
 - `RowAppProbe` — stable（minor 只增不破），since 1.0，全形态
 - `RowSandbox` — stable（minor 只增不破），since 1.0，全形态
@@ -214,7 +209,6 @@
 - `SANDBOX_MODE_INVALID` — stable（minor 只增不破），since 1.0，全形态
 - `SANDBOX_UNAVAILABLE` — stable（minor 只增不破），since 1.0，全形态
 - `SandboxMeta` — stable（minor 只增不破），since 1.0，全形态
-- `SERVICE_CATALOG` — stable（minor 只增不破），since 1.0，全形态
 - `ServiceCatalogEntry` — stable（minor 只增不破），since 1.0，全形态
 - `SESSION_CORE_TYPE_FORBIDDEN` — stable（minor 只增不破），since 1.0，全形态
 - `SESSION_EVENT_DATA_INVALID` — stable（minor 只增不破），since 1.0，全形态
@@ -289,7 +283,6 @@
 - `UserMessage` — stable（minor 只增不破），since 1.0，全形态
 - `validateAppManifest` — stable（minor 只增不破），since 1.0，全形态
 - `Value` — stable（minor 只增不破），since 1.0，全形态（forwarded 转发——tier 承诺归上游 typebox）
-- `VIRTUAL_API_KEYS` — stable（minor 只增不破），since 1.0，全形态
 - `VirtualApiKeyEntry` — stable（minor 只增不破），since 1.0，全形态
 - `WEB_DOWNLOAD_FAILED` — stable（minor 只增不破），since 1.0，全形态
 - `WEB_FETCH_FAILED` — stable（minor 只增不破），since 1.0，全形态

@@ -1072,3 +1072,70 @@ describe('api-doc-sections：实验面节豁免剥除（刀 E——节标记常�
     expect(stripExperimentalSection(nested)).toBe('# t\n\n## b\n\ny\n');
   });
 });
+
+describe('api.ts 公开根分桶（刀 A——internal 机制桶七符号不进公开面，§6.13.4）', () => {
+  it('INTERNAL_API_EXPORTS 逐名闭集：恰七名（白名单增删即红——单点漂移不静默）', async () => {
+    // 动态 import：修前无此导出（undefined 解构调用即红）——不静态 import 以免
+    // 整测试文件在修前全红殃及他锁
+    const { INTERNAL_API_EXPORTS } = await import('./extract-api-surface.mjs');
+    expect([...INTERNAL_API_EXPORTS].sort()).toEqual([
+      'API_ENFORCEMENT_IGNITED',
+      'SERVICE_CATALOG',
+      'VIRTUAL_API_KEYS',
+      'adjudicateApiGate',
+      'assertExperimentalDeclared',
+      'materializeHostFace',
+      'requireCapabilities',
+    ]);
+  });
+
+  it('assertApiBucketPartition 三向 fail-loud：未分类 / 漏桶 / 死名（注入白名单免牵连真册）', async () => {
+    const { assertApiBucketPartition } = await import('./extract-api-surface.mjs');
+    // 注入白名单：三违例形各自独立可红（不牵连库内真 api.ts/真白名单状态）
+    const wl = new Set(['zzInternal']);
+    // 合法通过形：全部落桶、无漏桶、无死名——不 throw
+    expect(() => assertApiBucketPartition(['a', 'zzInternal'], ['a'], wl)).not.toThrow();
+    // 未分类：api.ts 新顶层导出两桶皆不在——先分类再落码
+    expect(() => assertApiBucketPartition(['a', 'zzNew'], ['a'], wl)).toThrow('未分桶：zzNew');
+    // internal 漏桶：白名单符号出现在公开根面——机制符号不是应用 API
+    expect(() => assertApiBucketPartition(['a', 'zzInternal'], ['a', 'zzInternal'], wl)).toThrow(
+      '漏进公开桶：zzInternal',
+    );
+    // 白名单死名：api.ts 已无此名而白名单残留——改名/删除后烂尾即炸
+    expect(() => assertApiBucketPartition(['a'], ['a'], wl)).toThrow('白名单死名：zzInternal');
+  });
+
+  it('快照分桶行为锁：七机制符号绝迹公开面、可见桶十四名在册（修前快照含七符号即红）', () => {
+    // 星出时代机制符号实测进面（内部重构判伪 MAJOR 的面源）——本锁钉死分桶后
+    // 的快照投影态：抽取器回归（七符号再进公开桶）→ 查 1 红的同时本锁红，双保险
+    const surface = JSON.parse(readFileSync(join(ROOT, 'src/contracts/api-surface.json'), 'utf8'));
+    const face = new Set(surface.exports.filter((e) => e.module === 'berryagent').map((e) => e.symbol));
+    const internal = [
+      'VIRTUAL_API_KEYS',
+      'SERVICE_CATALOG',
+      'API_ENFORCEMENT_IGNITED',
+      'adjudicateApiGate',
+      'assertExperimentalDeclared',
+      'requireCapabilities',
+      'materializeHostFace',
+    ];
+    expect(internal.filter((n) => face.has(n))).toEqual([]);
+    const visible = [
+      'ApiTier',
+      'FormFactor',
+      'VirtualApiKeyEntry',
+      'ServiceCatalogEntry',
+      'DescriptorKeyEntry',
+      'CapabilityEntry',
+      'ApiBlock',
+      'ApiGateResult',
+      'HostFace',
+      'HostFaceData',
+      'DATA_DESCRIPTOR_API_KEYS',
+      'CAPABILITIES',
+      'compareApiVersions',
+      'isValidApiVersion',
+    ];
+    expect(visible.filter((n) => !face.has(n))).toEqual([]);
+  });
+});

@@ -358,6 +358,63 @@ function resolveTsPath(baseDir, spec) {
   }
 }
 
+/* ---------------- 公开根分桶不变式（§6.13.4 刀 A——api.ts 顶层导出两桶执法） ---------------- */
+
+/**
+ * api.ts internal 机制桶白名单（§6.13.4 公开根分桶——七符号逐名闭集单点）。
+ * 这些是宿主治理机制符号（键表/服务目录/点火位/装载门与实验门裁决核/宿主面
+ * 物化），不是应用作者可消费面——内核消费全深导 contracts/api.js，永不进公开
+ * 根 re-export。新增/改名 api.ts 顶层导出时必须二选一分类：进公开桶
+ * （contracts/index.ts 显式 re-export）或进本白名单——未分类即 extractSurface
+ * fail-loud（分桶不变式，审计 R4-D1：星出时代机制符号实测标 stable 进面）。
+ */
+export const INTERNAL_API_EXPORTS = new Set([
+  'VIRTUAL_API_KEYS',
+  'SERVICE_CATALOG',
+  'API_ENFORCEMENT_IGNITED',
+  'adjudicateApiGate',
+  'assertExperimentalDeclared',
+  'requireCapabilities',
+  'materializeHostFace',
+]);
+
+/**
+ * 分桶不变式执法（纯函数——导出供回归锁直锁）：api.ts 全部顶层导出名（token
+ * 扫描，值与类型同收）必须恰落两桶之一——公开桶（公开根面符号闭包）或 internal
+ * 白名单。三向违例皆 throw（fail-loud；经查 1 面 = 快照漂移永不静默过闸）：
+ * 1. 未分类：api.ts 新顶层导出两桶皆不在——先分类再落码（防新符号静默进公开
+ *    面标 stable——判级引擎执法失真面的根源）；
+ * 2. internal 漏桶：白名单符号出现在公开根面——机制符号不是应用 API；
+ * 3. 白名单死名：api.ts 已无该名而白名单残留——改名/删除后烂尾即炸。
+ * @param {Iterable<string>} apiNames api.ts 全部顶层导出名（扫描器产物）
+ * @param {Iterable<string>} barrelFaceNames 公开根传递闭包全部导出名
+ * @param {Iterable<string>} [whitelist] internal 桶白名单（缺省 INTERNAL_API_EXPORTS——测试注入专用）
+ */
+export function assertApiBucketPartition(apiNames, barrelFaceNames, whitelist = INTERNAL_API_EXPORTS) {
+  const api = new Set(apiNames);
+  const face = new Set(barrelFaceNames);
+  const unclassified = [...api].filter((n) => !face.has(n) && !whitelist.has(n));
+  if (unclassified.length > 0) {
+    throw new Error(
+      `api.ts 顶层导出未分桶：${unclassified.join(', ')}——公开桶（contracts/index.ts 显式 re-export）与 ` +
+        `internal 白名单（extract-api-surface INTERNAL_API_EXPORTS）二选一分类后再落码（§6.13.4 公开根分桶——防机制符号静默进公开面）`,
+    );
+  }
+  const leaked = [...whitelist].filter((n) => face.has(n));
+  if (leaked.length > 0) {
+    throw new Error(
+      `internal 机制符号漏进公开桶：${leaked.join(', ')}——机制符号不是应用 API，内核消费深导 contracts/api.js，` +
+        `公开根 re-export 须移除（§6.13.4 公开根分桶）`,
+    );
+  }
+  const dead = [...whitelist].filter((n) => !api.has(n));
+  if (dead.length > 0) {
+    throw new Error(
+      `internal 白名单死名：${dead.join(', ')}——api.ts 已无此名（改名/删除后白名单烂尾），同步 INTERNAL_API_EXPORTS`,
+    );
+  }
+}
+
 /* ---------------- 六真相源抽取主流程 ---------------- */
 
 /**
@@ -384,6 +441,14 @@ export async function extractSurface() {
 
   // —— #1a：berryagent 键（token 扫描 + jiti 值面自检）——
   const { symbols: barrelSymbols, rootTags } = collectBarrelSymbols();
+  // —— 分桶不变式（§6.13.4 刀 A）：api.ts 顶层导出（扫描器——值与类型同收）×
+  // 公开根面闭包 × internal 白名单三向执法——新顶层导出未分类 / internal 漏桶 /
+  // 白名单死名皆 fail-loud（经查 1 面 = 分桶漂移永不静默过闸）
+  const apiScan = scanTopLevelExports(readFileSync(join(REPO_ROOT, 'src/contracts/api.ts'), 'utf8'));
+  assertApiBucketPartition(
+    apiScan.names.keys(),
+    barrelSymbols.map((s) => s.name),
+  );
   const runtimeBarrel = await imp('../src/contracts/index.ts');
   const runtimeNames = Object.keys(runtimeBarrel).sort();
   const scannedNames = new Set(barrelSymbols.map((s) => s.name));
