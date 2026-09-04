@@ -15,7 +15,7 @@ import { createDesktopShell, type DesktopAdminFace, type DesktopShellDeps } from
 import { createDesktopService } from './desktop-service.js';
 import type { DesktopAppEntry, DesktopStatusService } from './desktop-service.js';
 import type { AssistantAnswer, AssistantService } from './assistant-app.js';
-import type { DesktopMonitorFace, MonitorPanel, MonitorTab } from './desktop-monitor.js';
+import type { DesktopMonitorFace, MonitorPanel, MonitorResult, MonitorTab } from './desktop-monitor.js';
 import type { DesktopStatusSnapshot } from './desktop-status.js';
 import { POWER_KILL_FAMILY_TEXT } from './host-power.js';
 import type { TerminalIO } from '../desktop/index.js';
@@ -417,6 +417,26 @@ describe('desktop-shell：键路由（desktop 视图）', () => {
       expect(io.output).toContain('管理动作经菜单（m）');
       press(io, clock, KEY.escape, 50); // 详情 → 桌面（判定窗 + 帧两段）
       expect(io.output).toContain('[全部]');
+    } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('【红锁 刀D】detail 视图 m 键 legacy text 轨可达（两轨输入律）：桥后回桌面，空框 Enter 换防', () => {
+    const { io, clock, calls, shell } = started();
+    try {
+      press(io, clock, KEY.m); // 桌面空框 m 热键开菜单（裸字节 = text 事件——输入框热键面本吃 text）
+      for (let i = 0; i < 5; i++) press(io, clock, KEY.down);
+      press(io, clock, KEY.enter); // → 详情视图
+      expect(io.output).toContain('id：chat');
+      // legacy 轨真终端形态：裸 'm' 字节 → 解码器 text 事件（可打印恒 text——
+      // 两轨输入律）。修前 text 事件在无输入框视图整类丢弃 → 提示行承诺的
+      // 「菜单（m）」在 legacy 终端零响应；修后单字符桥 → onKey 'm' → 回桌面
+      press(io, clock, 'm');
+      // 行为证据（视图归属）：真回桌面 = 空框 Enter 打开光标应用（detail 期
+      // Enter 只回桌面零换防——两视图同键不同账是区分力所在）
+      press(io, clock, KEY.enter);
+      expect(calls).toContain('enterApp:chat');
     } finally {
       void shell.dispose();
     }
@@ -1122,6 +1142,7 @@ describe('desktop-shell：/monitor 统一管理器（刀四三页签）', () => 
   ): Promise<{
     io: FakeIO;
     clock: FakeClock;
+    calls: string[];
     shell: ReturnType<typeof createDesktopShell>;
   }> {
     const made = started({ monitor: face });
@@ -1134,14 +1155,19 @@ describe('desktop-shell：/monitor 统一管理器（刀四三页签）', () => 
 
   it('/monitor：首帧面板 + ▸ 光标首条动作行 + 页签行；Esc 回桌面', async () => {
     const { face } = fakeMonitor();
-    const { io, clock, shell } = await enterMonitor(face);
+    const { io, clock, shell, calls } = await enterMonitor(face);
     try {
       expect(io.output).toContain('管理面板 proc');
       expect(io.output).toContain('▸  proc 动作行一'); // 光标 = 首条动作行（reverse 标记）
       expect(io.output).toContain('任务 / 内存（←→ 切换）'); // 页签行（含首差字符起的重写段）
       expect(io.output).toContain('k 取消 Job'); // proc 键位提示
       press(io, clock, KEY.escape, 50);
-      expect(io.output).toContain('[全部]'); // 回桌面
+      expect(io.output).toContain('[全部]'); // 回桌面（帧证据——弱断言，区分力在下行行为证据）
+      // 行为证据（刀D 强化——toContain('[全部]') 起屏首帧已含、无视图区分力，
+      // 突变实证掏空 Esc 路由整文件仍绿）：Esc 真回桌面 = 空框 Enter 打开
+      // 光标应用（monitor 期 Enter 无路由零换防）
+      press(io, clock, KEY.enter);
+      expect(calls).toContain('enterApp:chat');
     } finally {
       void shell.dispose();
     }
@@ -1335,12 +1361,53 @@ describe('desktop-shell：/monitor 统一管理器（刀四三页签）', () => 
         throw new Error('库炸了');
       },
     };
-    const { io, clock, shell } = await enterMonitor(face);
+    const { io, clock, shell, calls } = await enterMonitor(face);
     try {
       expect(io.output).toContain('取数失败：库炸了');
       press(io, clock, KEY.escape, 50);
-      expect(io.output).toContain('[全部]');
+      expect(io.output).toContain('[全部]'); // 帧证据（弱断言——区分力在下行行为证据）
+      // 行为证据（刀D 强化——错误面板期 Enter 无路由；Esc 真回桌面 = 空框
+      // Enter 打开光标应用）
+      press(io, clock, KEY.enter);
+      expect(calls).toContain('enterApp:chat');
     } finally {
+      void shell.dispose();
+    }
+  });
+
+  it('【红锁 刀D】迟到回执不换装：busy 消占位回 monitor 后 Esc 回桌面，settle 时回执降级桌面 notice（不抢视图）', async () => {
+    const base = fakeMonitor();
+    // reloadAll 悬置——settle 由测试手动放行（复刻 osRegistrar 秒级在飞窗：
+    // runMonitorAction fire-and-forget，用户可在飞窗期离链）
+    let release!: (value: MonitorResult) => void;
+    const face: DesktopMonitorFace = {
+      ...base.face,
+      reloadAll: () =>
+        new Promise<MonitorResult>((resolve) => {
+          release = resolve;
+        }),
+    };
+    const { io, clock, shell, calls } = await enterMonitor(face);
+    try {
+      press(io, clock, 'r'); // busy 占位（reload 无 confirmLabel——只读占位任意键可消）
+      expect(io.output).toContain('管理动作执行中…');
+      press(io, clock, KEY.enter, 50); // 任意键消占位 → 回视槽 monitor
+      press(io, clock, KEY.escape, 50); // monitor → desktop（离链完成）
+      release({ title: '全量 reload 完成', lines: ['  行一'] }); // 迟到回执到达
+      await flushMicrotasks();
+      clock.advance(17);
+      // 降级而非换装：notice 在场；回执内容（confirm 标题）零呈现
+      expect(io.output).toContain('回执丢弃');
+      expect(io.output).not.toContain('全量 reload 完成');
+      // 视图归属行为证据：desktop 下 k 不再路由 monitor 动词（修前回执换装
+      // confirm→刷新 monitor 后 k 会记账 cancel）
+      const cancelsBefore = calls.filter((c) => c.startsWith('cancel:')).length;
+      press(io, clock, 'k');
+      await flushMicrotasks();
+      clock.advance(17);
+      expect(calls.filter((c) => c.startsWith('cancel:')).length).toBe(cancelsBefore);
+    } finally {
+      release?.({ title: '（测试收尾放行）', lines: [] }); // 防悬置 promise 拒绝
       void shell.dispose();
     }
   });

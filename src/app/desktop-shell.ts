@@ -1171,8 +1171,26 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
       });
   }
 
+  /** 管理器链在场判定（刀D 迟到守卫）：view 'monitor' 或 backTo monitor 的
+   * confirm（busy 占位/回执链都在此列）= 仍在链内；已离链（busy 占位被任意
+   * 键消去后 Esc 回桌面/进其它视图）后到达的回执降级 notice 不换装——与
+   * askAssistant 迟到应答守卫同律（不抢当前视图），规范骨架篇 §1.2 回执到达
+   * 守卫条。 */
+  function inMonitorChain(): boolean {
+    return view === 'monitor' || (view === 'confirm' && confirmPane?.backTo === 'monitor');
+  }
+
   /** 管理器结果落视图（string 单行 = notice 回 monitor；多行/receipt = confirm 只读回执链回 monitor——C2 回视槽） */
   function applyMonitorResult(result: MonitorResult): void {
+    // 迟到守卫（刀D）：动作在飞期用户可消 busy 占位（只读任意键）再 Esc 离开
+    // 管理器——迟到回执不得强行换装当前视图（劫持桌面打字首键/静默替换用户
+    // 正处的其它确认）。降级 = 桌面 notice（回执内容丢弃——面板态可回
+    // /monitor 重查；refreshMonitor 不跑：openMonitor 入口必重取）
+    if (!inMonitorChain()) {
+      setNotice('管理动作已完成（已离开管理器——回执丢弃，可回 /monitor 查看新态）');
+      rerender();
+      return;
+    }
     if (typeof result === 'string') {
       if (result.includes('\n')) {
         confirmPane = { title: '管理动作回执', lines: result.split('\n'), backTo: 'monitor' };
@@ -1195,8 +1213,15 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
     void call()
       .then((result) => applyMonitorResult(result))
       .catch((err: unknown) => {
+        // 失败转述同带迟到守卫（刀D）：已离链则降级桌面 notice 不拉回 monitor
+        const message = `管理动作失败：${err instanceof Error ? err.message : String(err)}`;
+        if (!inMonitorChain()) {
+          setNotice(`${message}（已离开管理器）`);
+          rerender();
+          return;
+        }
         view = 'monitor';
-        setNotice(`管理动作失败：${err instanceof Error ? err.message : String(err)}`);
+        setNotice(message);
         rerender();
       });
   }
@@ -1215,8 +1240,15 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
           .memoryForget(item.key)
           .then((result) => applyMonitorResult(result))
           .catch((err: unknown) => {
+            // 失败转述同带迟到守卫（刀D）：已离链则降级桌面 notice 不拉回 monitor
+            const message = `忘掉失败：${err instanceof Error ? err.message : String(err)}`;
+            if (!inMonitorChain()) {
+              setNotice(`${message}（已离开管理器）`);
+              rerender();
+              return;
+            }
             view = 'monitor';
-            setNotice(`忘掉失败：${err instanceof Error ? err.message : String(err)}`);
+            setNotice(message);
             rerender();
           });
       },
@@ -1776,11 +1808,14 @@ export function createDesktopShell(deps: DesktopShellDeps): DesktopShell {
             break;
           }
         }
-        // 管理器视图无输入框：单字符 text 即动词键。两轨的普通可打印字符恒
-        // text 事件（kitty CSI-u 文本一致→text；legacy 游程→text）——onKey
-        // 的 k/r/e/d/n/f/v/x 分支若无此桥在真终端永不可达（m/g 热键同因走
-        // text 分支先例）。多字符游程（快速连打合并）不触发——单字符闸防误触
-        if (view === 'monitor' && event.text.length === 1) {
+        // 无输入框视图（menu/detail/confirm/guide/answer/store/sessions/monitor）
+        // 统一单字符 text 桥（刀D 泛化——monitor 桥同批升格全域，骨架篇 §1.2
+        // 桌面键位两轨输入律）：两轨的普通可打印字符恒 text 事件（kitty CSI-u
+        // 文本一致→text；legacy 游程→text——单键单字符亦然），onKey 的可打印
+        // 动词键（monitor k/r/e/d/n/f/v/x、detail m、guide g、sessions c/n/s）
+        // 若无此桥在真 legacy 终端永不可达。多字符游程（快速连打合并）不触发
+        // ——单字符闸防误触
+        if (view !== 'desktop' && view !== 'prompt' && event.text.length === 1) {
           onKey({ kind: 'key', key: event.text, mods: { ctrl: false, alt: false, shift: false, meta: false } });
           break;
         }
