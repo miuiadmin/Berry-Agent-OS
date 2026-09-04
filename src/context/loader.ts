@@ -77,7 +77,9 @@ export type ValidatedModule = Omit<AppModule, 'default'> & {
  * loadApps 缺省行为同构，后续按需开面）。
  *
  * 虚拟注入映射（契约篇 §1.2 落码注记①）：`berryagent`（宿主公共面 = contracts
- * 公共导出——AppError/错误码/事件常量与目录/typebox 再导出；名即宿主 npm 包名）
+ * 公共导出——AppError/错误码/事件常量与目录/typebox 再导出；键是装载期虚拟名
+ * 非宿主 npm 包名〔2026-09-04 勘正——第十一轮遗漏大扫 C6：包名 = berry-agent-os，
+ * npm 解析面不存在虚拟键；类型面经随包 dist/api/ paths 模板〕）
  * + typebox 三入口（宿主实例注入——双实例防线，pi 生态 Static 双实例实证反例）。
  */
 /**
