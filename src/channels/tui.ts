@@ -565,8 +565,16 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       return;
     }
     if (prompts.handleSubmit(trimmed)) return;
-    // 普通消息不本地回显——loop 对 user 消息发 message_start，渲染单一来源是事件流
-    opts.host.submit(trimmed);
+    // 普通消息不本地回显——loop 对 user 消息发 message_start，渲染单一来源是事件流。
+    // 投递回执（刀 1 投递通道可观测）：steer 档 = 插话已入队但本轮 run 结束才注入
+    // ——正文流数十秒级静默窗口内「输入清空 + 屏上零反馈」= 行为不可确认，落
+    // 瞬时回执行兜底；followUp/inject 档零回执行（run 即将开场正文流自证 / 落账
+    // 即见）；undefined（远程异步/无驱动）不落
+    const deliverChannel = opts.host.submit(trimmed);
+    if (deliverChannel === 'steer') {
+      steerReceipt = `❯ ${truncate(trimmed, 60)}（已排队，本轮结束注入）`;
+      refreshActivity();
+    }
   };
   // Ctrl+D / Ctrl+C 全局拦截面（pi-tui Editor 无专用回调；经原始输入监听 + 键解析识别）。
   // raw mode 下两键不产生信号而是输入字节——在此拦下分流（S6 形态④）：Ctrl+C 走
@@ -801,6 +809,14 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   /* ---- 工具实时进度面板（强化批 2 增强 5，技术栈篇 §4.1——状态面消费家族） ---- */
   /** 进度行登记簿：toolCallId → 展示串（Map 插入序 = 调用序；瞬时面不落正文、不跨 repaint 保存） */
   const activityById = new Map<string, string>();
+  /**
+   * steer 档投递回执行（刀 1 投递通道可观测，骨架篇 §4.1）：单行瞬时面——run
+   * 进行中插话已入队但本轮结束才注入，正文流静默窗内凭它确认「发出去了」。
+   * 生命周期与进度行同族：submit 落行、agent_start/agent_end/repaint 清（新
+   * run 开场 = 插话重播种进上下文、正文流接管回执；不设 TTL）；不进正文流、
+   * 不写 durable、不参与投影。
+   */
+  let steerReceipt: string | undefined;
   /** 面板行帽：并行流 partial 的工具超帽折叠「… + N 更多」（并行工具调用的常见量级） */
   const ACTIVITY_MAX = 4;
   /**
@@ -824,6 +840,10 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
    */
   const refreshActivity = (): void => {
     activityPanel.clear();
+    // steer 回执行居首（插话回执先于工具进度——用户自己的动作优先于机器动作）
+    if (steerReceipt !== undefined) {
+      activityPanel.addChild(new Text(` ${DIM(steerReceipt)}`, 1));
+    }
     let shown = 0;
     for (const line of activityById.values()) {
       if (shown >= ACTIVITY_MAX) break;
@@ -837,8 +857,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   };
   /** 清板（agent_start / agent_end / repaint 三时点——瞬时态靠事件重建；幂等） */
   const clearActivity = (): void => {
-    if (activityById.size === 0) return;
+    if (activityById.size === 0 && steerReceipt === undefined) return;
     activityById.clear();
+    steerReceipt = undefined;
     refreshActivity();
   };
 

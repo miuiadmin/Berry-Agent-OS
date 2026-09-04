@@ -16,6 +16,7 @@
 import type { Disposer } from '../context/types.js';
 import type { CommandRegistry } from '../channels/commands.js';
 import type { UiService } from '../channels/types.js';
+import type { DeliverChannel } from '../contracts/channels.js';
 import { runUpgradeCheck, entryRealPath } from './upgrade.js';
 import { QUICK_START_ENTRY } from './guide-text.js';
 import { VERSION, CODENAME } from './version.js';
@@ -218,8 +219,12 @@ export interface BuiltinCommandsOptions {
   readonly skills: SkillsService;
   /** 退出请求（接会话驱动的 requestQuit——优雅退出序列的入口） */
   readonly quit: () => void;
-  /** 普通消息提交（技能激活文本走这条——与用户手打同路径） */
-  readonly submit: (text: string) => void;
+  /**
+   * 普通消息提交（技能激活文本走这条——与用户手打同路径）。返回投递通道
+   * （刀 1 穿透——签名不留 void 断层）；命令面消费点（/app 开新、技能激活）
+   * 不落回执行——命令自有 notify 反馈形态。
+   */
+  readonly submit: (text: string) => DeliverChannel | undefined;
   /** 开新会话（/new——组合根热切换；无持久层/run 进行中返回 undefined） */
   readonly newSession: () => { header: { sessionId: string } } | undefined;
   /**

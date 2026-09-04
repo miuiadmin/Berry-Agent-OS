@@ -949,6 +949,17 @@
       ]
     },
     {
+      "symbol": "DeliverChannel",
+      "module": "berryagent",
+      "tier": "stable",
+      "since": "1.0",
+      "formFactors": [
+        "daemon",
+        "server",
+        "standalone"
+      ]
+    },
+    {
       "symbol": "DescriptorKeyEntry",
       "module": "berryagent",
       "tier": "stable",

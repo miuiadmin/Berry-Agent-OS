@@ -306,7 +306,7 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
             // 诊断面 apply 永不跑；占位腿全 stub，注册表键在即树形不失真）
             webuiDeps: {
               addDisplay: () => undefined,
-              submitTo: () => false,
+              submitTo: () => null,
               historyFor: () => undefined,
               sessionsFor: () => [],
               openSession: async () => undefined,

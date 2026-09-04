@@ -23,6 +23,7 @@ import type { TuiChannel } from '../channels/index.js';
 import { projectedToAgentMessages } from '../chat/index.js';
 import type { AgentEvent } from '../agent/events.js';
 import type { AgentMessage } from '../contracts/messages.js';
+import type { DeliverChannel } from '../contracts/channels.js';
 import type { WebuiPendingApproval, WebuiSessionSummary, WebuiSseEnvelope } from '../webui/index.js';
 import {
   decideApproval,
@@ -253,8 +254,10 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
   /* ---- TUI 通道（全栈复用；命令注册表空 = v1 无斜杠命令面） ---- */
   const tui: TuiChannel = createTuiChannel({
     host: {
-      submit(text: string): void {
-        // 投递即忘：应答经 SSE display 族回流；requestId 生成在客户端
+      submit(text: string): DeliverChannel | undefined {
+        // 投递即忘（刀 1 undefined 档——远程异步投递：HTTP 投递发起即回，同步
+        // 返回通道结构性不可能；路由真值在服务端 202 响应体，attach 呈现面回
+        // 执行 v1 豁免挂账）。应答经 SSE display 族回流；requestId 生成在客户端
         //（重试语义归服务端 LRU 去重——协议正确性层刀一件④）
         const requestId = randomUUID();
         void submitText(port, token, focusId, text, requestId).then((res): void => {
@@ -270,6 +273,7 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
             tui.ui().notify('重复投递已忽略（requestId 去重）');
           }
         });
+        return undefined; // 远程异步档显式收场（同步面无通道真值可回）
       },
       requestQuit(): void {
         quitResolve(); // 仅退 attach——daemon 与在飞 run 不动（spec v1 边界）

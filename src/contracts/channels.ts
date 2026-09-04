@@ -4,7 +4,18 @@
  * 迁入——装载面（ctx.channels.registerCommand 的参数类型）引用的类型住
  * contracts，与 SkillsProvider 五符号下沉同病同修；channels/types.ts 改再
  * 导出，旧消费面零改动）。
+ *
+ * DeliverChannel 自 chat/conversation.ts 下沉（2026-09-04 TUI 强化批 4 刀 1：
+ * ChannelHost.submit 返回投递通道——channels 不能 import chat〔拓扑 DAG〕，
+ * 联盟单源驻本模块，chat 侧改再导出旧消费面路径不变——同 P2-1 M4 迁移形）。
  */
+
+/**
+ * 三通道（骨架篇 §4.1 投递通道可观测）：steer（run 中入队）/ followUp（闲时
+ * 唤醒开轮）/ inject（只落日志不唤醒）。deliver/submit 返回实际选定值——路由
+ * 按目标当下状态瞬时裁定，发送方是唯一拿得到路由结果的位。
+ */
+export type DeliverChannel = 'steer' | 'followUp' | 'inject';
 
 /**
  * 命令参数补全候选项（getArgumentCompletions 的返回元素；镜像 pi-tui

@@ -1169,6 +1169,21 @@ describe('ConversationDriver 驱动级取消模型（S6 形态①②③）', () 
     expect(calls.length).toBe(1);
   });
 
+  it('submit 返回投递通道（刀 1 投递通道可观测，骨架篇 §4.1）：闲时 followUp / 在飞 steer / 拆卸后 inject', async () => {
+    const { driver, calls } = makeS6Driver();
+    // 闲时档：submit 直接开新轮 → followUp（修前 void——红位）
+    expect(driver.submit('闲时首问')).toBe('followUp');
+    await tick();
+    expect(driver.isRunning).toBe(true);
+    // 忙档：run 在飞期插话 → steer 入队（「插话像消失」的原发位——返回值让通道可回执）
+    expect(driver.submit('在飞插话')).toBe('steer');
+    await driver.interrupt(); // 清场（打断路径余量 inject 落审计自带）
+    expect(calls.length).toBe(1);
+    // 拆卸档：requestQuit dismantle 后投递 → 不唤醒只落日志
+    driver.requestQuit();
+    expect(driver.submit('拆后投递')).toBe('inject');
+  });
+
   it('打断前 steering 余量多条：interrupt 循环排空全量落审计（B3——第十一轮遗漏大扫 20260904-b，修前红：one-at-a-time 模式单次 drain 只取最旧一条，其余余量存活被 followUp 循环当新批捎跑——打断前提交的存量不是「窗口期新输入」，形态② 捎跑语义不覆盖它）', async () => {
     const { driver, session, calls } = makeS6Driver();
     const pending = driver.submitOnce('慢问');

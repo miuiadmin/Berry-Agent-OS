@@ -417,9 +417,11 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
       expect(before.status).toBe(200);
       expect(Array.isArray((before.body as { messages: unknown[] }).messages)).toBe(true);
 
-      // ⑤ submit：202 入队（fire-and-forget——应答不等轮次）
+      // ⑤ submit：202 入队（fire-and-forget——应答不等轮次）；body 携带实际
+      //    投递通道（刀 1 机器面同律——服务端路由真值不丢在 HTTP 边界；boot
+      //    会话此刻闲时 = followUp 开新轮）
       const accepted = await postSubmit(port, bootId, '从 web 提交');
-      expect(accepted).toEqual({ status: 202, body: { ok: true } });
+      expect(accepted).toEqual({ status: 202, body: { ok: true, channel: 'followUp' } });
 
       // ⑥ 轮次跑完（scripted 模型）：durable 镜像族（session）到 turn/end =
       //    事件已落库（拉投影腿可见 assistant 终值）

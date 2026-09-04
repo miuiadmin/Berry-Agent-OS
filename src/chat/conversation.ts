@@ -17,6 +17,7 @@ import type { AgentContext, AgentLoopConfig, PreStepDecision, RunResult } from '
 import { startRun } from '../agent/loop.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import { isStandardMessage } from '../contracts/messages.js';
+import type { DeliverChannel } from '../contracts/channels.js';
 import type { AssistantMessage, MessageSource, Usage, UserMessage } from '../contracts/llm.js';
 import { describeError } from '../contracts/errors.js';
 import { runInSessionChain } from '../context/chain.js';
@@ -124,8 +125,12 @@ export interface DeliverOptions {
   readonly toolFilter?: readonly string[];
 }
 
-/** 三通道（§4.1）：steer（run 中入队）/ followUp（闲时唤醒开轮）/ inject（只落日志不唤醒） */
-export type DeliverChannel = 'steer' | 'followUp' | 'inject';
+/**
+ * 三通道（§4.1）：steer（run 中入队）/ followUp（闲时唤醒开轮）/ inject（只落日志不唤醒）。
+ * 单源驻 contracts/channels（刀 1 下沉——ChannelHost.submit 返回值跨模块消费；
+ * 此处再导出保持旧消费面 import 路径不变）。
+ */
+export type { DeliverChannel } from '../contracts/channels.js';
 
 /** 投递元数据（deliver 携带、驱动按消息引用挂靠——收窄判定输入） */
 export interface DeliverMeta {
@@ -399,9 +404,13 @@ export class ConversationDriver {
     for (const display of this.displays) display(event);
   };
 
-  /** 普通消息提交（通道宿主面）：经 deliver 三通道路由（非后台投递——用户手写消息恢复自激预算） */
-  submit(text: string): void {
-    this.deliver({ role: 'user', content: text, timestamp: Date.now() });
+  /**
+   * 普通消息提交（通道宿主面）：经 deliver 三通道路由（非后台投递——用户手写
+   * 消息恢复自激预算）。返回实际选定通道（刀 1 投递通道可观测——「插话像消失」
+   * 是行为不可确认类缺陷，通道侧凭返回值落回执行）。
+   */
+  submit(text: string): DeliverChannel {
+    return this.deliver({ role: 'user', content: text, timestamp: Date.now() });
   }
 
   /** 退出请求（通道宿主面）：停摆当前 run + resolve 退出 promise */

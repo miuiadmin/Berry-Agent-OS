@@ -49,7 +49,7 @@ function stubLogger(): AppLogger {
 function stubDeps(): WebuiAppDeps {
   return {
     addDisplay: () => undefined,
-    submitTo: () => false,
+    submitTo: () => null,
     historyFor: () => undefined,
     sessionsFor: () => [],
     openSession: async () => ({ id: 'opened', appId: 'berrycode', active: true }),

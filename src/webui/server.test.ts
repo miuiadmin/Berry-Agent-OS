@@ -35,7 +35,7 @@ function stubLogger(collected?: string[]): AppLogger {
 function stubDeps(override?: Partial<WebuiAppDeps>): WebuiAppDeps {
   return {
     addDisplay: () => undefined,
-    submitTo: (id) => id === 'live',
+    submitTo: (id) => (id === 'live' ? 'followUp' : null),
     historyFor: (id) => (id === 'live' ? [{ role: 'user', text: 'hi' }] : undefined),
     sessionsFor: () => [{ id: 'live', appId: 'chat', active: true }],
     openSession: async () => ({ id: 'opened', appId: 'berrycode', active: true }),
@@ -512,7 +512,8 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
       body: JSON.stringify({ text: 'hello' }),
     });
     expect(ok.status).toBe(202);
-    expect(JSON.parse(ok.text)).toEqual({ ok: true });
+    // 202 体携带投递通道（刀 1 远程腿机器面同律——服务端真值不丢在 HTTP 边界）
+    expect(JSON.parse(ok.text)).toEqual({ ok: true, channel: 'followUp' });
 
     const ghost = await send(port, {
       method: 'POST',
@@ -857,7 +858,7 @@ describe('webui 服务面：daemon 形态鉴权与协议正确性层', () => {
       deps: stubDeps({
         submitTo: (id, text) => {
           delivered.push(`${id}:${text}`);
-          return id === 'live';
+          return id === 'live' ? 'followUp' : null;
         },
         cordoned: () => cordoned,
         interruptFor: (id) => id === 'live',
@@ -970,7 +971,7 @@ describe('webui 服务面：daemon 形态鉴权与协议正确性层', () => {
     ).toBe(404);
     const second = await post(JSON.stringify({ text: '二投', requestId: 'r-2' }));
     expect(second.status).toBe(202);
-    expect(JSON.parse(second.text)).toEqual({ ok: true });
+    expect(JSON.parse(second.text)).toEqual({ ok: true, channel: 'followUp' });
     // LRU：r-1/r-2 在册 → 再投 127 个新键即 129 超 128 帽，逐出最旧 r-1
     for (let i = 0; i < 127; i += 1) {
       await post(JSON.stringify({ text: `fill-${i}`, requestId: `f-${i}` }));

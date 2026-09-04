@@ -7,7 +7,7 @@
  */
 
 import type { AgentMessage } from '../contracts/messages.js';
-import type { CommandDefinition } from '../contracts/channels.js';
+import type { CommandDefinition, DeliverChannel } from '../contracts/channels.js';
 import type { Disposer } from '../context/types.js';
 
 // 再导出下沉两符号（2026-08-27 第三十三批 P2-1 M4：类型面迁 contracts，
@@ -17,8 +17,14 @@ export type { CommandDefinition, CommandCompletionItem } from '../contracts/chan
 /** 宿主面：通道把用户输入交回宿主（TUI 入口把它接到对话驱动的 submit——
  * running 时入 steering 队列、闲时开 run；装配与命令面见 app/channels 服务） */
 export interface ChannelHost {
-  /** 普通用户消息（已排除斜杠命令；宿主接对话驱动 submit） */
-  submit(text: string): void;
+  /**
+   * 普通用户消息（已排除斜杠命令；宿主接对话驱动 submit）。返回实际选定的
+   * 投递通道（刀 1 投递通道可观测，骨架篇 §4.1）：直连形态恒返回 'steer' |
+   * 'followUp' | 'inject'；undefined 档 = 远程异步投递（attach 腿 HTTP 投递
+   * 发起即回，同步返回结构性不可能）或无聚焦驱动档——通道凭返回值落回执
+   * 呈现（TUI steer 档瞬时回执行），undefined 不落。
+   */
+  submit(text: string): DeliverChannel | undefined;
   /** 请求退出（Ctrl+D / quit 命令等）——宿主执行优雅退出序列（骨架篇 §1.3） */
   requestQuit(): void;
   /**

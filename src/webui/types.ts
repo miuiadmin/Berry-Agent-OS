@@ -9,6 +9,7 @@
 
 import { Type, type Static } from '../contracts/typebox.js';
 import type { SessionEvent } from '../contracts/events.js';
+import type { DeliverChannel } from '../contracts/channels.js';
 import type { UiService } from '../channels/types.js';
 
 /* ------------------------------------------------------------------ */
@@ -202,9 +203,11 @@ export interface WebuiAppDeps {
   readonly addDisplay: (sink: WebuiDisplaySink) => void;
   /**
    * 定向提交：进目标会话驱动的 submit（running 时入 steering 队列、闲时开 run
-   * ——驱动自治）。@returns 目标不存在或已闭（retired）= false（HTTP 404 判据）
+   * ——驱动自治）。返回实际选定投递通道（刀 1 投递通道可观测——服务端真值
+   * 不丢在 HTTP 边界，202 响应体携带）；@returns 目标不存在或已闭（retired）
+   * = null（HTTP 404 判据）
    */
-  readonly submitTo: (sessionId: string, text: string) => boolean;
+  readonly submitTo: (sessionId: string, text: string) => DeliverChannel | null;
   /**
    * 会话消息投影（拉投影腿——deriveMessages 产物）。@returns 会话不在册 =
    * undefined（HTTP 404 判据；webui 不解释投影内容，序列化透传）。已闭会话

@@ -333,12 +333,12 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
       // display 信封入列：chat 件前台宿主无注销器（Ring 1 不随 /reload 回卷）
       //——channel.closed 旗标自守（dispose 后 sink no-op）
       addDisplay: (sink) => host.chatFront.addDisplay(sink),
-      // 提交路由：仅未退役活条目收（retired/未知 id = false → 404）
+      // 提交路由：仅未退役活条目收（retired/未知 id = null → 404）。返回投递
+      // 通道（刀 1——服务端真值穿透到 202 响应体，不在 HTTP 边界丢弃）
       submitTo: (sessionId, text) => {
         const entry = host.registry.entries.get(sessionId);
-        if (entry === undefined || entry.retired) return false;
-        entry.driver.submit(text);
-        return true;
+        if (entry === undefined || entry.retired) return null;
+        return entry.driver.submit(text);
       },
       // 历史投影：事件日志 deriveMessages。registry miss（已闭会话）走 store
       // 装载只读派生（刀二规范细化）：loadSession 纯读不 append（无 write-behind

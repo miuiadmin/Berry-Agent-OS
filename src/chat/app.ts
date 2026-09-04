@@ -72,6 +72,7 @@ import type { DurableSinks } from './durable.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import { createFsTools } from '../tools/fs.js';
 import type { ConversationDriver, OverflowCompactionFace, RunSettled } from './conversation.js';
+import type { DeliverChannel } from '../contracts/channels.js';
 import { ConversationDriver as ConversationDriverClass } from './conversation.js';
 
 /**
@@ -335,8 +336,12 @@ export interface DriverRegistry {
  * 形态（overlay 禁用/persist:false）submit 静默、requestQuit 直接聚合退、settle 即回。
  */
 export interface FrontHost {
-  /** 普通用户消息（路由前台聚焦驱动的 submit；无驱动 no-op） */
-  submit(text: string): void;
+  /**
+   * 普通用户消息（路由前台聚焦驱动的 submit；无驱动 no-op 返回 undefined）。
+   * 返回实际选定投递通道（刀 1 投递通道可观测）——穿透驱动 submit 返回值，
+   * TUI 凭 steer 档落瞬时回执行；undefined = 无聚焦驱动（无投递发生）。
+   */
+  submit(text: string): DeliverChannel | undefined;
   /**
    * 前台聚焦指针只读视图（S3：registry focus 的纯委托——宿主壳信封分流判据
    * `envelope.sessionId === front.focus.sessionId` 读这里，不经手 registry）

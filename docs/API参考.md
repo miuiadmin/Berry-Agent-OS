@@ -3,7 +3,7 @@
 > 本文件由 `tools/generate-api-reference.mjs` 从 `src/contracts/api-surface.json` 生成（`npm run build` 尾挂再生，check-api 查 8 drift 守护）——勿手编。
 > 稳定性分级与兼容承诺的语义权威 = 设计文档「应用契约与扩展点」API 治理章（§6.13）；本文件只派生符号面。
 
-当前 apiVersion：`1.0`。导出 367 项、能力 14 项。
+当前 apiVersion：`1.0`。导出 368 项、能力 14 项。
 
 ## 目录
 
@@ -109,6 +109,7 @@
 - `DAEMON_START_TIMEOUT` — stable（minor 只增不破），since 1.0，全形态
 - `DAEMON_STOP_TIMEOUT` — stable（minor 只增不破），since 1.0，全形态
 - `DATA_DESCRIPTOR_API_KEYS` — stable（minor 只增不破），since 1.0，全形态
+- `DeliverChannel` — stable（minor 只增不破），since 1.0，全形态
 - `describeError` — stable（minor 只增不破），since 1.0，全形态
 - `DescriptorKeyEntry` — stable（minor 只增不破），since 1.0，全形态
 - `EVENT_DUPLICATE` — stable（minor 只增不破），since 1.0，全形态

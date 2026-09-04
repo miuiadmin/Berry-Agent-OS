@@ -17,6 +17,7 @@ import type { AgentEvent } from '../agent/events.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import { createTuiChannel } from './tui.js';
 import type { ChannelHost } from './types.js';
+import type { DeliverChannel } from '../contracts/channels.js';
 import type { CommandRegistry } from './commands.js';
 
 /* ---------------- 假终端与事件构造 ---------------- */
@@ -504,7 +505,10 @@ function makeHost() {
   return {
     log,
     host: {
-      submit: (text: string) => log.push(`submit:${text}`),
+      // submit 落账后 undefined 收场（刀 1 签名——ChannelHost 返回通道或 undefined）
+      submit: (text: string) => {
+        log.push(`submit:${text}`);
+      },
       requestQuit: () => log.push('requestQuit'),
       interrupt: () => log.push('interrupt'),
     } satisfies ChannelHost,
@@ -1284,6 +1288,47 @@ describe('/history 全屏回看器（增强 8——副屏生命周期与渲染�
     expect(closed).toContain('\x1b[?1006l');
     expect(closed).toContain('\x1b[?7h');
     expect(closed).toContain('\x1b[?1049l');
+    tui.stop();
+  });
+
+  it('投递回执行（刀 1 投递通道可观测）：steer 档瞬时行在场 / agent_end 清行 / followUp 档零回执行', async () => {
+    const terminal = new CaptureTerminal();
+    // host.submit 档位可编排（makeHost 是 undefined 档——本测要真通道值）
+    let channel: DeliverChannel | undefined;
+    const host: ChannelHost = {
+      submit: () => channel,
+      requestQuit: () => {},
+      interrupt: () => {},
+    };
+    const { registry } = makeRoutingRegistry();
+    const tui = createTuiChannel({ host, commands: registry, terminal, history: () => [] });
+    tui.start();
+    await flush();
+    // steer 档：run 在飞期插话 → 活动面板首行「❯ …（已排队，本轮结束注入）」
+    //（修前：submit 返回 void 无回执行——插话清空输入框后屏上零反馈）
+    channel = 'steer';
+    const submitMark = terminal.frames.length;
+    await type(terminal, '先把手头的跑完');
+    terminal.send('\r');
+    await flush(200);
+    // CaptureTerminal 帧是增量写——mark 起切片 join 看本段输出全集（鼠标配对测同法）
+    const queuedOut = terminal.frames.slice(submitMark).join('');
+    expect(queuedOut).toContain('已排队，本轮结束注入');
+    expect(queuedOut).toContain('先把手头的跑完');
+    // 清除事件驱动（骨架篇 §4.1）：本 run 终态 agent_end 先到 → 回执行随活动面板清组
+    const clearMark = terminal.frames.length;
+    tui.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    await flush(100);
+    const settledOut = terminal.frames.slice(clearMark).join('');
+    expect(settledOut).not.toContain('已排队');
+    // followUp 档零回执行（run 即将开场——正文流自证，回执行反而噪声）
+    channel = 'followUp';
+    const openMark = terminal.frames.length;
+    await type(terminal, '闲时新开一轮');
+    terminal.send('\r');
+    await flush(200);
+    const openedOut = terminal.frames.slice(openMark).join('');
+    expect(openedOut).not.toContain('已排队');
     tui.stop();
   });
 

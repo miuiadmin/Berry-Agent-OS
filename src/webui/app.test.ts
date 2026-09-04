@@ -73,7 +73,7 @@ function stubDeps(): {
     },
     submitTo: () => {
       calls.submitTo += 1;
-      return false;
+      return null;
     },
     historyFor: () => {
       calls.historyFor += 1;

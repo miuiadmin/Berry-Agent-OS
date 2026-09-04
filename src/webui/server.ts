@@ -375,8 +375,8 @@ async function route(
       return;
     }
     // 目标不存在或已闭（retired）= 404（冷读 m3：已闭会话 v1 只读，复活面挂刀三）
-    const ok = opts.deps.submitTo(decodeSegment(submit[1]!), (parsed as { text: string }).text);
-    if (!ok) {
+    const channel = opts.deps.submitTo(decodeSegment(submit[1]!), (parsed as { text: string }).text);
+    if (channel === null) {
       sendJson(res, 404, { error: 'session not found' });
       return;
     }
@@ -389,7 +389,9 @@ async function route(
         if (oldest !== undefined) requestIds.delete(oldest);
       }
     }
-    sendJson(res, 202, { ok: true });
+    // 响应体携带投递通道（刀 1 远程腿机器面同律——steer/followUp/inject 服务端
+    // 真值不丢在 HTTP 边界；attach/Web 呈现面回执行 v1 豁免挂账，客户端暂不消费）
+    sendJson(res, 202, { ok: true, channel });
     return;
   }
   // 打断在飞 run（daemon 刀一·协议正确性层 = POST /api/sessions/:id/interrupt）：
