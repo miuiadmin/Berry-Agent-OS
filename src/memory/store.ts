@@ -246,7 +246,7 @@ export function utilityScore(record: Pick<MemoryRecord, 'confidence' | 'evidence
 /** 晋升候选 kind 闭集（§9.1 第 1 项，第四十二批——§9 原文口径：failure/insight/convention；correction 是对模型行为的纠正不进候选） */
 const PROMOTION_KINDS: ReadonlySet<MemoryKind> = new Set<MemoryKind>(['failure', 'insight', 'convention']);
 
-/** 晋升候选判据阈值：独立证据攒到第二次，或被引用过至少一次（usage ≡ cite 行数）——起草值随实测调 */
+/** 晋升候选判据阈值：独立证据攒到第二次，或被引用过至少一次（usage ≡ cite 行数·累计口径——90 天窗口清扫只删流水不回退聚合，判据读聚合列不受清扫影响）——起草值随实测调 */
 const PROMOTION_MIN_EVIDENCE = 2;
 const PROMOTION_MIN_USAGE = 1;
 
@@ -660,7 +660,9 @@ export class MemoryStore {
    * 引用回写（§6 效用闭环 + §3 持有面续期）：命中条目 usage_count + 1、
    * last_used_at = now、**TTL 续期**（有 ttl_days 且非 frozen 时钟 = now + ttl_days 天
    * ——「使用中」的证据即留存正当性）；同事务落 cite 流水（聚合只随 cite——
-   * usage_count ≡ cite 行数，审计面与计量面同源）。物化 expired 行跳过（过期条目
+   * usage_count ≡ cite 行数为**累计口径**：90 天窗口清扫只删流水不回退聚合
+   * 〔批 153〕，清扫后表内 cite 行数 ≤ usage_count，审计面与计量面同源）。
+   * 物化 expired 行跳过（过期条目
    * 不因引用复活——复活唯 restore）；冻结行照计 usage 但钟不动（frozen 压倒 TTL）。
    * 由应用在 assistant 消息文本解析出引用标记后批量调用（一条消息对一条记忆
    * 计一次——去重归调用方）。副作用即「复活」：last_used_at 刷新使 30 天未用
@@ -997,7 +999,8 @@ export class MemoryStore {
     // 晋升候选（§9.1 第 1 项，第四十二批）：同一 scored 流取数——未用排除之后
     // （冷读 M2：晋升候选 ⊆ 简报资格集，「死 = 离开常驻面」纪律不被判据绕过——
     // 未用死条目不因「被引用过一次」捞回常驻面）；kind 三类 + 反复命中判据
-    // （evidence ≥ 2 ∨ usage ≥ 1，usage ≡ cite 行数）+ frozen 排除（时间胶囊不搬家）；
+    // （evidence ≥ 2 ∨ usage ≥ 1，usage ≡ cite 行数·累计口径——判据读聚合列不受
+    // 窗口清扫影响）+ frozen 排除（时间胶囊不搬家）；
     // 正文已列条目去重（冷读 M1：face 内同 id 双行污染指纹与差分比较面）；排序 =
     // 效用综合分降序（§5 同一把尺），截 top N。
     const bodyIds = new Set(records.map((r) => r.id));

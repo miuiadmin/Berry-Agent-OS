@@ -14,7 +14,9 @@
  * - parameters 用宿主 typebox 再导出面构建（contracts/typebox.ts——与应用经
  *   berryagent 虚拟面取 typebox 同路，防双实例）；
  * - 检索/引用的访问流水（§3 memory_access）在工具面落账：search 命中记
- *   op='search'（聚合不随——usage_count ≡ cite 行数）。
+ *   op='search'（聚合不随——聚合只随 cite 累加，usage_count ≡ cite 行数为
+ *   **累计口径**：90 天窗口清扫只删流水不回退聚合〔批 153〕，清扫后表内
+ *   cite 行数 ≤ usage_count）。
  */
 
 import { Type } from '../contracts/typebox.js';
@@ -328,7 +330,8 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
       const limit = typeof args.limit === 'number' ? args.limit : 5;
       const records = store.search(query, opts.ownerKeys(), limit);
       // 访问流水（§3）：检索命中记 op='search'——只记流水不进聚合（聚合只随 cite，
-      // usage_count ≡ cite 行数）；session_id 恒 NULL（工具上下文无会话键）
+      // usage_count ≡ cite 行数为累计口径——90 天窗口清扫只删流水不回退聚合，
+      // 清扫后表内 cite 行数 ≤ usage_count）；session_id 恒 NULL（工具上下文无会话键）
       if (records.length > 0) {
         store.recordAccess(records.map((r) => ({ memoryId: r.id, op: 'search' as const })));
       }

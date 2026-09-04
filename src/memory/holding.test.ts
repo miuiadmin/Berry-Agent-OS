@@ -229,7 +229,7 @@ describe('版本链（append-only 内容面快照 + 回滚）', () => {
 /* ---------------- 第四件：访问流水 ---------------- */
 
 describe('访问流水（recordAccess + markUsed cite + 查询聚合）', () => {
-  it('markUsed 三合一：usage/续期/cite 流水同事务；usage_count ≡ cite 行数', () => {
+  it('markUsed 三合一：usage/续期/cite 流水同事务；usage_count ≡ cite 行数（清扫前·累计口径恒等——90 天窗口清扫只删流水不回退聚合）', () => {
     const idTtl = seed({ ttlDays: 30, summary: '有留存条' });
     const idFrozen = seed({ ttlDays: 30, summary: '冻结计量条' });
     db.setFrozen(idFrozen, true, T0);
