@@ -301,7 +301,14 @@ export class BrowserEngine {
     if (this.engineIdleTimer !== undefined) return; // 已武装不重置（零活起算时刻不变）
     this.engineIdleTimer = setTimeout(() => {
       this.engineIdleTimer = undefined;
-      void this.closeEngine('引擎闲置回收');
+      // fire-and-forget 收口律（契约篇 §6.10 泛化——一切 void 异步腿必带失败
+      // 收口；遗漏大扫 20260904-c 刀B）：closeEngine 现行抛面经分析为零
+      // （Browser.close 已 catch；teardownGeneration 的净退失败被 fireDead
+      // 回调派发层吸收——live-test 实录，契约篇 §6.6 同批裁定），本 .catch 是
+      // 律令层防御——防未来抛面扩张，失败降 warn 不炸宿主
+      void this.closeEngine('引擎闲置回收').catch((err: unknown) => {
+        this.deps.logger.warn(`browser 引擎闲置回收失败收口：${String(err)}`);
+      });
     }, this.idleMs);
     this.engineIdleTimer.unref?.();
   }

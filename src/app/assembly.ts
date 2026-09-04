@@ -719,7 +719,11 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   // 复用 mcp ChildRegistry 类（exec 结构上不见 mcp——组合根注入，killTree 闭包
   // 同款先例），分置 `<dataDir>/exec/children.json`（与 mcp/children.json 各自持）。
   // 登记失败静默吞——fs 边角只损清扫完备性，不阻命令执行（mcp 同律）。
-  const commandRegistry = new ChildRegistry(join(dataDir(), 'exec', 'children.json'));
+  // 写面容错告警接线（遗漏大扫 20260904-c 刀B）：writeAll 失败降 warn 在类内
+  // 收口，本位注入宿主 logger（stderr 缺省面之外的模块级归因）。
+  const commandRegistry = new ChildRegistry(join(dataDir(), 'exec', 'children.json'), (err) => {
+    ctx.logger.warn(`exec 登记簿写失败（清扫完备性受损——丢失窗口类，下次启动照扫）：${String(err)}`);
+  });
   const commandLog: CommandProcessLog = {
     add: (pid, label) => {
       try {

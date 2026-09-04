@@ -6,7 +6,7 @@
  * 目录真读写（tmp+rename 原子换的物理形态在测）。
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -179,5 +179,52 @@ describe('ChildRegistry.sweep — 孤儿清扫判定序', () => {
     expect(report.killed).toEqual([]);
     expect(report.reapedRecords).toContain(-1);
     expect(registry.list()).toEqual([]);
+  });
+});
+
+/* ---- 写面容错（遗漏大扫 20260904-c 刀B——写失败 = 丢失窗口类降 warn 不抛） ---- */
+
+describe('ChildRegistry — 写面容错（遗漏大扫 20260904-c 刀B）', () => {
+  it('写失败不抛：只读目录下 add/remove 照常返回 + 注入告警面被调（修前必红——EACCES 同步直穿四消费腿任一上下文）', () => {
+    const dir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'mcp-children-wo-')));
+    dirs.push(dir);
+    // 登记簿目录改只读（盘满/只读数据目录同语义位——writeAll 的 tmp 写入必 EACCES）
+    mkdirSync(join(dir, 'mcp'), { recursive: true });
+    chmodSync(join(dir, 'mcp'), 0o555);
+    try {
+      const onWriteError = vi.fn();
+      const registry = new ChildRegistry(join(dir, 'mcp', 'children.json'), onWriteError);
+      // 修前红位：writeFileSync EACCES 同步直穿 add/remove——回卷 void 腿 =
+      // unhandledRejection、运行期退出回调 = uncaughtException，四消费腿任一
+      // 上下文都是宿主死刑（探针 B 实证 /tmp/berry-probe-mcp-b.json）；
+      // 修后：丢失窗口类语义——降 warn（告警面）不抛，条目滞留下次启动照扫
+      expect(() => registry.add(entry())).not.toThrow();
+      expect(() => registry.remove(22222)).not.toThrow();
+      expect(onWriteError).toHaveBeenCalled();
+      expect(onWriteError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    } finally {
+      chmodSync(join(dir, 'mcp'), 0o755); // 还原可写（tmp 清理面不受阻）
+    }
+  });
+
+  it('缺省告警面：无注入时 stderr 直写（可见性不依赖注入——修前必红同上一用例）', () => {
+    const dir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'mcp-children-wd-')));
+    dirs.push(dir);
+    mkdirSync(join(dir, 'mcp'), { recursive: true });
+    chmodSync(join(dir, 'mcp'), 0o555);
+    try {
+      const stderrWrite = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      try {
+        const registry = new ChildRegistry(join(dir, 'mcp', 'children.json'));
+        expect(() => registry.add(entry())).not.toThrow();
+        // 缺省告警面在场（「看不见的 bug」纪律——吞错不许静默）
+        expect(stderrWrite).toHaveBeenCalled();
+        expect(String(stderrWrite.mock.calls[0]?.[0])).toContain('children.json');
+      } finally {
+        stderrWrite.mockRestore();
+      }
+    } finally {
+      chmodSync(join(dir, 'mcp'), 0o755);
+    }
   });
 });

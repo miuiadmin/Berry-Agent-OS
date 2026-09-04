@@ -60,8 +60,19 @@ export class ChildRegistry {
   /** 登记簿文件绝对路径（<dataDir>/mcp/children.json） */
   readonly path: string;
 
-  constructor(path: string) {
+  /** 写失败告警面（构造注入宿主 logger.warn；缺省 stderr 直写——可见性不依赖注入） */
+  private readonly onWriteError: (err: unknown) => void;
+
+  constructor(path: string, onWriteError?: (err: unknown) => void) {
     this.path = path;
+    this.onWriteError =
+      onWriteError ??
+      ((err) => {
+        // 缺省告警面（logger 不可得时的兜底）——「看不见的 bug」纪律：吞错不许静默
+        process.stderr.write(
+          `[child-registry] 登记簿写失败（${path}）：${String(err)}——清扫完备性受损（丢失窗口类），不影响正确性\n`,
+        );
+      });
   }
 
   /** 读全部条目（文件缺失/损坏 = 空表——清扫语义 fail-open，不阻启动） */
@@ -75,12 +86,27 @@ export class ChildRegistry {
     }
   }
 
-  /** 原子写全量（tmp + rename——双开下丢失窗口只影响清扫完备性） */
+  /**
+   * 原子写全量（tmp + rename——双开下丢失窗口只影响清扫完备性）。
+   *
+   * 写面容错（遗漏大扫 20260904-c 刀B 根治层，契约篇 §6.6 子进程治理条）：
+   * 写失败（盘满/只读/EACCES）＝丢失窗口类——降 warn 不抛（「丢失窗口只影响
+   * 清扫完备性不损正确性」语义对写失败同样成立：条目滞留、下次启动孤儿清扫
+   * 照扫，读面本就 fail-open）。修前三类上下文被簿记失败炸宿主均为量刑过重：
+   * fire-and-forget 回卷腿 unhandledRejection〔mcp void shutdownAll / browser
+   * void engine.dispose〕、运行期退出事件回调 uncaughtException〔mcp wireLive
+   * onExit〕、引擎闲置回收腿〔browser void closeEngine〕——add/remove 全消费
+   * 腿（exec/mcp/lsp/browser 四登记簿）在此一处收口。
+   */
   private writeAll(entries: RegistryFile): void {
-    mkdirSync(dirname(this.path), { recursive: true });
-    const tmp = `${this.path}.tmp-${process.pid}`;
-    writeFileSync(tmp, `${JSON.stringify(entries, null, 2)}\n`, 'utf8');
-    renameSync(tmp, this.path);
+    try {
+      mkdirSync(dirname(this.path), { recursive: true });
+      const tmp = `${this.path}.tmp-${process.pid}`;
+      writeFileSync(tmp, `${JSON.stringify(entries, null, 2)}\n`, 'utf8');
+      renameSync(tmp, this.path);
+    } catch (err) {
+      this.onWriteError(err);
+    }
   }
 
   /** spawn 即登记（childPid 即 pid） */

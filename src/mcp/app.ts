@@ -98,7 +98,10 @@ async function applyMcpApp(
     return;
   }
 
-  const registry = new ChildRegistry(`${deps.dataDir}/mcp/children.json`);
+  const registry = new ChildRegistry(`${deps.dataDir}/mcp/children.json`, (err) => {
+    // 登记簿写面容错告警面（遗漏大扫 20260904-c 刀B——宿主 logger 接线）
+    ctx.logger.warn(`mcp 登记簿写失败（清扫完备性受损——丢失窗口类，下次启动照扫）：${String(err)}`);
+  });
   // 启动期孤儿清扫（先于自家 spawn——宿主猝死遗留的 detached 子进程在此认领）
   const report = await registry.sweep({
     kill: (pid) => deps.killTree(pid),
@@ -127,7 +130,14 @@ async function applyMcpApp(
   ctx.effect(() => {
     return () => {
       disposed = true;
-      void shutdownAll(live, registry, catalogBox);
+      // fire-and-forget 收口律（契约篇 §6.10 泛化——一切 void 异步腿必带失败收口；
+      // 遗漏大扫 20260904-c 刀B）：回卷关停失败（conn.dispose 意外可抛——登记簿
+      // 写失败已由 writeAll 容错单源收口）降 warn——回卷本就不阻（void 本义），
+      // 残局留待下次启动孤儿清扫，不炸宿主
+      void shutdownAll(live, registry, catalogBox).catch((err: unknown) => {
+        const message = err instanceof AppError ? describeError(err) : String(err);
+        ctx.logger.warn(`mcp 回卷批量关停失败收口：${message}`);
+      });
     };
   });
 

@@ -10,7 +10,7 @@
  */
 
 import { PassThrough } from 'node:stream';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -546,6 +546,35 @@ describe('mcp 件 — 运行期退出与回卷', () => {
     expect(env.tools.list()).toHaveLength(0);
     const file = join(harness.deps.dataDir, 'mcp', 'children.json');
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual([]);
+  });
+
+  it('【回归锁 刀B】回卷登记簿写失败：不炸宿主（无 unhandledRejection）+ 条目滞留下次启动照扫语义（修前必红——void shutdownAll 无 .catch 即 unhandledRejection exit(1)）', async () => {
+    const env = makeEnv();
+    roots.push(env.root);
+    const harness = makeHarness({ [cmd('srv-a')]: [{ name: 'a1' }] });
+    await applyAndWait(env, harness, { 'srv-a': { command: cmd('srv-a') } });
+    await vi.waitFor(() => {
+      expect(env.tools.list()).toHaveLength(1);
+    });
+    // 登记簿目录改只读（盘满/只读数据目录同语义位——回卷净退的 writeAll 必 EACCES）
+    const mcpDir = join(harness.deps.dataDir, 'mcp');
+    chmodSync(mcpDir, 0o555);
+    try {
+      // 修前红位：shutdownAll → registry.remove → writeAll EACCES → per-item
+      // reject → Promise.all reject → void 无 .catch → unhandledRejection 杀宿主
+      // （探针 B 实证 /tmp/berry-probe-mcp-b.json；vitest 全局报即缺陷现场本体）。
+      // 修后：写面容错（丢失窗口类）——回卷照常完成、条目滞留 children.json
+      void env.scope.dispose();
+      for (const server of harness.servers.values()) server.die(0);
+      await new Promise((resolve) => setTimeout(resolve, 30)); // 回卷关停结算 flush
+      // 回卷主体不受簿记失败株连：工具照撤、无崩溃
+      expect(env.tools.list()).toHaveLength(0);
+      // 条目滞留 = 丢失窗口语义（下次启动孤儿清扫照扫——fail-open 读面同族）
+      const file = join(mcpDir, 'children.json');
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toHaveLength(1);
+    } finally {
+      chmodSync(mcpDir, 0o755); // 还原可写（后续清理面不受阻）
+    }
   });
 });
 

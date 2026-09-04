@@ -521,24 +521,30 @@ describe('browser 引擎生命周期', () => {
      *  显式 undefined = spawn 失败腿〔EACCES/ENOEXEC——child.pid undefined〕，
      *  全面复盘 20260903 #18 红锁用；序列短于 spawn 次数仍回缺省值） */
     pids?: Array<number | undefined>;
+    /** registry.remove 注入实现（缺省 vi.fn 空转；抛错 = 刀B 收口腿注入位——
+     *  teardownGeneration 净退失败的协议面/写面语义位） */
+    removeImpl?: () => void;
   }): {
     engine: BrowserEngine;
     killTree: ReturnType<typeof vi.fn>;
     registry: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn>; sweep: ReturnType<typeof vi.fn> };
     notify: ReturnType<typeof vi.fn>;
+    logger: { debug: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
   } => {
     const killTree = vi.fn();
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
+    // remove 注入实现经 mockImplementation 挂（保持 Mock 类型原形——直挂函数
+    // 会破坏 EngineRegistryLike 结构窄化）；缺省空转
+    const remove = vi.fn();
+    if (opts.removeImpl !== undefined) remove.mockImplementation(opts.removeImpl);
     const registry = {
       add: vi.fn(),
-      remove: vi.fn(),
+      remove,
       sweep: vi.fn(async () => ({ killed: [] as number[] })),
     };
     const notify = vi.fn();
     // 日志 stub（AppLogger 三键结构投影——引擎不消费真实落盘面）
-    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Pick<
-      AppLogger,
-      'debug' | 'info' | 'warn'
-    >;
+    const loggerStub = logger as unknown as Pick<AppLogger, 'debug' | 'info' | 'warn'>;
     // spawn 计数（pid 序列取值游标——代际竞速腿区分两代引擎）
     let spawnCount = 0;
     const engine = new BrowserEngine({
@@ -564,12 +570,12 @@ describe('browser 引擎生命周期', () => {
       killTree,
       registry,
       newConnection: (o) => new JsonRpcConnection(o),
-      logger,
+      logger: loggerStub,
       notify,
       idleMs: opts.idleMs,
       startupTimeoutMs: opts.startupTimeoutMs ?? 2_000,
     });
-    return { engine, killTree, registry, notify };
+    return { engine, killTree, registry, notify, logger };
   };
 
   it('全链起：发现→spawn→DevToolsActivePort→WS 连接→context 建立（登记簿入册）', async () => {
@@ -648,6 +654,32 @@ describe('browser 引擎生命周期', () => {
     expect(disposes).toHaveLength(1);
     // 对照面：spawn 形态收场必发 Browser.close（attach 只断连 ≠ 全形态都不发）
     expect(fake.receivedFrames.filter((f) => f.method === 'Browser.close')).toHaveLength(1);
+  });
+
+  it('【不变式锁 刀B】引擎闲置回收净退失败：fireDead 吸收不炸宿主 + 引擎照常收场（void closeEngine 已按 §6.10 收口律挂 .catch——本测锁吸收机制非缺陷现场）', async () => {
+    const dataDir = makeEngineDir();
+    const { engine, logger } = makeEngine({
+      dataDir,
+      idleMs: 25,
+      // 净退失败注入位：registry.remove 抛（写失败语义位——add 不抛，spawn 即写
+      // 须成功入册才能走到收场腿）
+      removeImpl: () => {
+        throw new Error('registry write failed (probe)');
+      },
+    });
+    await engine.acquireContext('sess-A');
+    expect(engine.getStatus().state).toBe('running');
+    // 机制实录（遗漏大扫 20260904-c 刀B 现场裁定）：closeEngine → conn.close →
+    // fireDead → onEngineDead → teardownGeneration（remove 在此抛）——fireDead
+    // 派发回调自带 try/catch（「回调异常不拦死亡传播」），remove 失败被吸收、
+    // tornDown 闸已记账 → closeEngine 自身 teardownGeneration 早退——**引擎侧
+    // 净退失败到不了 void 腿**（与 mcp 腿不同：shutdownAll/wireLive 直调 remove
+    // 无吸收层）。void closeEngine 的 .catch 按 §6.10 泛化律保留（律令层防未来
+    // 抛面扩张），本测锁吸收机制不退化：失败不炸宿主 + 引擎收场 closed
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(engine.getStatus().state).toBe('closed');
+    // 吸收面无泄漏：engine idle 收场路径零 unhandled（vitest 全局报即红）
+    expect(logger.warn.mock.calls).toHaveLength(0);
   });
 
   it('续命语义：反复取用只续命本 session——他 session 不被牵连闲置', async () => {

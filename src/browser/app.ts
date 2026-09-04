@@ -12,7 +12,7 @@
 
 import type { AppContext, BuiltinAppModule } from '../contracts/app.js';
 import type { ToolsService } from '../contracts/tools.js';
-import { describeError } from '../contracts/errors.js';
+import { AppError, describeError } from '../contracts/errors.js';
 import type { CdpConnectionFactory } from './cdp.js';
 import { BrowserEngine, type EngineChild, type EngineRegistryLike, type SessionHandle } from './engine.js';
 import { installEngine } from './install.js';
@@ -228,7 +228,15 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
       // 行回卷：引擎永久关停（Browser.close 优雅 → 树杀兜底 → 登记簿净退）
       ctx.effect(() => {
         return () => {
-          void engine.dispose();
+          // fire-and-forget 收口律（契约篇 §6.10 泛化——一切 void 异步腿必带失败
+          // 收口；遗漏大扫 20260904-c 刀B）：dispose 现行抛面经分析为零（净退
+          // 失败被 fireDead 回调派发层吸收——live-test 实录），本 .catch 是律令
+          // 层防御——防未来抛面扩张，失败降 warn 不炸宿主
+          void engine.dispose().catch((err: unknown) => {
+            ctx.logger.warn(
+              `browser 行回卷关停失败收口：${err instanceof AppError ? describeError(err) : String(err)}`,
+            );
+          });
         };
       });
     },
