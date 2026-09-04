@@ -42,7 +42,7 @@ export interface PeriodicReviewOptions {
   readonly store: MemoryStore;
   /** llm 服务面（一般传 ctx.get('llm')） */
   readonly llm: ReviewLlmFace;
-  /** 提取条目归属（缺省 'global'；装配层按场景注入） */
+  /** 提取条目归属（缺省 'global'；§3 写入归属拍板 2026-09-04——装配层恒注 global 单域，参数留作注入面） */
   readonly ownerKey?: string;
   /** turn/end 计数阈值（缺省 10，Hermes 实证档） */
   readonly turnThreshold?: number;
@@ -492,6 +492,21 @@ export function attachPeriodicReview(ctx: AppContext, opts: PeriodicReviewOption
       // 失败信号——若留 debug，缺省 info 档下失败不可见（红线：debug 分支须有
       // durable 对应物，而清扫失败恰无任何 durable 痕迹）
       ctx.logger.warn('TTL 清扫失败（本轮跳过，下拍重扫补账）', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    // 访问流水窗口清扫（§3 留存条款）：与 TTL 清扫同节拍同拍（规范拍板原文）——
+    // 90 天窗外流水整批删（聚合列权威、不随窗口清扫回退）。独立 try：本腿失败
+    // 不阻 TTL 腿也不阻 review/consolidation 两腿（各自尽力而为，下拍重扫补账）
+    try {
+      const sweptAccess = opts.store.sweepAccessLog(now());
+      // 成功分支维持 debug：删除的 durable 对应物 = 库内剩余流水可直查
+      //（memory_access_log 工具面），进程日志只是观测窗不是承载
+      if (sweptAccess > 0) ctx.logger.debug('访问流水窗口清扫', { swept: sweptAccess });
+    } catch (err) {
+      // 失败升 warn：与 TTL 清扫失败同律（基建大扫 20260901 #1）——清扫失败恰无
+      // durable 痕迹，debug 独扛违技术栈篇 §6 红线
+      ctx.logger.warn('访问流水窗口清扫失败（本轮跳过，下拍重扫补账）', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

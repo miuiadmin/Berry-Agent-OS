@@ -195,8 +195,9 @@ async function applyMemoryApp(ctx: AppContext, config: MemoryConfig | undefined,
   // Store 公共读脸的本地窄化引用（守卫后的属性窄化不进闭包——差分 handler 闭包用）
   const storeFace = deps.store;
   const fts = new SessionFtsIndex(deps.store.connection);
-  /** 生效归属键（首键 = 写入 owner：global——tools.ts 装配约定）。project 键
-   *  哈希入参 = canonical 工作区根（§3，第十四批 A 组）：git commondir 归并——
+  /** 生效归属键（首键 = 写入 owner：global——§3 owner 判据注记·写入归属拍板
+   *  2026-09-04：提取与模型工具写入恒归 global；project 键读者面专用+导入承接）。
+   *  project 键哈希入参 = canonical 工作区根（§3，第十四批 A 组）：git commondir 归并——
    *  同一仓库的主目录/worktree/子目录同键，防裂库；非 git 目录回退字面 cwd */
   const ownerKeys = (): string[] => ['global', projectOwnerKey(canonicalWorkspaceRoot(deps.workspace()))];
 

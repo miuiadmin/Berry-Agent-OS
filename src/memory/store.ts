@@ -166,6 +166,13 @@ const SOURCE_REFS_CAP = 50;
 /** 毫秒/天换算（TTL 钟计算唯一来源） */
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * 访问日志滚动窗口（毫秒）——起草 90 天（记忆与自进化.md §3 访问日志留存条款：
+ * 「清扫与 TTL expired 同节拍同拍」）。窗外流水整批可弃：聚合列 usage_count/
+ * last_used_at 权威且不随窗口清扫回退，流水只是可丢弃的审计展开面
+ */
+const ACCESS_LOG_WINDOW_MS = 90 * MS_PER_DAY;
+
 /** 物理行（snake_case + source_refs JSON 文本；持有面三列随 v11 迁移入位） */
 interface MemoryRow {
   id: string;
@@ -708,6 +715,18 @@ export class MemoryStore {
         for (const e of entries) stmt.run(uuidV7(nowMs), e.memoryId, e.op, e.sessionId ?? null, nowMs);
       })
       .immediate();
+  }
+
+  /**
+   * 访问日志窗口清扫（§3 留存条款——90 天滚动窗，与 TTL expired 清扫同节拍
+   * 同拍）：窗外流水行整批删除。幂等 DELETE（零行命中即零开销）；聚合列
+   * usage_count/last_used_at 不动（权威计量面与可丢弃审计面分离——清扫不回退
+   * 计量）。全表按 ts 扫可接受（索引注释同判——90 天窗口量级）。
+   * @returns 本次删除行数
+   */
+  sweepAccessLog(nowMs: number = Date.now()): number {
+    const result = this.db.prepare(`DELETE FROM memory_access WHERE ts <= ? - ${ACCESS_LOG_WINDOW_MS}`).run(nowMs);
+    return result.changes;
   }
 
   /**

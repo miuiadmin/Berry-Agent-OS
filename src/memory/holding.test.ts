@@ -299,6 +299,26 @@ describe('访问流水（recordAccess + markUsed cite + 查询聚合）', () => 
     const top = db.topByUsage(['global'], 10, T0 + 3 * DAY);
     expect(top.map((r) => r.id)).toEqual([idA, idB]); // expired 不进聚合面
   });
+
+  it('【回归锁 OS 三大管理面研究 20260904】sweepAccessLog 90 天窗口清扫：窗外流水删、窗内留、聚合列不回退', () => {
+    // 修前：MemoryStore 无 sweepAccessLog 面——记忆与自进化.md §3「清扫与 TTL
+    // expired 同节拍同拍」拍板未落码，流水表无界增长（90 天窗口留存条款空头）
+    const idA = seed({ summary: '老流水条' });
+    const idB = seed({ summary: '新流水条' });
+    db.markUsed([idA], T0, 's1'); // cite 流水 @T0（窗外——清扫基准 T0+95d，窗界 T0+5d）
+    db.recordAccess([{ memoryId: idA, op: 'search' }], T0 + 2 * DAY); // 仍窗外
+    db.recordAccess([{ memoryId: idB, op: 'recall' }], T0 + 10 * DAY); // 窗内
+
+    const swept = db.sweepAccessLog(T0 + 95 * DAY);
+    expect(swept).toBe(2); // 只删窗外两行（修前：方法不存在即红）
+    expect(db.accessLog({})).toHaveLength(1); // 窗内 recall 留存
+    expect(db.accessLog({})[0]!.op).toBe('recall');
+    // 聚合列不回退：idA 的 cite 计量在窗外流水删除后原样（权威计量面与可丢弃审计面分离）
+    expect(db.get(idA)!.usageCount).toBe(1);
+    expect(db.get(idA)!.lastUsedAt).toBe(T0);
+    // 幂等：再扫零命中零开销
+    expect(db.sweepAccessLog(T0 + 95 * DAY)).toBe(0);
+  });
 });
 
 /* ---------------- 第五件：文件导入导出 ---------------- */

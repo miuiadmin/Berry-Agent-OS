@@ -507,6 +507,27 @@ describe('attachPeriodicReview（session/event 计数触发全栈）', () => {
     handle.dispose();
   });
 
+  it('【回归锁 OS 三大管理面研究 20260904】访问流水窗口清扫随拍同拍：fire 即清 90 天窗外流水、聚合列不动', async () => {
+    // 修前红：fire 只扫 TTL 不扫流水——窗外 cite 行留存（记忆与自进化.md §3
+    // 「清扫与 TTL expired 同节拍同拍」拍板未接线，流水表无界增长）
+    const { ctx } = captureRoot();
+    const { llm } = scriptedLlm(['[]']);
+    const m = db.addMemory({ ownerKey: 'global', kind: 'fact', summary: '流水宿主条', content: 'x' });
+    if (m.outcome !== 'inserted') throw new Error('前置失败');
+    const nowMs = Date.now();
+    db.markUsed([m.memory.id], nowMs - 91 * 24 * 3600_000, 's1'); // cite @91 天前（窗外）
+    db.recordAccess([{ memoryId: m.memory.id, op: 'search' }], nowMs); // 窗内
+
+    const handle = attachPeriodicReview(ctx, { store: db, llm, turnThreshold: 1 });
+    ctx.emit('session/event', envelope('turn/end'));
+    await handle.idle();
+    expect(db.accessLog({})).toHaveLength(1); // 窗外 cite 已清、窗内 search 留存
+    expect(db.accessLog({})[0]!.op).toBe('search');
+    // 聚合不回退：窗外 cite 流水删除后计量仍在（权威计量面与可丢弃审计面分离）
+    expect(db.get(m.memory.id)!.usageCount).toBe(1);
+    handle.dispose();
+  });
+
   it('在飞防抖：一轮未收尾时阈值再达不叠发（收尾后下个周期再试）', async () => {
     const { ctx } = captureRoot();
     let release!: () => void;
@@ -580,6 +601,32 @@ describe('attachPeriodicReview（session/event 计数触发全栈）', () => {
       .map((l) => JSON.parse(l) as { level: string; msg: string })
       .find((o) => o.msg.includes('周期路'));
     expect(round?.level).toBe('warn'); // 修前红：当前 debug——同为白跑，对齐 :226/:338 的 warn 分级
+
+    // 路 C——访问流水窗口清扫失败：store.sweepAccessLog 抛错注入（同路 A 形状，
+    // 独立 try 独立收口——本腿失败不阻 TTL 腿也不阻 review/consolidation 两腿）
+    const { ctx: ctx3, lines: lines3 } = captureRoot();
+    const failingAccessSweep = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === 'sweepAccessLog')
+          return () => {
+            throw new Error('流水清扫炸了');
+          };
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as MemoryStore;
+    const c = attachPeriodicReview(ctx3, {
+      store: failingAccessSweep,
+      llm: scriptedLlm(['[]']).llm,
+      turnThreshold: 1,
+    });
+    ctx3.emit('session/event', envelope('turn/end'));
+    await c.idle();
+    c.dispose();
+    const accessSweep = lines3
+      .map((l) => JSON.parse(l) as { level: string; msg: string })
+      .find((o) => o.msg.includes('访问流水窗口清扫'));
+    expect(accessSweep?.level).toBe('warn'); // 修前红：无此日志面（清扫未接线）
   });
 
   it('consolidation 变更短路 + anchor（第十四批 A 组）：零摄入跳过、刚摄入等聚集窗、窗口过后跑', async () => {

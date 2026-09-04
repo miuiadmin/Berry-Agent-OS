@@ -94,8 +94,10 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
       ),
     }),
     execute: async (args) => {
-      // 写入归属 = ownerKeys() 首键（装配层约定首键 = global）：注入取并集、
-      // 写入落 global——项目级记忆由提取管线按信封/会话判定，工具面不猜项目
+      // 写入归属 = ownerKeys() 首键 = global（§3 owner 判据注记·写入归属拍板
+      // 2026-09-04：提取与模型工具写入恒归 global 单域——提取候选是跨项目混合
+      // 体无项目判据；project 域 = 导入承接 + 未来显式写入预留）：注入取并集、
+      // 写入落 global——工具面不猜项目
       const ownerKey = opts.ownerKeys()[0] ?? 'global';
       const result = guardedAddMemory(store, {
         ownerKey,
