@@ -21,6 +21,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJiti } from 'jiti';
+import { EXPERIMENTAL_SECTION_HEADING } from './api-doc-sections.mjs';
 
 /** 仓库根（脚本位置上一级） */
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -50,7 +51,8 @@ function formFactorsNote(entry) {
 /**
  * 渲染 docs/API参考.md 全文（纯函数——查 8 与 CLI 同源）。逐符号行形态：
  * `- `Symbol` — tier，since X，形态集`（deprecated 追加 DEP/死期/替代；
- * forwarded 追加转发注记——tier 承诺归上游）。
+ * forwarded 追加转发注记——tier 承诺归上游）。experimental 符号不入模块节
+ * ——单列文末「实验面」节（查 5 豁免位，刀 E；空集不渲染）。
  * @param {{ surface: object, deprecations: Array<{ dep: string, symbol: string, removalIn: string, replacement: string }> }} input
  */
 export function renderApiReference({ surface, deprecations }) {
@@ -71,17 +73,23 @@ export function renderApiReference({ surface, deprecations }) {
   lines.push('');
   lines.push('## 目录');
   lines.push('');
-  // 模块分节（字典序——与 COMPATIBILITY.md 当前面盘点同序）
-  const modules = [...new Set(surface.exports.map((e) => e.module))].sort((a, b) => a.localeCompare(b, 'en'));
+  // 模块分节（字典序——与 COMPATIBILITY.md 当前面盘点同序）。experimental 符号
+  // 不入模块节——单列文末「实验面」节（查 5 豁免位，§6.13.8/9 刀 E）；零实验
+  // 符号时过滤为恒等、节不渲染——输出与旧形态字节等值（查 8 不因本刀漂移）
+  const experimentalExports = surface.exports
+    .filter((e) => e.tier === 'experimental')
+    .sort((a, b) => `${a.module}::${a.symbol}`.localeCompare(`${b.module}::${b.symbol}`, 'en'));
+  const stableExports = surface.exports.filter((e) => e.tier !== 'experimental');
+  const modules = [...new Set(stableExports.map((e) => e.module))].sort((a, b) => a.localeCompare(b, 'en'));
   for (const m of modules) lines.push(`- [\`${m}\`](#${m.replace(/[/]/g, '')})`);
   lines.push('- [能力面（capabilities）](#能力面capabilities)');
+  // 目录腿同律：零实验符号不加目录行（空节不渲染——不产死链）
+  if (experimentalExports.length > 0) lines.push('- [实验面（experimental）](#实验面experimental)');
   lines.push('');
   for (const m of modules) {
     lines.push(`## \`${m}\``);
     lines.push('');
-    const entries = surface.exports
-      .filter((e) => e.module === m)
-      .sort((a, b) => a.symbol.localeCompare(b.symbol, 'en'));
+    const entries = stableExports.filter((e) => e.module === m).sort((a, b) => a.symbol.localeCompare(b.symbol, 'en'));
     for (const entry of entries) {
       let note = TIER_NOTES[entry.tier] ?? entry.tier;
       note += `，since ${entry.since}，${formFactorsNote(entry)}`;
@@ -100,6 +108,22 @@ export function renderApiReference({ surface, deprecations }) {
   lines.push('');
   for (const cap of [...surface.capabilities].sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
     lines.push(`- \`${cap.name}\` — ${cap.providedBy}，${formFactorsNote(cap)}`);
+  }
+  // —— 实验面节（查 5 豁免位——experimental 符号在 docs 的唯一合法披露位）——
+  // 空集不渲染（无永久空节——查 8 字节等值会把空节锁死在文档直到首个实验键）；
+  // 行带模块注记（跨模块单列，模块归属不可丢）
+  if (experimentalExports.length > 0) {
+    lines.push('');
+    lines.push(EXPERIMENTAL_SECTION_HEADING);
+    lines.push('');
+    lines.push('实验符号单列本节（查 5 豁免位——节外禁入稳定文档；任意 minor 可破可删，承诺语义见 §6.13.3）。');
+    lines.push('');
+    for (const entry of experimentalExports) {
+      let note = `experimental，since ${entry.since}，${formFactorsNote(entry)}`;
+      const reg = bySymbol.get(`${entry.module}::${entry.symbol}`);
+      if (reg !== undefined) note += `（${reg.dep}，死期 ${reg.removalIn}，替代 \`${reg.replacement}\`）`;
+      lines.push(`- \`${entry.symbol}\`（\`${entry.module}\`） — ${note}`);
+    }
   }
   // 尾形纪律：恰一个换行收尾（prettier 形态——多条尾空行会被 format:check 红）
   return lines.join('\n').replace(/\n+$/, '') + '\n';

@@ -9,8 +9,11 @@
  *    JSDoc 标签；typebox 转发条目（forwarded）记载不承诺、不参与执法（冷读 M4）；
  * 3. 废弃登记完整性——DEP 注册簿行不变式 + 双向对照（批 3 充实）；
  * 4. 官方全家桶零废弃使用——批 3 充实扫描面；
- * 5. 实验面隔离——experimental 符号/键漏进 docs/ 与 examples/ 即红（现零实验键恒绿，
- *    机制常驻——实验键上线日即执法日）；
+ * 5. 实验面隔离（刀 E 判据精化——解查 5×查 8 互锁死结）——豁免节之外零实验
+ *    符号：experimental 符号/键漏进 docs/ 与 examples/ 的非豁免区即红；「实验面」
+ *    节是唯一合法披露位（两生成器单列渲染，节标记常量与查 5 共享单源
+ *    api-doc-sections.mjs——豁免界漂移结构性不可能；现零实验键恒绿，机制常驻——
+ *    实验键上线日即执法日）；
  * 6. compat 件死期——批 4 点火前结构性拒绝（src/compat/ 在场即红——死期机器未落地，
  *    compat 件无登记可查 = fail-closed，非静默放行）；
  * 7. 清单 api 块狗家全覆盖——仓内全部 .app.yaml 的 api 块在场且合法（schema 校验 +
@@ -39,6 +42,7 @@ import {
   COMPATIBILITY_PATH,
 } from './generate-compatibility.mjs';
 import { renderApiReference, API_REFERENCE_PATH } from './generate-api-reference.mjs';
+import { stripExperimentalSection } from './api-doc-sections.mjs';
 
 /** 仓库根（脚本位置上一级） */
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -301,7 +305,7 @@ const DEPRECATIONS =
   }
 }
 
-/* ---------------- 查 5：实验面隔离（experimental 漏进稳定文档/示例红） ---------------- */
+/* ---------------- 查 5：实验面隔离（豁免节之外零实验符号——刀 E 判据精化） ---------------- */
 
 {
   const experimentalSymbols = surface.exports.filter((e) => e.tier === 'experimental');
@@ -315,10 +319,12 @@ const DEPRECATIONS =
           ? new RegExp(entry.module.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
           : null;
       for (const file of docFiles) {
-        const text = readFileSync(join(SCAN_ROOT, file), 'utf8');
+        // 豁免预处理（刀 E）：先剥「实验面」节再扫——判据 = 豁免节之外零实验符号
+        // （节标记常量与两生成器共享单源 api-doc-sections.mjs——豁免界漂移结构性不可能）
+        const text = stripExperimentalSection(readFileSync(join(SCAN_ROOT, file), 'utf8'));
         if (re.test(text) || (keyRe !== null && keyRe.test(text))) {
           v(
-            `[查 5] 实验面 ${entry.module}::${entry.symbol} 漏进稳定文档/示例 ${file}——实验面不入稳定文档（§6.13.8 查 5）`,
+            `[查 5] 实验面 ${entry.module}::${entry.symbol} 漏进稳定文档/示例 ${file}（豁免节〔实验面〕之外——实验符号唯一合法披露位在两生成器的实验面节，§6.13.8 查 5）`,
           );
         }
       }

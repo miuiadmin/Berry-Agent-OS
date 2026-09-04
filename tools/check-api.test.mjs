@@ -30,6 +30,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { scanTopLevelExports } from './extract-api-surface.mjs';
+import { EXPERIMENTAL_SECTION_HEADING, stripExperimentalSection } from './api-doc-sections.mjs';
 import {
   classifyFaceDiff,
   compareSemver,
@@ -322,6 +323,80 @@ describe('check-api 扫描侧可红探针（CHECK_API_ROOT / CHECK_API_SURFACE �
     const root = makeFixtureRoot();
     mkdirSync(join(root, 'docs'));
     writeFileSync(join(root, 'docs/guide.md'), '# 指南\n\n先试用 zzFutureThing。\n');
+    const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-surface-'));
+    const fake = join(dir, 'fake-surface.json');
+    writeFileSync(
+      fake,
+      JSON.stringify({
+        exports: [
+          {
+            symbol: 'zzFutureThing',
+            module: 'berryagent',
+            tier: 'experimental',
+            since: '1.0',
+            formFactors: ['standalone'],
+          },
+        ],
+        capabilities: [],
+      }),
+    );
+    try {
+      const r = runGate({ CHECK_API_ROOT: root, CHECK_API_SURFACE: fake });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('[查 5]');
+      expect(r.stderr).toContain('漏进稳定文档');
+      expect(r.stderr).toContain('zzFutureThing');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 5 豁免节内合法：实验符号只现于「实验面」节 → exit 0（刀 E 互锁死结回归锁——修前查 5 无豁免位，生成器一按规范渲染实验符号即恒红）', () => {
+    // 夹具文档 = 生成器落盘形态：实验符号只出现在文末实验面节内（节标记常量
+    // 与生成器共享单源——豁免界两端结构性同源）
+    const root = makeFixtureRoot();
+    mkdirSync(join(root, 'docs'));
+    writeFileSync(
+      join(root, 'docs/API参考.md'),
+      `# API 参考\n\n## zzModule\n\n- 稳定行\n\n## 能力面（capabilities）\n\n- 无\n\n${EXPERIMENTAL_SECTION_HEADING}\n\n- \`zzFutureThing\`（\`berryagent\`） — experimental，since 1.1，standalone\n`,
+    );
+    const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-surface-'));
+    const fake = join(dir, 'fake-surface.json');
+    writeFileSync(
+      fake,
+      JSON.stringify({
+        exports: [
+          {
+            symbol: 'zzFutureThing',
+            module: 'berryagent',
+            tier: 'experimental',
+            since: '1.0',
+            formFactors: ['standalone'],
+          },
+        ],
+        capabilities: [],
+      }),
+    );
+    try {
+      const r = runGate({ CHECK_API_ROOT: root, CHECK_API_SURFACE: fake });
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('查 5 豁免不放宽：同文件节外泄漏仍红（strip 只剥节——执法面不随豁免收窄）', () => {
+    // 与上一探针同一夹具文档，唯一变量 = 实验符号另现于稳定节一行（红归因唯一
+    // ——豁免位只救节内披露，节外泄漏照点名）
+    const root = makeFixtureRoot();
+    mkdirSync(join(root, 'docs'));
+    writeFileSync(
+      join(root, 'docs/API参考.md'),
+      `# API 参考\n\n## zzModule\n\n- 也可先试用 zzFutureThing\n\n## 能力面（capabilities）\n\n- 无\n\n${EXPERIMENTAL_SECTION_HEADING}\n\n- \`zzFutureThing\`（\`berryagent\`） — experimental，since 1.1，standalone\n`,
+    );
     const dir = mkdtempSync(join(tmpdir(), 'berry-check-api-surface-'));
     const fake = join(dir, 'fake-surface.json');
     writeFileSync(
@@ -975,5 +1050,25 @@ describe('scanTopLevelExports：手写扫描器单测（tsgo unstable/ast 依赖
     expect(scan.names.has('Abs')).toBe(true);
     expect(scan.names.has('afn')).toBe(true);
     expect(scan.names.has('dec')).toBe(false); // declare 未 export 不收
+  });
+});
+
+describe('api-doc-sections：实验面节豁免剥除（刀 E——节标记常量生成器与查 5 共享单源）', () => {
+  it('三形：剥到下一 ## 节头 / 剥到文末 / 标题不在场原文返回', () => {
+    // 中置形：豁免节后随同级节——剥到 `## b` 起点止（前段含节前空行原样保留）
+    const mid = `# t\n\n## a\n\nx\n\n${EXPERIMENTAL_SECTION_HEADING}\n\n- exp\n\n## b\n\ny\n`;
+    expect(stripExperimentalSection(mid)).toBe('# t\n\n## a\n\nx\n\n## b\n\ny\n');
+    // 尾置形：豁免节在文末——剥到文末（残余空行不含符号、扫描期不修饰尾形）
+    const tail = `# t\n\n${EXPERIMENTAL_SECTION_HEADING}\n\n- exp\n`;
+    expect(stripExperimentalSection(tail)).toBe('# t\n\n');
+    // 缺席形：零实验符号态（生成器未渲染本节）——原文返回
+    const untouched = '# t\n\n## a\n\nx\n';
+    expect(stripExperimentalSection(untouched)).toBe(untouched);
+  });
+
+  it('子节头不断节：### 属豁免区内部（行首锚定只认 ## 级标题）', () => {
+    // 豁免节内的 ### 子节（将来实验键分组位）不终止剥除——其内符号仍在豁免区
+    const nested = `# t\n\n${EXPERIMENTAL_SECTION_HEADING}\n\n### 分组\n\n- exp\n\n## b\n\ny\n`;
+    expect(stripExperimentalSection(nested)).toBe('# t\n\n## b\n\ny\n');
   });
 });

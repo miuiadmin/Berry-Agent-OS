@@ -26,6 +26,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJiti } from 'jiti';
+import { EXPERIMENTAL_SECTION_HEADING } from './api-doc-sections.mjs';
 
 /** 仓库根（脚本位置上一级） */
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -239,6 +240,23 @@ export function renderCompatibility({ surface, deprecations, snapshots }) {
       : '执法纪元：`pre-ignition`（兼容执法未点火——清单 api 块缺席为 legacy 容忍态，仅聚合 warn）。',
   );
   lines.push('');
+
+  // —— 实验面节（查 5 豁免位的 COMPATIBILITY 侧同律——§6.13.8/9 刀 E）——
+  // 当前面在役实验符号逐名单列（盘点表只计数不点名）；空集不渲染：无永久空节
+  // （零实验符号时输出与旧形态字节等值——查 8 不因本刀漂移）
+  const experimentalExports = surface.exports
+    .filter((e) => e.tier === 'experimental')
+    .sort((a, b) => `${a.module}::${a.symbol}`.localeCompare(`${b.module}::${b.symbol}`, 'en'));
+  if (experimentalExports.length > 0) {
+    lines.push(EXPERIMENTAL_SECTION_HEADING);
+    lines.push('');
+    lines.push('当前面在役实验符号（任意 minor 可破可删——判级语义见 §6.13.3/6.13.6）。');
+    lines.push('');
+    for (const entry of experimentalExports) {
+      lines.push(`- \`${entry.module}::${entry.symbol}\` — since ${entry.since}`);
+    }
+    lines.push('');
+  }
 
   // —— DEP 注册簿节 ——
   lines.push('## 废弃登记（DEP 注册簿）');
