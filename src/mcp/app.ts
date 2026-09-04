@@ -132,6 +132,13 @@ async function applyMcpApp(
   });
 
   // 后台发现（apply 返回后才真正连接——零阻塞启动；单服务器失败不阻其余）
+  // 失败收口（OS 三大管理面研究 20260904 medium——A2 同律：fire-and-forget 必带
+  // 失败收口）：发现后半段（ctx.get 取面 / safeRegister 非拒件码透传）意外可抛，
+  // void 上下文无 catch 即 unhandledRejection 经宿主 fatal 编舞 exit(1) 杀宿主。
+  // 收口 = 降 warn 不阻宿主——MCP 是可选扩展面，与单服务器连接失败不阻启动
+  // （契约篇 §6.6）同律；已 spawn 未接线的子进程经登记簿兜底（spawn 即写条目：
+  // 宿主猝死后下次启动孤儿清扫认领树杀）。notify 面自身缺席（= 原抛点族）时
+  // logger.warn 已收口，不叠抛
   void discoverAll(ctx, names, servers, {
     deps,
     logger: ctx.logger,
@@ -140,6 +147,16 @@ async function applyMcpApp(
     catalog,
     catalogBox,
     isDead: () => disposed,
+  }).catch((err: unknown) => {
+    const message = err instanceof AppError ? describeError(err) : String(err);
+    ctx.logger.warn(`mcp 后台发现失败收口（工具面缺席——装配层异常）：${message}`);
+    try {
+      ctx
+        .get<UiNotifyFace>('ui')
+        .notify(`MCP 后台发现失败（工具面缺席——装配层异常，详见日志）：${message}`, { level: 'warn' });
+    } catch {
+      /* ui 面缺席即原抛点族——logger.warn 已收口 */
+    }
   });
 }
 

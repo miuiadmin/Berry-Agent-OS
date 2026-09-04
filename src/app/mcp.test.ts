@@ -605,6 +605,47 @@ function makeE2eDeps(dir: string): McpAppDeps {
   };
 }
 
+describe('mcp 件 — 后台发现失败收口（OS 三大管理面研究 20260904 medium）', () => {
+  it('注册面非拒件码炸响：不落 unhandledRejection 杀宿主——warn 收口 + 用户可见通知（修前：void discoverAll 无 catch，rejection 直通宿主 fatal 编舞 exit(1)）', async () => {
+    // 坏注册面环境：tools.register 抛非拒件码 Error（safeRegister 的透传腿——
+    // 模拟装配层缺陷，如 tools 服务内部不变量破裂）
+    const root = createContext({ name: 'mcp-plugin-test' });
+    roots.push(root);
+    const notifies: Array<{ message: string; level?: string }> = [];
+    root.provide('ui', {
+      notify: (message: string, opts?: { level?: 'info' | 'warn' | 'error' }) =>
+        notifies.push({ message, level: opts?.level }),
+    });
+    root.provide('tools', {
+      register: () => {
+        throw new Error('装配层缺陷：注册面炸了');
+      },
+      list: () => [],
+      listFor: () => [],
+    } as unknown as ToolsService);
+    const scope = root.fork({ name: 'row:mcp' });
+
+    // unhandledRejection 探针（A2 同款——vitest 报 Unhandled Rejection 即缺陷
+    // 现场本体；本测显式捕捉转断言，修前必红）
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown) => rejections.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const harness = makeHarness({ [cmd('boom-srv')]: [{ name: 't1' }] });
+      const mod = createMcpApp(harness.deps);
+      await mod.apply(scope, { servers: { 'boom-srv': { command: cmd('boom-srv') } } });
+      // 等后台发现走完 rejection 告发（假服务器 PassThrough 同步应答——微任务级，
+      // 100ms 缓冲足够 unhandled 检查点到达）
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // 修后收口三断言：零 unhandled + warn 通知在场（工具面缺席用户该知道）
+      expect(rejections).toEqual([]);
+      expect(notifies.some((n) => n.message.includes('MCP 后台发现失败') && n.level === 'warn')).toBe(true);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+});
+
 describe('mcp 件 — e2e 真子进程（CI 轨，零网络）', () => {
   it('握手→发现→调用→回卷全链：真 spawn/真管道/真关停', { timeout: 20_000 }, async () => {
     const dir = makeTempDir('mcp-e2e-');
